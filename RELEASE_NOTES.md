@@ -1,14 +1,13 @@
-# altium-monkey 2026.05.28.post1 Release Notes
+# altium-monkey 2026.05.29 Release Notes
 
-Package version: `2026.5.28.post1`
+Package version: `2026.5.29`
 
-`2026.05.28.post1` is represented in Python package metadata as the PEP 440
-canonical form `2026.5.28.post1`.
+`2026.05.29` is represented in Python package metadata as the PEP 440
+canonical form `2026.5.29`.
 
-This post-release publishes the staged PcbDoc user-union API and sample work
-that landed after the original `2026.5.28` package upload. It also carries
-release-validation cleanup that keeps the public packaging lane aligned with
-the current private test and type-checking baselines.
+This release publishes the PcbDoc user-union API and sample work. It also
+carries release-validation cleanup that keeps the public packaging lane aligned
+with the current private test and type-checking baselines.
 
 ## PcbDoc User Unions
 
