@@ -32,7 +32,10 @@ class AltiumPcbTrack(PcbGraphicalObject):
         net_index: Links to net (uint16, 0xFFFF=unlinked)
         polygon_index: Polygon index (uint16)
         subpoly_index: Sub-polygon index (uint16)
-        union_index: Union membership (uint32, 0xFFFFFFFF=none)
+        union_index: Header union field (uint32, 0xFFFFFFFF=none). For
+                     AD25/AD26 user unions, Altium keeps this field at the
+                     sentinel and encodes the visible union id in
+                     `solder_mask_expansion`.
         is_locked: Locked for editing
         is_keepout: Keepout track
         is_polygon_outline: Part of polygon outline
@@ -156,7 +159,9 @@ class AltiumPcbTrack(PcbGraphicalObject):
             self.component_index = None
         pos += 2
 
-        # Union index (offset 9-12): uint32, 0xFFFFFFFF = no union
+        # Header union field (offset 9-12): uint32, 0xFFFFFFFF = no union.
+        # AD25/AD26 user-union tracks keep this as the sentinel and encode the
+        # visible union id in the high bytes of solder_mask_expansion.
         self.union_index = struct.unpack("<I", content[pos : pos + 4])[0]
         pos += 4
 

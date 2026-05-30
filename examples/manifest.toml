@@ -472,6 +472,27 @@ requires_extra = []
 tags = ["pcbdoc", "mutation", "track", "routing", "nets"]
 
 [[examples]]
+id = "pcbdoc_user_union"
+title = "Create a PCB user union"
+summary = "Load a blank PcbDoc, place two PcbLib footprints plus board primitives and a STEP body, group them in a named user-defined union, save the board, and write a JSON summary."
+areas = ["pcbdoc", "mutation"]
+status = "ready"
+entrypoint = "pcbdoc_user_union/pcbdoc_user_union.py"
+doc = "pcbdoc_user_union/README.md"
+inputs = [
+  "assets/pcbdoc/blank.PcbDoc",
+  "pcbdoc_user_union/assets/footprints/9774080360R-YIYUAN.PcbLib",
+  "pcbdoc_user_union/assets/footprints/YZ209315103P-01.PcbLib",
+]
+assets = ["pcbdoc_user_union/assets/models/cricket-node-hw__B__fixture_alignment.step"]
+outputs = [
+  "pcbdoc_user_union/output/pcbdoc_user_union.PcbDoc",
+  "pcbdoc_user_union/output/pcbdoc_user_union.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "mutation", "pcblib", "component", "3d", "user-union", "grouping"]
+
+[[examples]]
 id = "pcbdoc_add_arc"
 title = "Add PCB arcs"
 summary = "Load a blank PcbDoc, add full-circle and partial arc primitives on multiple layers, and save the board."

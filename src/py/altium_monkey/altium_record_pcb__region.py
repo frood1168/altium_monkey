@@ -68,6 +68,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
         self.hole_vertices: list[list[RegionVertex]] = []
         self.properties: dict = {}
         self.kind: int = 0
+        self.union_index: int = 0
         self.is_board_cutout: bool = False
         self.is_shapebased: bool = False
         self.keepout_restrictions: int = 0
@@ -208,6 +209,9 @@ class AltiumPcbRegion(PcbGraphicalObject):
                     self.properties.get("KEEPOUTRESTRIC", "0")
                 )
                 self.subpoly_index = int(self.properties.get("SUBPOLYINDEX", "0"))
+                self.union_index = int(
+                    self.properties.get("UNIONINDEX", "0").strip().strip("\x00") or "0"
+                )
             else:
                 log.warning(
                     f"REGION properties truncated: need {prop_len}, have {len(content) - pos}"
@@ -283,6 +287,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
             bool(self.is_shapebased),
             int(self.keepout_restrictions),
             int(self.subpoly_index),
+            int(self.union_index),
             tuple(sorted((str(k), str(v)) for k, v in self.properties.items())),
         )
 
@@ -303,6 +308,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
             bool(self.is_shapebased),
             int(self.keepout_restrictions),
             int(self.subpoly_index),
+            int(self.union_index),
             tuple((v.x_raw, v.y_raw) for v in self.outline_vertices),
             tuple(
                 tuple((v.x_raw, v.y_raw) for v in hole) for hole in self.hole_vertices
@@ -323,6 +329,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
         props["ISSHAPEBASED"] = "TRUE" if self.is_shapebased else "FALSE"
         props["KEEPOUTRESTRIC"] = str(int(self.keepout_restrictions))
         props["SUBPOLYINDEX"] = str(int(self.subpoly_index))
+        props["UNIONINDEX"] = str(int(self.union_index))
         return "|".join(f"{k}={v}" for k, v in props.items())
 
     def serialize_to_binary(self) -> bytes:

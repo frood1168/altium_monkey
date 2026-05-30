@@ -1,3 +1,41 @@
+# altium-monkey 2026.05.28.post1 Release Notes
+
+Package version: `2026.5.28.post1`
+
+`2026.05.28.post1` is represented in Python package metadata as the PEP 440
+canonical form `2026.5.28.post1`.
+
+This post-release publishes the staged PcbDoc user-union API and sample work
+that landed after the original `2026.5.28` package upload. It also carries
+release-validation cleanup that keeps the public packaging lane aligned with
+the current private test and type-checking baselines.
+
+## PcbDoc User Unions
+
+PcbDoc now includes public user-union authoring APIs for creating, renaming,
+mutating, and deleting named user-defined PCB unions. The release adds a small
+`pcbdoc_user_union` public example that creates a named union containing
+ordinary board objects and writes a board that can be inspected in Altium
+Designer.
+
+Track user-union encoding is corrected so authored track unions are visible
+when the saved board is opened in Altium Designer.
+
+## Release Validation Maintenance
+
+Internal type-checking diagnostics were reduced across collection query views,
+PCB drawing metadata, and IPC-2581 export paths without changing public APIs.
+
+Stale release and test metadata were cleaned so release validation no longer
+depends on obsolete fixtures or optional direct dependencies.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The PcbDoc user-union APIs are
+additive.
+
+---
+
 # altium-monkey 2026.05.28 Release Notes
 
 Package version: `2026.5.28`

@@ -152,6 +152,7 @@ def test_domain_docs_list_public_workflow_examples() -> None:
         "pcbdoc_bom",
         "pcbdoc_pick_n_place",
         "pcbdoc_add_differential_pairs",
+        "pcbdoc_user_union",
         "pcbdoc_diff_pair_report",
         "intlib_extract_sources",
         "altium_monkey.design.a1",
@@ -1683,6 +1684,103 @@ def test_pcbdoc_add_primitive_examples_write_expected_records(
     keepout = next(region for region in region_doc.regions if region.is_keepout)
     assert keepout.layer == PcbLayer.KEEPOUT
     assert keepout.keepout_restrictions == 31
+
+
+def test_pcbdoc_user_union_example_writes_expected_union(
+    check_examples_root: Path,
+) -> None:
+    from altium_monkey import AltiumPcbDoc
+    from altium_monkey.altium_pcbdoc_unions import (
+        pcb_packed_mask_user_union_index,
+        pcb_pad_user_union_index,
+        pcb_track_user_union_index,
+    )
+
+    example = next(
+        item for item in _load_examples() if item["id"] == "pcbdoc_user_union"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    output_root = check_examples_root / "pcbdoc_user_union" / "output"
+    pcbdoc = AltiumPcbDoc.from_file(output_root / "pcbdoc_user_union.PcbDoc")
+    user_unions = {user_union.name: user_union for user_union in pcbdoc.user_unions}
+    assert set(user_unions) == {"DEMO_USER_UNION"}
+
+    user_union = user_unions["DEMO_USER_UNION"]
+    expected_members = {
+        "arcs": 6,
+        "components": 2,
+        "component_bodies": 3,
+        "fills": 1,
+        "pads": 3,
+        "regions": 1,
+        "shapebased_component_bodies": 3,
+        "shapebased_regions": 1,
+        "texts": 5,
+        "tracks": 3,
+        "vias": 1,
+    }
+    assert user_union.member_count == sum(expected_members.values())
+    assert {
+        collection: len(members)
+        for collection, members in user_union.members_by_collection.items()
+    } == expected_members
+    assert {component.designator for component in pcbdoc.components} == {"TP1", "MH1"}
+    assert {component.union_index for component in pcbdoc.components} == {
+        user_union.union_index
+    }
+    assert len(pcbdoc.tracks) == 3
+    assert {track.union_index for track in pcbdoc.tracks} == {0xFFFFFFFF}
+    assert [pcb_track_user_union_index(track) for track in pcbdoc.tracks] == [
+        user_union.union_index,
+        user_union.union_index,
+        user_union.union_index,
+    ]
+    assert {arc.union_index for arc in pcbdoc.arcs} == {0xFFFFFFFF}
+    assert {pcb_packed_mask_user_union_index(arc) for arc in pcbdoc.arcs} == {
+        user_union.union_index
+    }
+    assert {fill.union_index for fill in pcbdoc.fills} == {0xFFFFFFFF}
+    assert {pcb_packed_mask_user_union_index(fill) for fill in pcbdoc.fills} == {
+        user_union.union_index
+    }
+    assert {pad.union_index for pad in pcbdoc.pads} == {0xFFFFFFFF}
+    assert {pcb_pad_user_union_index(pad) for pad in pcbdoc.pads} == {
+        user_union.union_index
+    }
+    assert {region.union_index for region in pcbdoc.regions} == {user_union.union_index}
+    assert {region.properties.get("UNIONINDEX") for region in pcbdoc.regions} == {
+        str(user_union.union_index)
+    }
+    npth_pad = next(pad for pad in pcbdoc.pads if pad.designator == "NPTH1")
+    assert npth_pad.hole_size / 10000.0 == pytest.approx(2.0 * 1000.0 / 25.4)
+    assert npth_pad.is_plated is False
+    assert npth_pad.is_tenting_top is True
+    assert npth_pad.is_tenting_bottom is True
+    assert npth_pad.pastemask_expansion_mode == 0
+    assert npth_pad.soldermask_expansion_mode == 0
+
+    summary = json.loads(
+        (output_root / "pcbdoc_user_union.json").read_text(encoding="utf-8")
+    )
+    assert summary["union_name"] == "DEMO_USER_UNION"
+    assert summary["union_index"] == user_union.union_index
+    assert summary["member_count"] == user_union.member_count
+    assert summary["members_by_collection"] == expected_members
+    assert summary["component_designators"] == ["TP1", "MH1"]
+    assert summary["footprints"] == [
+        "9774080360R-YIYUAN.PcbLib",
+        "YZ209315103P-01.PcbLib",
+    ]
+    assert summary["pad_count"] == 3
+    assert summary["via_count"] == 1
+    assert summary["track_count"] == 3
+    assert summary["arc_count"] == 6
+    assert summary["fill_count"] == 1
+    assert summary["region_count"] == 1
+    assert summary["component_body_count"] == 3
+    assert summary["typed_smart_union_count"] == 0
 
 
 def test_pcbdoc_via_ipc4761_examples_write_expected_via_state(

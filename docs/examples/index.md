@@ -4,7 +4,7 @@
 
 Public examples are indexed from `examples/manifest.toml`.
 
-Total examples: `81`
+Total examples: `82`
 
 ## Generate
 
@@ -71,6 +71,7 @@ uv run python tools\generate_docs.py
 | [`pcbdoc_netclass_svg`](../../examples/pcbdoc_netclass_svg/README.md)<br>Render net-class-highlighted PcbDoc SVG review pages | pcbdoc, svg, design | Load the RT Super C1 project with AltiumDesign, render routed copper layers for each PCB net class, recolor SVG primitives from embedded net-class metadata, and write inline HTML review pages. | pcbdoc, svg, rendering, project, net-class, html |
 | [`pcbdoc_stats`](../../examples/pcbdoc_stats/README.md)<br>Print PcbDoc board statistics | pcbdoc, design | Load the loz-old-man project with AltiumDesign, open its PcbDoc, and print board outline, drill, slot, primitive-width, and resolved layer-stack statistics. | pcbdoc, project, statistics, board-outline, drills, slots |
 | [`pcbdoc_svg`](../../examples/pcbdoc_svg/README.md)<br>Render PcbDoc layers to SVG | pcbdoc, svg, design | Load the RT Super C1 project with AltiumDesign, open its PcbDoc, and write one SVG per visible PCB layer plus a separate board-outline SVG. | pcbdoc, svg, rendering, project, layers, board-outline |
+| [`pcbdoc_user_union`](../../examples/pcbdoc_user_union/README.md)<br>Create a PCB user union | pcbdoc, mutation | Load a blank PcbDoc, place two PcbLib footprints plus board primitives and a STEP body, group them in a named user-defined union, save the board, and write a JSON summary. | pcbdoc, mutation, pcblib, component, 3d, user-union |
 
 ### `pcblib`
 
@@ -176,6 +177,7 @@ uv run python tools\generate_docs.py
 | [`pcbdoc_extract_embedded_3d_models`](../../examples/pcbdoc_extract_embedded_3d_models/README.md)<br>Extract embedded PcbDoc 3D models | pcbdoc, design, 3d | Load the RT Super C1 project with AltiumDesign, open its PcbDoc, and write embedded STEP model payloads to disk. | pcbdoc, project, 3d, embedded-model, step, extraction |
 | [`pcbdoc_add_text`](../../examples/pcbdoc_add_text/README.md)<br>Add PCB text primitives | pcbdoc, mutation | Load a blank PcbDoc, add stroke text, TrueType text, inverted text, mirrored text, and barcode text variants, and save the board. | pcbdoc, mutation, text, truetype, barcode, inverted-text |
 | [`pcbdoc_add_track`](../../examples/pcbdoc_add_track/README.md)<br>Add PCB tracks | pcbdoc, mutation | Load a blank PcbDoc, add tracks on copper, overlay, and mechanical layers with several widths and net assignments, and save the board. | pcbdoc, mutation, track, routing, nets |
+| [`pcbdoc_user_union`](../../examples/pcbdoc_user_union/README.md)<br>Create a PCB user union | pcbdoc, mutation | Load a blank PcbDoc, place two PcbLib footprints plus board primitives and a STEP body, group them in a named user-defined union, save the board, and write a JSON summary. | pcbdoc, mutation, pcblib, component, 3d, user-union |
 | [`pcbdoc_add_arc`](../../examples/pcbdoc_add_arc/README.md)<br>Add PCB arcs | pcbdoc, mutation | Load a blank PcbDoc, add full-circle and partial arc primitives on multiple layers, and save the board. | pcbdoc, mutation, arc, full-circle, routing |
 | [`pcbdoc_add_pad`](../../examples/pcbdoc_add_pad/README.md)<br>Add PCB pads | pcbdoc, mutation | Load a blank PcbDoc, add SMT pads, through-hole pads, and a non-plated through hole with explicit zero mask expansions, and save the board. | pcbdoc, mutation, pad, smt, through-hole, npth |
 | [`pcbdoc_add_hole_tolerances`](../../examples/pcbdoc_add_hole_tolerances/README.md)<br>Add PCB hole tolerances | pcbdoc, mutation | Load a blank PcbDoc, add labeled pad and via drill-hole tolerance examples plus unset controls, and save the board. | pcbdoc, mutation, pad, via, through-hole, hole-tolerance |

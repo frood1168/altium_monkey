@@ -17,6 +17,8 @@
 - Read and write promoted via metadata such as IPC-4761 type, via feature
   rows, solder-mask tenting, hole tolerance, fabrication/assembly testpoint
   flags, and propagation delay.
+- Inspect user-defined PCB unions through union-name records, typed smart-union
+  records, and computed user-union member summaries.
 - Render PCB SVG and PCB layer SVGs.
 
 ## Object Model
@@ -27,6 +29,24 @@ document-owned helpers such as `add_track(...)`, `add_via(...)`,
 
 Direct record-list mutation remains an advanced escape hatch for narrow edits
 or preservation work.
+
+## User Unions
+
+`union_name_records` exposes the decoded `UnionNames/Data` catalog.
+`smart_unions` exposes read-only typed smart-union records. `user_unions`
+computes named user-defined unions and member references from parsed public
+primitive fields.
+
+Use explicit mutation helpers such as `create_user_union(...)`,
+`rename_user_union(...)`, `add_user_union_member(...)`,
+`remove_user_union_member(...)`, and `delete_user_union(...)` for user-defined
+union authoring. Typed smart unions such as drill tables, layer-stack tables,
+via stitching, via shielding, OLE/object unions, rectangles, and length tuning
+are read-only in this contract.
+
+Passing a component to `create_user_union(...)` includes the component record
+and its authorable child primitives. Shape-based region membership is kept in
+sync with the paired standard region record when that pair exists.
 
 ## Units
 

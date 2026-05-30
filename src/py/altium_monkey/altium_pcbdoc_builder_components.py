@@ -134,6 +134,7 @@ def parse_component_stream(data: bytes) -> tuple[AltiumPcbComponent, ...]:
                 y=fields.get("Y", ""),
                 rotation=fields.get("ROTATION", ""),
                 unique_id=fields.get("UNIQUEID", ""),
+                union_index=int(fields.get("UNIONINDEX", "0") or "0"),
                 description=fields.get("SOURCEDESCRIPTION", ""),
                 raw_record=dict(fields),
                 component_kind=parse_component_kind(fields),
@@ -264,6 +265,7 @@ def build_authored_component(
         y=raw_record["Y"],
         rotation=raw_record["ROTATION"],
         unique_id=unique_id,
+        union_index=int(raw_record["UNIONINDEX"]),
         description=description,
         raw_record=dict(raw_record),
     )

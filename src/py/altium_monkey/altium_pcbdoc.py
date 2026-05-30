@@ -26,6 +26,7 @@ from .altium_embedded_files import (
     sanitize_embedded_asset_name,
 )
 from .altium_pcb_component import AltiumPcbComponent
+from .altium_pcbdoc_builder_components import build_component_stream
 from .altium_pcb_dimension import AltiumPcbDimension, parse_dimensions6_stream
 from .altium_pcb_extended_primitive_information import (
     AltiumPcbExtendedPrimitiveInformation,
@@ -56,6 +57,20 @@ from .altium_pcb_via_structure import (
     parse_via_structure_links_stream,
     parse_via_structure_manager_stream,
     via_structure_header_count,
+)
+from .altium_pcbdoc_unions import (
+    PCB_USER_UNION_MEMBER_COLLECTIONS,
+    PcbSmartUnionRecord,
+    PcbUnionMemberRef,
+    PcbUnionNameRecord,
+    PcbUserUnion,
+    build_pcb_user_unions,
+    decode_pcb_smart_union_records_from_streams,
+    decode_pcb_union_name_records_from_streams,
+    encode_pcb_union_name_records,
+    pcb_packed_mask_user_union_index,
+    pcb_pad_user_union_index,
+    pcb_union_name_byte_count,
 )
 from .altium_record_pcb__board_region import AltiumPcbBoardRegion
 from .altium_record_pcb__arc import AltiumPcbArc
@@ -1018,6 +1033,9 @@ class AltiumPcbDoc:
         # CRITICAL: Stores raw binary for ALL streams (both parsed and unparsed)
         # to ensure complete round-trip preservation
         self._raw_streams: dict[str, bytes] = {}
+        self.union_name_records: tuple[PcbUnionNameRecord, ...] = ()
+        self.smart_unions: tuple[PcbSmartUnionRecord, ...] = ()
+        self._union_authoring_dirty: bool = False
         self.raw_custom_shapes_header: bytes | None = None
         self.raw_custom_shapes_data: bytes | None = None
         self._authoring_builder: Any | None = None
@@ -2420,6 +2438,7 @@ class AltiumPcbDoc:
         if verbose:
             log.info("  Storing unparsed streams for passthrough...")
         self._store_raw_streams(ole, verbose=verbose)
+        self._parse_union_streams(verbose=verbose)
 
     def _parse_text_lookup_tables(
         self,
@@ -2524,6 +2543,7 @@ class AltiumPcbDoc:
                     y=record.get("Y", ""),
                     rotation=record.get("ROTATION", ""),
                     unique_id=unique_id,
+                    union_index=int(record.get("UNIONINDEX", "0") or "0"),
                     description=record.get("SOURCEDESCRIPTION", ""),
                     parameters=parameter_map.get(unique_id, {}),
                     raw_record=record,
@@ -3447,6 +3467,23 @@ class AltiumPcbDoc:
                 if verbose:
                     log.warning(f"Could not read stream {stream_name}: {e}")
 
+    def _parse_union_streams(self, *, verbose: bool) -> None:
+        """
+        Decode read-only union catalogs from raw passthrough streams.
+        """
+        self.union_name_records = decode_pcb_union_name_records_from_streams(
+            self._raw_streams
+        )
+        self.smart_unions = decode_pcb_smart_union_records_from_streams(
+            self._raw_streams
+        )
+        if verbose and (self.union_name_records or self.smart_unions):
+            log.info(
+                "    Parsed %d union name record(s), %d smart-union record(s)",
+                len(self.union_name_records),
+                len(self.smart_unions),
+            )
+
     def save(self, filepath: Path | str, verbose: bool = False) -> None:
         """
         Save to binary PcbDoc format.
@@ -3460,6 +3497,12 @@ class AltiumPcbDoc:
         output_path = Path(filepath)
         if self._authoring_builder is not None:
             self._authoring_builder.save(output_path)
+            if self._union_authoring_dirty:
+                parsed = self.from_file(output_path, verbose=verbose)
+                parsed.union_name_records = self.union_name_records
+                parsed.smart_unions = self.smart_unions
+                parsed._union_authoring_dirty = True
+                parsed._to_file_impl(output_path, verbose=verbose)
             self._sync_from_saved_authoring_file(output_path, verbose=verbose)
             return
         self._to_file_impl(output_path, verbose=verbose)
@@ -3528,6 +3571,23 @@ class AltiumPcbDoc:
             "ViaStructures/Data", serialize_via_structure_links_stream(links)
         )
 
+    def _write_union_streams(self, writer: AltiumOleWriter, *, verbose: bool) -> None:
+        """
+        Write user-union catalog streams after explicit union authoring.
+        """
+        if not self._union_authoring_dirty:
+            return
+        writer.add_stream("UnionNames/Header", b"\x01\x00\x00\x00")
+        writer.add_stream(
+            "UnionNames/Data",
+            encode_pcb_union_name_records(self.union_name_records),
+        )
+        if verbose:
+            log.info(
+                "  Wrote UnionNames streams (%d record(s))",
+                len(self.union_name_records),
+            )
+
     def _write_basic_primitive_streams(
         self, writer: AltiumOleWriter, *, verbose: bool
     ) -> None:
@@ -3576,6 +3636,23 @@ class AltiumPcbDoc:
                     f"  Writing BoardRegions/Data ({len(self.board_regions)} board regions)..."
                 )
             writer.add_stream("BoardRegions/Data", self._serialize_board_regions())
+
+    def _write_component_streams(
+        self, writer: AltiumOleWriter, *, verbose: bool
+    ) -> None:
+        """
+        Write component placement records after semantic component mutation.
+        """
+        if not self.components:
+            return
+        if not self._union_authoring_dirty:
+            return
+        if verbose:
+            log.info(
+                f"  Writing Components6/Data ({len(self.components)} components)..."
+            )
+        writer.add_stream("Components6/Header", struct.pack("<I", len(self.components)))
+        writer.add_stream("Components6/Data", build_component_stream(self.components))
 
     def _write_shapebased_region_stream(
         self, writer: AltiumOleWriter, *, verbose: bool
@@ -3718,12 +3795,14 @@ class AltiumPcbDoc:
         writer = AltiumOleWriter()
 
         self._write_passthrough_streams(writer, verbose=verbose)
+        self._write_component_streams(writer, verbose=verbose)
         self._write_basic_primitive_streams(writer, verbose=verbose)
         self._write_shapebased_region_stream(writer, verbose=verbose)
         self._write_component_body_streams(writer, verbose=verbose)
         self._write_model_streams(writer, verbose=verbose)
         self._write_support_streams(writer, verbose=verbose)
         self._write_via_structure_streams(writer, verbose=verbose)
+        self._write_union_streams(writer, verbose=verbose)
 
         # Write to file
         writer.write(str(filepath))
@@ -4941,6 +5020,383 @@ class AltiumPcbDoc:
             if pair.negative_net_name:
                 pairs[pair.negative_net_name] = pair
         return pairs
+
+    @property
+    def user_unions(self) -> tuple[PcbUserUnion, ...]:
+        """
+        Return read-only semantic views of named user-defined PCB unions.
+
+        Typed smart unions are excluded from this view. Known generated
+        via-stitching and via-shielding child vias are also excluded when their
+        byte-sized primitive union index collides with a user-union id.
+        """
+        return build_pcb_user_unions(self)
+
+    @staticmethod
+    def _validate_user_union_name(name: str) -> str:
+        value = str(name)
+        if not value:
+            raise ValueError("User union name must not be empty")
+        if "\x00" in value:
+            raise ValueError("User union name must not contain NUL characters")
+        return value
+
+    def _typed_smart_union_indexes(self) -> set[int]:
+        return {record.union_index for record in self.smart_unions}
+
+    def _user_union_record(self, union_index: int) -> PcbUnionNameRecord | None:
+        for record in self.union_name_records:
+            if record.union_index == int(union_index):
+                return record
+        return None
+
+    def _require_user_union_record(self, union_index: int) -> PcbUnionNameRecord:
+        typed_indexes = self._typed_smart_union_indexes()
+        if int(union_index) in typed_indexes:
+            raise ValueError(f"Union {union_index} is a typed smart union")
+        record = self._user_union_record(int(union_index))
+        if record is None:
+            raise ValueError(f"User union {union_index} does not exist")
+        return record
+
+    def _typed_via_child_collision_indexes(self) -> set[int]:
+        return {
+            record.union_index & 0xFF
+            for record in self.smart_unions
+            if record.union_type in {2, 6} and record.union_index & 0xFF
+        }
+
+    def _next_user_union_index(self) -> int:
+        used = {record.union_index for record in self.union_name_records}
+        small_used = [index for index in used if 0 < index < 0x100000]
+        candidate = max(small_used, default=0) + 1
+        via_child_collisions = self._typed_via_child_collision_indexes()
+        while candidate in used or candidate in via_child_collisions:
+            candidate += 1
+        return candidate
+
+    def _set_union_name_records(
+        self,
+        records: tuple[PcbUnionNameRecord, ...],
+    ) -> None:
+        self.union_name_records = records
+        self._union_authoring_dirty = True
+
+    def _user_union_view_for_index(self, union_index: int) -> PcbUserUnion:
+        for user_union in self.user_unions:
+            if user_union.union_index == int(union_index):
+                return user_union
+        record = self._require_user_union_record(int(union_index))
+        return PcbUserUnion(record.union_index, record.name, ())
+
+    def _mark_user_union_member_collection_dirty(self, collection: str) -> None:
+        builder = self._authoring_builder
+        if builder is None:
+            return
+        dirty_attr_by_collection = {
+            "fills": "_fills_dirty",
+            "pads": "_pads_dirty",
+            "vias": "_vias_dirty",
+            "texts": "_texts_dirty",
+            "components": "_components_dirty",
+            "regions": "_regions_dirty",
+            "shapebased_regions": "_regions_dirty",
+            "polygons": "_polygons_dirty",
+            "component_bodies": "_component_bodies_dirty",
+            "shapebased_component_bodies": "_component_bodies_dirty",
+        }
+        dirty_attr = dirty_attr_by_collection.get(collection)
+        if dirty_attr is not None:
+            setattr(builder, dirty_attr, True)
+
+    @staticmethod
+    def _member_union_index(collection: str, obj: object) -> int:
+        if collection in {"tracks", "arcs", "fills"}:
+            return pcb_packed_mask_user_union_index(obj) or -1
+        if collection == "pads":
+            return pcb_pad_user_union_index(obj) or -1
+        if collection == "texts":
+            return int(getattr(obj, "text_union_index", 0))
+        return int(getattr(obj, "union_index", 0))
+
+    @staticmethod
+    def _set_packed_mask_user_union_index(
+        primitive: object,
+        union_index: int | None,
+    ) -> None:
+        raw_value = int(getattr(primitive, "solder_mask_expansion", 0))
+        encoded = raw_value & 0xFF
+        if union_index is not None:
+            union_value = int(union_index)
+            if union_value < 0 or union_value > 0x7FFFFF:
+                raise ValueError(
+                    "User-union indexes must fit the AD packed membership field"
+                )
+            encoded |= union_value << 8
+        setattr(primitive, "union_index", 0xFFFFFFFF)
+        setattr(primitive, "solder_mask_expansion", encoded)
+
+    @staticmethod
+    def _set_pad_user_union_index(pad: object, union_index: int | None) -> None:
+        if union_index is not None:
+            union_value = int(union_index)
+            if union_value < 0 or union_value > 0xFFFFFFFF:
+                raise ValueError("Pad user-union indexes must fit uint32")
+        else:
+            union_value = 0
+        setattr(pad, "union_index", 0xFFFFFFFF)
+        setattr(pad, "pad_user_union_index", union_value)
+
+    def _locate_user_union_member(self, member: object) -> PcbUnionMemberRef:
+        if isinstance(member, PcbUnionMemberRef):
+            member = member.obj
+        for collection, _union_attr in PCB_USER_UNION_MEMBER_COLLECTIONS:
+            for object_index, obj in enumerate(getattr(self, collection, ())):
+                if obj is member:
+                    return PcbUnionMemberRef(
+                        collection=collection,
+                        object_index=object_index,
+                        union_index=self._member_union_index(collection, obj),
+                        obj=obj,
+                    )
+        raise ValueError("Union member does not belong to this PcbDoc")
+
+    def _component_user_union_member_refs(
+        self,
+        component_index: int,
+    ) -> tuple[PcbUnionMemberRef, ...]:
+        refs: list[PcbUnionMemberRef] = [
+            PcbUnionMemberRef(
+                collection="components",
+                object_index=component_index,
+                union_index=self._member_union_index(
+                    "components", self.components[component_index]
+                ),
+                obj=self.components[component_index],
+            )
+        ]
+        primitives_by_collection = self.get_component_primitives(component_index)
+        for collection, primitives in primitives_by_collection.items():
+            if collection == "board_regions":
+                continue
+            for primitive in primitives:
+                refs.append(self._locate_user_union_member(primitive))
+        for object_index, body in enumerate(self.shapebased_component_bodies):
+            if body.component_index != component_index:
+                continue
+            refs.append(
+                PcbUnionMemberRef(
+                    collection="shapebased_component_bodies",
+                    object_index=object_index,
+                    union_index=self._member_union_index(
+                        "shapebased_component_bodies", body
+                    ),
+                    obj=body,
+                )
+            )
+        if not refs:
+            raise ValueError(
+                f"Component {component_index} has no union-authorable primitives"
+            )
+        return tuple(refs)
+
+    def _expand_user_union_member_refs(
+        self,
+        members: Sequence[object],
+    ) -> tuple[PcbUnionMemberRef, ...]:
+        refs: list[PcbUnionMemberRef] = []
+        seen: set[tuple[str, int]] = set()
+        for member in members:
+            expanded: tuple[PcbUnionMemberRef, ...] | None = None
+            if isinstance(member, PcbUnionMemberRef):
+                expanded = (self._locate_user_union_member(member.obj),)
+            else:
+                for component_index, component in enumerate(self.components):
+                    if component is member:
+                        expanded = self._component_user_union_member_refs(
+                            component_index
+                        )
+                        break
+            if expanded is None:
+                expanded = (self._locate_user_union_member(member),)
+            for ref in expanded:
+                refs_to_add = [ref]
+                if ref.collection == "shapebased_regions" and ref.object_index < len(
+                    self.regions
+                ):
+                    paired_region = self.regions[ref.object_index]
+                    refs_to_add.append(
+                        PcbUnionMemberRef(
+                            collection="regions",
+                            object_index=ref.object_index,
+                            union_index=self._member_union_index(
+                                "regions", paired_region
+                            ),
+                            obj=paired_region,
+                        )
+                    )
+                for ref_to_add in refs_to_add:
+                    key = (ref_to_add.collection, ref_to_add.object_index)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    refs.append(ref_to_add)
+        return tuple(refs)
+
+    def _set_user_union_member_ref(
+        self,
+        member: PcbUnionMemberRef,
+        union_index: int | None,
+    ) -> None:
+        if member.collection in {"tracks", "arcs", "fills"}:
+            self._set_packed_mask_user_union_index(member.obj, union_index)
+        elif member.collection == "texts":
+            setattr(
+                member.obj,
+                "text_union_index",
+                0 if union_index is None else union_index,
+            )
+        elif member.collection == "pads":
+            self._set_pad_user_union_index(member.obj, union_index)
+        elif member.collection == "components":
+            union_value = 0 if union_index is None else int(union_index)
+            setattr(member.obj, "union_index", union_value)
+            raw_record = getattr(member.obj, "raw_record", None)
+            if isinstance(raw_record, dict):
+                raw_record["UNIONINDEX"] = str(union_value)
+        else:
+            setattr(
+                member.obj, "union_index", 0 if union_index is None else union_index
+            )
+            if member.collection in {
+                "component_bodies",
+                "shapebased_component_bodies",
+                "regions",
+                "shapebased_regions",
+            }:
+                properties = getattr(member.obj, "properties", None)
+                if isinstance(properties, dict):
+                    properties["UNIONINDEX"] = str(
+                        0 if union_index is None else int(union_index)
+                    )
+                if member.collection == "regions":
+                    setattr(member.obj, "_properties_raw", None)
+                    setattr(member.obj, "_properties_raw_signature", None)
+                if member.collection == "shapebased_regions":
+                    setattr(member.obj, "_raw_properties_bytes", None)
+                    setattr(member.obj, "_props_has_trailing_null", False)
+        self._mark_user_union_member_collection_dirty(member.collection)
+        self._union_authoring_dirty = True
+
+    def create_user_union(
+        self,
+        name: str,
+        members: Sequence[object] = (),
+    ) -> PcbUserUnion:
+        """
+        Create a named user-defined PCB union and optionally assign members.
+
+        `members` may contain parsed primitive objects, `PcbUnionMemberRef`
+        objects, or component records. Component records expand to the parsed
+        union-authorable primitives owned by that component.
+        """
+        union_name = self._validate_user_union_name(name)
+        union_index = self._next_user_union_index()
+        records = (
+            *self.union_name_records,
+            PcbUnionNameRecord(
+                union_index=union_index,
+                name=union_name,
+                byte_count=pcb_union_name_byte_count(union_name),
+            ),
+        )
+        self._set_union_name_records(records)
+        for member in self._expand_user_union_member_refs(members):
+            self._set_user_union_member_ref(member, union_index)
+        return self._user_union_view_for_index(union_index)
+
+    def rename_user_union(self, union_index: int, name: str) -> PcbUserUnion:
+        """
+        Rename an existing user-defined PCB union.
+        """
+        self._require_user_union_record(union_index)
+        union_name = self._validate_user_union_name(name)
+        records = tuple(
+            PcbUnionNameRecord(
+                union_index=record.union_index,
+                name=union_name,
+                byte_count=pcb_union_name_byte_count(union_name),
+            )
+            if record.union_index == int(union_index)
+            else record
+            for record in self.union_name_records
+        )
+        self._set_union_name_records(records)
+        return self._user_union_view_for_index(int(union_index))
+
+    def add_user_union_member(
+        self,
+        union_index: int,
+        member: object,
+    ) -> PcbUserUnion:
+        """
+        Add one primitive, member reference, or component to a user union.
+        """
+        self._require_user_union_record(union_index)
+        typed_indexes = self._typed_smart_union_indexes()
+        user_indexes = {
+            record.union_index
+            for record in self.union_name_records
+            if record.union_index not in typed_indexes
+        }
+        for ref in self._expand_user_union_member_refs((member,)):
+            if ref.union_index in typed_indexes:
+                raise ValueError("Cannot move a typed smart-union member")
+            if ref.union_index in user_indexes and ref.union_index != int(union_index):
+                raise ValueError(
+                    f"Member already belongs to user union {ref.union_index}"
+                )
+            self._set_user_union_member_ref(ref, int(union_index))
+        return self._user_union_view_for_index(int(union_index))
+
+    def remove_user_union_member(
+        self,
+        union_index: int,
+        member: object,
+    ) -> PcbUserUnion:
+        """
+        Remove one primitive, member reference, or component from a user union.
+        """
+        self._require_user_union_record(union_index)
+        refs = self._expand_user_union_member_refs((member,))
+        removed = False
+        for ref in refs:
+            if ref.union_index != int(union_index):
+                continue
+            self._set_user_union_member_ref(ref, None)
+            removed = True
+        if not removed:
+            raise ValueError(f"Member is not in user union {union_index}")
+        return self._user_union_view_for_index(int(union_index))
+
+    def delete_user_union(self, union_index: int) -> None:
+        """
+        Delete a user-defined PCB union and clear its parsed member fields.
+        """
+        self._require_user_union_record(union_index)
+        for user_union in self.user_unions:
+            if user_union.union_index != int(union_index):
+                continue
+            for member in user_union.members:
+                self._set_user_union_member_ref(member, None)
+            break
+        self._set_union_name_records(
+            tuple(
+                record
+                for record in self.union_name_records
+                if record.union_index != int(union_index)
+            )
+        )
 
     def get_unique_footprints(self) -> set[str]:
         """

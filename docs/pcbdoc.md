@@ -13,6 +13,7 @@ Use it when you need to:
 5. add board outlines, nets, PCB primitives, routes, pads, vias, and regions
 6. place footprints from `.PcbLib`
 7. add component bodies and embedded 3D model payloads
+8. inspect and author user-defined PCB unions
 
 ## Object Model
 
@@ -40,6 +41,22 @@ pcbdoc.save("updated.PcbDoc")
 Direct edits to typed lists are advanced usage. They can be appropriate for
 read-preserving mutation, but callers are responsible for keeping indexes,
 ownership, stream order, and related binary state valid.
+
+## User Unions
+
+`pcbdoc.union_name_records` exposes the decoded union-name catalog.
+`pcbdoc.smart_unions` exposes read-only typed smart-union records.
+`pcbdoc.user_unions` returns named user-defined unions with member references.
+
+Use `create_user_union(...)`, `rename_user_union(...)`,
+`add_user_union_member(...)`, `remove_user_union_member(...)`, and
+`delete_user_union(...)` for explicit user-union authoring. Typed smart unions,
+including drill tables, layer-stack tables, via stitching, via shielding,
+OLE/object unions, rectangles, and length tuning, are read-only.
+
+Passing a component to `create_user_union(...)` includes the component record
+and its authorable child primitives. Shape-based region membership is kept in
+sync with the paired standard region record when that pair exists.
 
 PCB components are available through `pcbdoc.components`. Each
 `AltiumPcbComponent` row exposes the resolved designator, footprint, placement,
@@ -238,20 +255,21 @@ Start with:
 5. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
 6. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
 7. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
-8. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
-9. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
-10. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
-11. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
-12. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
-13. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
-14. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
-15. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
-16. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
-17. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
-18. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
-19. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
-20. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
-21. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
+8. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
+9. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
+10. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
+11. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
+12. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
+13. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
+14. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
+15. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
+16. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
+17. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
+18. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
+19. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
+20. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
+21. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
+22. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.

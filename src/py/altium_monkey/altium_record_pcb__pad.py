@@ -162,6 +162,7 @@ class AltiumPcbPad(PcbGraphicalObject):
         self._flags: int = 0
         self.polygon_index: int = 0xFFFF  # Offset 5-6: always 0xFFFF for pads
         self.union_index: int = 0xFFFFFFFF  # Offset 9-12: 0xFFFFFFFF=none
+        self.pad_user_union_index: int = 0  # SubRecord 5 offset 106
         self.user_routed: bool = True  # flags1 bit3 (0x08)
         self._flags1_bit0: int = 0  # flags1 bit0 (preserved raw)
 
@@ -581,6 +582,9 @@ class AltiumPcbPad(PcbGraphicalObject):
                 self.cache_solder_mask_expansion_valid = content[pos]  # offset 104
                 pos += 1
 
+        if len(content) >= 110:
+            self.pad_user_union_index = struct.unpack("<I", content[106:110])[0]
+
         if len(content) >= 118:
             self.layer_v7_save_id = struct.unpack("<I", content[114:118])[0]
 
@@ -836,6 +840,7 @@ class AltiumPcbPad(PcbGraphicalObject):
             int(self.soldermask_expansion_mode or 0),
             int(self.cache_paste_mask_expansion_valid or 0),
             int(self.cache_solder_mask_expansion_valid or 0),
+            int(self.pad_user_union_index or 0),
             0 if self.layer_v7_save_id is None else int(self.layer_v7_save_id),
             bool(self._has_hole_tolerances),
             int(self._hole_positive_tolerance),
@@ -924,6 +929,9 @@ class AltiumPcbPad(PcbGraphicalObject):
         ext_data[41] = int(self.soldermask_expansion_mode) & 0xFF
         ext_data[42] = int(self.cache_paste_mask_expansion_valid) & 0xFF
         ext_data[43] = int(self.cache_solder_mask_expansion_valid) & 0xFF
+        struct.pack_into(
+            "<I", ext_data, 45, int(self.pad_user_union_index or 0) & 0xFFFFFFFF
+        )
         struct.pack_into(
             "<I", ext_data, 53, int(self.layer_v7_save_id or 0) & 0xFFFFFFFF
         )

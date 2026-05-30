@@ -33,6 +33,7 @@ class AltiumPcbComponent:
         y: Y position with "mil" suffix
         rotation: Rotation angle in scientific notation (e.g., "1.80000000000000E+0002" = 180 deg)
         unique_id: 8-character unique identifier (UNIQUEID field, linkage key for pads/parameters)
+        union_index: User-union index from the component `UNIONINDEX` field.
         description: Component description (SOURCEDESCRIPTION field)
         parameters: Dict of component parameters from PrimitiveParameters/Data
         raw_record: Original text record dict from Components6/Data
@@ -52,6 +53,7 @@ class AltiumPcbComponent:
     y: str  # "27514.9995mil" format
     rotation: str = ""
     unique_id: str = ""
+    union_index: int = 0
     description: str = ""
     parameters: dict[str, object] | None = None
     raw_record: dict[str, object] | None = None

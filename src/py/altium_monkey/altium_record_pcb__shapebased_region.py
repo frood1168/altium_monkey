@@ -541,7 +541,8 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
             props_bytes = self._properties_string().encode("utf-8", errors="replace")
             subrecord.extend(struct.pack("<I", len(props_bytes)))
             subrecord.extend(props_bytes)
-            subrecord.extend(b"\x00")
+            if self._props_has_trailing_null:
+                subrecord.extend(b"\x00")
 
         # Write outline vertices directly - self.outline already includes the
         # closing vertex from parsing (parser reads count+1 vertices).
