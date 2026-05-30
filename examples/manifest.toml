@@ -1347,6 +1347,51 @@ requires_extra = []
 tags = ["schdoc", "mutation", "clean", "normalize", "project"]
 
 [[examples]]
+id = "schdoc_param_layout_extract"
+title = "Extract parameter positions from a reference schematic"
+summary = "Read a reference SchDoc where parameters are manually positioned, compute component-local offsets (rotation/mirror aware), and write a param_layout.toml template."
+areas = ["schdoc"]
+status = "ready"
+entrypoint = "schdoc_param_layout/schdoc_param_layout_extract.py"
+doc = "schdoc_param_layout/README.md"
+inputs = []
+assets = [
+  "assets/projects/hydroscope/CPU.SchDoc",
+]
+outputs = [
+  "schdoc_param_layout/output/param_layout.toml",
+]
+requires_extra = []
+tags = ["schdoc", "parameter", "layout", "extract", "template"]
+
+[[examples]]
+id = "schdoc_param_layout"
+title = "Apply parameter layout template to project schematics"
+summary = "Read param_layout.toml and reposition parameter fields on every component across all SchDocs in a project, accounting for component rotation and mirroring."
+areas = ["schdoc", "mutation"]
+status = "ready"
+entrypoint = "schdoc_param_layout/schdoc_param_layout.py"
+doc = "schdoc_param_layout/README.md"
+inputs = []
+assets = [
+  "assets/projects/hydroscope/CPU.SchDoc",
+  "assets/projects/hydroscope/POWER_SUPPLY.SchDoc",
+  "assets/projects/hydroscope/TOP_LEVEL.SchDoc",
+  "assets/projects/hydroscope/US_IF.SchDoc",
+  "schdoc_param_layout/param_layout.toml",
+]
+outputs = [
+  "schdoc_param_layout/output/hydroscope_param/CPU.SchDoc",
+  "schdoc_param_layout/output/hydroscope_param/Hydroscope.PrjPcb",
+  "schdoc_param_layout/output/hydroscope_param/POWER_SUPPLY.SchDoc",
+  "schdoc_param_layout/output/hydroscope_param/TOP_LEVEL.SchDoc",
+  "schdoc_param_layout/output/hydroscope_param/US_IF.SchDoc",
+  "schdoc_param_layout/output/schdoc_param_layout_manifest.json",
+]
+requires_extra = []
+tags = ["schdoc", "parameter", "layout", "mutation", "project", "template"]
+
+[[examples]]
 id = "schdoc_svg"
 title = "Render project schematics to SVG"
 summary = "Open the Hydroscope PrjPcb, pass project parameters into the schematic SVG renderer, and write one SVG per schematic page."

@@ -312,7 +312,7 @@ class AltiumSchParameter(SingleFontBindableRecordMixin, SchPrimitive):
         raw_record: dict[str, Any] | None,
     ) -> None:
         if self.is_hidden:
-            serializer.write_bool(record, Fields.IS_HIDDEN, True, raw_record)
+            serializer.write_bool(record, Fields.IS_HIDDEN, True, raw_record, force=True)
         else:
             serializer.remove_field(record, Fields.IS_HIDDEN)
 

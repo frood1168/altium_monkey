@@ -214,7 +214,7 @@ class AltiumSchDesignator(SingleFontBindableRecordMixin, SchPrimitive):
 
         # Boolean fields
         if self.is_hidden:
-            s.write_bool(record, Fields.IS_HIDDEN, self.is_hidden, raw)
+            s.write_bool(record, Fields.IS_HIDDEN, self.is_hidden, raw, force=True)
         else:
             s.remove_field(record, Fields.IS_HIDDEN)
         if self.is_mirrored:

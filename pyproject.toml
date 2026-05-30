@@ -59,3 +59,11 @@ packages = ["src/py/altium_monkey"]
 
 [tool.hatch.version]
 path = "src/py/altium_monkey/_version.py"
+
+[tool.uv.sources]
+altium-monkey = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "altium-monkey",
+]
