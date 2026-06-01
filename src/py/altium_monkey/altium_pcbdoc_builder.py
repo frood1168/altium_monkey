@@ -58,6 +58,11 @@ from .altium_pcb_via_structure import (
     serialize_via_structure_links_stream,
     serialize_via_structure_manager_stream,
 )
+from .altium_pcb_mask_expansion import (
+    PcbMaskExpansionInput,
+    PcbMaskExpansionModeInput,
+)
+from .altium_pcb_via_authoring import apply_authored_via_surface_policy
 from .altium_record_pcb__board_region import AltiumPcbBoardRegion
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
 from .altium_record_pcb__model import AltiumPcbModel
@@ -4091,10 +4096,24 @@ class PcbDocBuilder:
         plated: bool | None = None,
         net: str | None = None,
         corner_radius_percent: int | None = None,
+        top_shape: int | str | PadShape | None = None,
+        top_width_mils: float | None = None,
+        top_height_mils: float | None = None,
+        mid_shape: int | str | PadShape | None = None,
+        mid_width_mils: float | None = None,
+        mid_height_mils: float | None = None,
+        bottom_shape: int | str | PadShape | None = None,
+        bottom_width_mils: float | None = None,
+        bottom_height_mils: float | None = None,
+        pad_mode: int | None = None,
         slot_length_mils: float = 0.0,
         slot_rotation_degrees: float = 0.0,
         hole_shape: int | str = "round",
+        solder_mask_expansion: PcbMaskExpansionInput = None,
+        solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion: PcbMaskExpansionInput = None,
+        paste_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         paste_mask_expansion_mils: float | None = None,
         hole_positive_tolerance_mils: float | None = None,
         hole_negative_tolerance_mils: float | None = None,
@@ -4111,10 +4130,24 @@ class PcbDocBuilder:
             hole_size_mils=hole_size_mils,
             plated=plated,
             corner_radius_percent=corner_radius_percent,
+            top_shape=top_shape,
+            top_width_mils=top_width_mils,
+            top_height_mils=top_height_mils,
+            mid_shape=mid_shape,
+            mid_width_mils=mid_width_mils,
+            mid_height_mils=mid_height_mils,
+            bottom_shape=bottom_shape,
+            bottom_width_mils=bottom_width_mils,
+            bottom_height_mils=bottom_height_mils,
+            pad_mode=pad_mode,
             slot_length_mils=slot_length_mils,
             slot_rotation_degrees=slot_rotation_degrees,
             hole_shape=hole_shape,
+            solder_mask_expansion=solder_mask_expansion,
+            solder_mask_expansion_mode=solder_mask_expansion_mode,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
+            paste_mask_expansion=paste_mask_expansion,
+            paste_mask_expansion_mode=paste_mask_expansion_mode,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
             hole_positive_tolerance_mils=hole_positive_tolerance_mils,
             hole_negative_tolerance_mils=hole_negative_tolerance_mils,
@@ -4156,6 +4189,8 @@ class PcbDocBuilder:
         hole_negative_tolerance_mils: float | None = None,
         is_tent_top: bool = False,
         is_tent_bottom: bool = False,
+        solder_mask_expansion_top_mils: float | None = None,
+        solder_mask_expansion_bottom_mils: float | None = None,
         is_test_fab_top: bool = False,
         is_test_fab_bottom: bool = False,
         is_assy_testpoint_top: bool = False,
@@ -4174,14 +4209,13 @@ class PcbDocBuilder:
         via.ipc4761_via_type = PcbIpc4761ViaType(int(ipc4761_via_type))
         if propagation_delay_ps is not None:
             via.propagation_delay_ps = float(propagation_delay_ps)
-        via.is_tent_top = bool(is_tent_top)
-        via.is_tent_bottom = bool(is_tent_bottom)
-        if via.is_tent_top or via.is_tent_bottom:
-            via.solder_mask_expansion_mode = 2  # eMaskExpansionMode_Manual
-            via.soldermask_expansion_front = 40000
-            via.soldermask_expansion_back = 40000
-            via._has_soldermask_expansion_front = True
-            via._has_soldermask_expansion_back = True
+        apply_authored_via_surface_policy(
+            via,
+            is_tent_top=is_tent_top,
+            is_tent_bottom=is_tent_bottom,
+            solder_mask_expansion_top_mil=solder_mask_expansion_top_mils,
+            solder_mask_expansion_bottom_mil=solder_mask_expansion_bottom_mils,
+        )
         via.is_test_fab_top = bool(is_test_fab_top)
         via.is_test_fab_bottom = bool(is_test_fab_bottom)
         via.is_assy_testpoint_top = bool(is_assy_testpoint_top)
@@ -4220,6 +4254,8 @@ class PcbDocBuilder:
         subpoly_index: int = -1,
         union_index: int = 0,
         region_kind: int | PcbRegionKind = PcbRegionKind.COPPER,
+        is_board_cutout: bool = False,
+        is_shapebased: bool = False,
     ) -> "PcbDocBuilder":
         net_index: int | None = None
         if net:
@@ -4235,6 +4271,8 @@ class PcbDocBuilder:
             subpoly_index=int(subpoly_index),
             union_index=int(union_index),
             region_kind=region_kind,
+            is_board_cutout=is_board_cutout,
+            is_shapebased=is_shapebased,
             is_keepout=is_keepout,
             keepout_restrictions=keepout_restrictions,
         )

@@ -107,6 +107,10 @@ from .altium_pcb_enums import (
     PcbTextJustification,
     PcbTextKind,
 )
+from .altium_pcb_mask_expansion import (
+    PcbMaskExpansionInput,
+    PcbMaskExpansionModeInput,
+)
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
 from .altium_pcbdoc_layers import (
     _clear_raw_cache,
@@ -2152,10 +2156,24 @@ class AltiumPcbDoc:
         plated: bool | None = None,
         net: str | None = None,
         corner_radius_percent: int | None = None,
+        top_shape: int | str | PadShape | None = None,
+        top_width_mils: float | None = None,
+        top_height_mils: float | None = None,
+        mid_shape: int | str | PadShape | None = None,
+        mid_width_mils: float | None = None,
+        mid_height_mils: float | None = None,
+        bottom_shape: int | str | PadShape | None = None,
+        bottom_width_mils: float | None = None,
+        bottom_height_mils: float | None = None,
+        pad_mode: int | None = None,
         slot_length_mils: float = 0.0,
         slot_rotation_degrees: float = 0.0,
         hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
+        solder_mask_expansion: PcbMaskExpansionInput = None,
+        solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion: PcbMaskExpansionInput = None,
+        paste_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         paste_mask_expansion_mils: float | None = None,
         hole_positive_tolerance_mils: float | None = None,
         hole_negative_tolerance_mils: float | None = None,
@@ -2172,6 +2190,10 @@ class AltiumPcbDoc:
         mask expansion values when provided. Pass `0.0` for explicit zero
         expansion.
 
+        Supplying any `top_*`, `mid_*`, or `bottom_*` pad-body override writes
+        native local-stack mode (`pad_mode=1`). Omitted local-stack values
+        inherit the base `shape`, `width_mils`, and `height_mils`.
+
         Args:
             designator: Pad designator text, for example `"1"`.
             position_mils: Pad center as `(x_mils, y_mils)`.
@@ -2186,12 +2208,30 @@ class AltiumPcbDoc:
                 convention when omitted.
             net: Optional net name. The net is created if needed.
             corner_radius_percent: Rounded-rectangle corner radius percentage.
+            top_shape: Optional top-layer pad body shape override.
+            top_width_mils: Optional top-layer pad body X size in mils.
+            top_height_mils: Optional top-layer pad body Y size in mils.
+            mid_shape: Optional internal-layer pad body shape override.
+            mid_width_mils: Optional internal-layer pad body X size in mils.
+            mid_height_mils: Optional internal-layer pad body Y size in mils.
+            bottom_shape: Optional bottom-layer pad body shape override.
+            bottom_width_mils: Optional bottom-layer pad body X size in mils.
+            bottom_height_mils: Optional bottom-layer pad body Y size in mils.
+            pad_mode: Optional native pad mode. Use `1` for local-stack pads.
             slot_length_mils: Optional total slot length in mils.
             slot_rotation_degrees: Slot rotation in degrees.
             hole_shape: Drill shape: `"round"`, `"square"`, or `"slot"`.
                 Slots also require `slot_length_mils`.
+            solder_mask_expansion: Optional `PcbMaskExpansion`, mode string, or
+                native mode id for solder-mask expansion.
+            solder_mask_expansion_mode: Optional solder-mask mode string/id:
+                `"none"`, `"rule"`, or `"manual"`.
             solder_mask_expansion_mils: Optional manual solder-mask expansion
                 in mils.
+            paste_mask_expansion: Optional `PcbMaskExpansion`, mode string, or
+                native mode id for paste-mask expansion.
+            paste_mask_expansion_mode: Optional paste-mask mode string/id:
+                `"none"`, `"rule"`, or `"manual"`.
             paste_mask_expansion_mils: Optional manual paste-mask expansion in
                 mils.
             hole_positive_tolerance_mils: Optional upper drill-hole tolerance
@@ -2217,10 +2257,24 @@ class AltiumPcbDoc:
             plated=plated,
             net=net,
             corner_radius_percent=corner_radius_percent,
+            top_shape=top_shape,
+            top_width_mils=top_width_mils,
+            top_height_mils=top_height_mils,
+            mid_shape=mid_shape,
+            mid_width_mils=mid_width_mils,
+            mid_height_mils=mid_height_mils,
+            bottom_shape=bottom_shape,
+            bottom_width_mils=bottom_width_mils,
+            bottom_height_mils=bottom_height_mils,
+            pad_mode=pad_mode,
             slot_length_mils=slot_length_mils,
             slot_rotation_degrees=slot_rotation_degrees,
             hole_shape=hole_shape,
+            solder_mask_expansion=solder_mask_expansion,
+            solder_mask_expansion_mode=solder_mask_expansion_mode,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
+            paste_mask_expansion=paste_mask_expansion,
+            paste_mask_expansion_mode=paste_mask_expansion_mode,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
             hole_positive_tolerance_mils=hole_positive_tolerance_mils,
             hole_negative_tolerance_mils=hole_negative_tolerance_mils,
@@ -2243,6 +2297,8 @@ class AltiumPcbDoc:
         hole_negative_tolerance_mils: float | None = None,
         is_tent_top: bool = False,
         is_tent_bottom: bool = False,
+        solder_mask_expansion_top_mils: float | None = None,
+        solder_mask_expansion_bottom_mils: float | None = None,
         is_test_fab_top: bool = False,
         is_test_fab_bottom: bool = False,
         is_assy_testpoint_top: bool = False,
@@ -2271,6 +2327,10 @@ class AltiumPcbDoc:
             is_tent_bottom: Bottom-side solder-mask tenting flag. Authored vias
                 with tenting use AD25-compatible manual solder-mask expansion
                 defaults.
+            solder_mask_expansion_top_mils: Optional signed top/front manual
+                solder-mask expansion in mils.
+            solder_mask_expansion_bottom_mils: Optional signed bottom/back
+                manual solder-mask expansion in mils.
             is_test_fab_top: Top-side fabrication testpoint flag.
             is_test_fab_bottom: Bottom-side fabrication testpoint flag.
             is_assy_testpoint_top: Top-side assembly testpoint flag.
@@ -2293,6 +2353,8 @@ class AltiumPcbDoc:
             hole_negative_tolerance_mils=hole_negative_tolerance_mils,
             is_tent_top=is_tent_top,
             is_tent_bottom=is_tent_bottom,
+            solder_mask_expansion_top_mils=solder_mask_expansion_top_mils,
+            solder_mask_expansion_bottom_mils=solder_mask_expansion_bottom_mils,
             is_test_fab_top=is_test_fab_top,
             is_test_fab_bottom=is_test_fab_bottom,
             is_assy_testpoint_top=is_assy_testpoint_top,
@@ -2307,8 +2369,12 @@ class AltiumPcbDoc:
         outline_points_mils: list[tuple[float, float]],
         layer: int | PcbLayer = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
+        kind: int | PcbRegionKind = PcbRegionKind.COPPER,
+        is_board_cutout: bool = False,
+        is_shapebased: bool = False,
         is_keepout: bool = False,
         keepout_restrictions: int = 0,
+        subpoly_index: int = -1,
         net: str | None = None,
     ) -> AltiumPcbRegion:
         """
@@ -2318,8 +2384,13 @@ class AltiumPcbDoc:
             outline_points_mils: Outer polygon vertices in mils.
             layer: `PcbLayer` or native layer id.
             hole_points_mils: Optional list of hole polygons in mils.
+            kind: Native region kind. Prefer `PcbRegionKind` values when
+                authoring new public examples.
+            is_board_cutout: Mark the region as a board cutout.
+            is_shapebased: Write shape-based region metadata where supported.
             is_keepout: Mark the region as a keepout.
             keepout_restrictions: Native keepout restriction bitmask.
+            subpoly_index: Native sub-polygon index.
             net: Optional net name. The net is created if needed.
 
         Returns:
@@ -2330,8 +2401,12 @@ class AltiumPcbDoc:
             outline_points_mils=outline_points_mils,
             layer=layer,
             hole_points_mils=hole_points_mils,
+            region_kind=kind,
+            is_board_cutout=is_board_cutout,
+            is_shapebased=is_shapebased,
             is_keepout=is_keepout,
             keepout_restrictions=keepout_restrictions,
+            subpoly_index=subpoly_index,
             net=net,
         )
         self._mirror_authoring_builder_state()

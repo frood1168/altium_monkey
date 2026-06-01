@@ -446,6 +446,8 @@ class AltiumPcbFootprint:
         width_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion_mils: float | None = None,
     ) -> AltiumPcbTrack:
         """
         Add a straight track segment to this footprint using mil units.
@@ -457,6 +459,8 @@ class AltiumPcbFootprint:
             layer: `PcbLayer` or native layer id.
             v7_layer_id: Optional explicit V7 layer-kind id for compatibility
                 with source libraries that store it separately.
+            solder_mask_expansion_mils: Optional manual solder-mask expansion.
+            paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
         Returns:
             The authored `AltiumPcbTrack` record.
@@ -472,6 +476,8 @@ class AltiumPcbFootprint:
             width_mil=width_mils,
             layer=layer,
             v7_layer_id=v7_layer_id,
+            solder_mask_expansion_mil=solder_mask_expansion_mils,
+            paste_mask_expansion_mil=paste_mask_expansion_mils,
         )
 
     def add_arc(
@@ -484,6 +490,8 @@ class AltiumPcbFootprint:
         width_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion_mils: float | None = None,
     ) -> AltiumPcbArc:
         """
         Add a circular arc to this footprint using mil units and degree angles.
@@ -496,6 +504,8 @@ class AltiumPcbFootprint:
             width_mils: Arc stroke width in mils.
             layer: `PcbLayer` or native layer id.
             v7_layer_id: Optional explicit V7 layer-kind id.
+            solder_mask_expansion_mils: Optional manual solder-mask expansion.
+            paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
         Returns:
             The authored `AltiumPcbArc` record.
@@ -511,6 +521,8 @@ class AltiumPcbFootprint:
             width_mil=width_mils,
             layer=layer,
             v7_layer_id=v7_layer_id,
+            solder_mask_expansion_mil=solder_mask_expansion_mils,
+            paste_mask_expansion_mil=paste_mask_expansion_mils,
         )
 
     def add_fill(
@@ -521,6 +533,8 @@ class AltiumPcbFootprint:
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion_mils: float | None = None,
     ) -> AltiumPcbFill:
         """
         Add a rectangular fill to this footprint using opposite mil corners.
@@ -531,6 +545,8 @@ class AltiumPcbFootprint:
             layer: `PcbLayer` or native layer id.
             rotation_degrees: Fill rotation in degrees.
             v7_layer_id: Optional explicit V7 layer-kind id.
+            solder_mask_expansion_mils: Optional manual solder-mask expansion.
+            paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
         Returns:
             The authored `AltiumPcbFill` record.
@@ -546,6 +562,8 @@ class AltiumPcbFootprint:
             layer=layer,
             rotation_degrees=rotation_degrees,
             v7_layer_id=v7_layer_id,
+            solder_mask_expansion_mil=solder_mask_expansion_mils,
+            paste_mask_expansion_mil=paste_mask_expansion_mils,
         )
 
     def add_via(
@@ -680,6 +698,8 @@ class AltiumPcbFootprint:
         inverted_margin_mils: float = 0.0,
         use_inverted_rectangle: bool = False,
         inverted_rectangle_size_mils: tuple[float, float] | None = None,
+        is_frame: bool = False,
+        frame_size_mils: tuple[float, float] | None = None,
         text_justification: int | PcbTextJustification | None = None,
     ) -> AltiumPcbText:
         """
@@ -721,6 +741,8 @@ class AltiumPcbFootprint:
                 of deriving the box from text extents.
             inverted_rectangle_size_mils: Optional inverted rectangle
                 `(width_mils, height_mils)`.
+            is_frame: Create multiline text-frame text.
+            frame_size_mils: Text-frame `(width_mils, height_mils)`.
             text_justification: Optional `PcbTextJustification` for inverted
                 text.
 
@@ -756,6 +778,8 @@ class AltiumPcbFootprint:
             inverted_margin_mil=inverted_margin_mils,
             use_inverted_rectangle=use_inverted_rectangle,
             inverted_rectangle_size_mil=inverted_rectangle_size_mils,
+            is_frame=is_frame,
+            frame_size_mil=frame_size_mils,
             text_justification=None
             if text_justification is None
             else int(text_justification),

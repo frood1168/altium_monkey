@@ -19,6 +19,7 @@ from .altium_record_pcb__shapebased_region import (
 )
 from .altium_record_types import PcbLayer
 
+
 def parse_region_stream(data: bytes) -> tuple[AltiumPcbRegion, ...]:
     """
     Parse `Regions6/Data` into REGION objects.
@@ -42,7 +43,9 @@ def build_region_stream(regions: Sequence[AltiumPcbRegion]) -> bytes:
     return b"".join(region.serialize_to_binary() for region in regions)
 
 
-def parse_shapebased_region_stream(data: bytes) -> tuple[AltiumPcbShapeBasedRegion, ...]:
+def parse_shapebased_region_stream(
+    data: bytes,
+) -> tuple[AltiumPcbShapeBasedRegion, ...]:
     """
     Parse `ShapeBasedRegions6/Data` into rendered region objects.
     """
@@ -58,7 +61,9 @@ def parse_shapebased_region_stream(data: bytes) -> tuple[AltiumPcbShapeBasedRegi
     return tuple(regions)
 
 
-def build_shapebased_region_stream(regions: Sequence[AltiumPcbShapeBasedRegion]) -> bytes:
+def build_shapebased_region_stream(
+    regions: Sequence[AltiumPcbShapeBasedRegion],
+) -> bytes:
     """
     Serialize rendered region objects back into `ShapeBasedRegions6/Data`.
     """
@@ -76,6 +81,8 @@ def build_authored_region_pair(
     subpoly_index: int = -1,
     union_index: int = 0,
     region_kind: PcbRegionKind | int = PcbRegionKind.COPPER,
+    is_board_cutout: bool = False,
+    is_shapebased: bool = False,
     is_keepout: bool = False,
     keepout_restrictions: int = 0,
 ) -> tuple[AltiumPcbRegion, AltiumPcbShapeBasedRegion]:
@@ -88,7 +95,16 @@ def build_authored_region_pair(
     layer_id = int(layer)
     holes = hole_points_mils or []
     parsed_region_kind = PcbRegionKind(region_kind)
-    properties_kind = 1 if parsed_region_kind == PcbRegionKind.POLYGON_CUTOUT else int(parsed_region_kind)
+    effective_board_cutout = (
+        bool(is_board_cutout) or parsed_region_kind == PcbRegionKind.BOARD_CUTOUT
+    )
+    properties_kind = (
+        1
+        if parsed_region_kind
+        in (PcbRegionKind.BOARD_CUTOUT, PcbRegionKind.POLYGON_CUTOUT)
+        else int(parsed_region_kind)
+    )
+    shapebased_text = "TRUE" if is_shapebased else "FALSE"
     shape_outline = list(outline_vertices or [])
     if not shape_outline:
         for x_mil, y_mil in outline_points_mils:
@@ -112,12 +128,12 @@ def build_authored_region_pair(
     region.is_keepout = bool(is_keepout)
     region.is_polygon_outline = False
     region.kind = properties_kind
-    region.is_board_cutout = parsed_region_kind == PcbRegionKind.BOARD_CUTOUT
-    region.is_shapebased = False
+    region.is_board_cutout = effective_board_cutout
+    region.is_shapebased = bool(is_shapebased)
     region.keepout_restrictions = int(keepout_restrictions)
     region.subpoly_index = int(subpoly_index)
     region._flags1_raw = 0x0C
-    region._skip_bytes_9 = b"\xFF\xFF\xFF\xFF\x00"
+    region._skip_bytes_9 = b"\xff\xff\xff\xff\x00"
     region._skip_bytes_16 = b"\x00\x00"
     region.properties = {
         "V7_LAYER": PcbLayer(layer_id).to_json_name(),
@@ -126,16 +142,22 @@ def build_authored_region_pair(
         "SUBPOLYINDEX": str(int(subpoly_index)),
         "UNIONINDEX": str(int(union_index)),
         "ARCRESOLUTION": "0.5mil",
-        "ISSHAPEBASED": "FALSE",
+        "ISSHAPEBASED": shapebased_text,
         "CAVITYHEIGHT": "0mil",
     }
     region.outline_vertices = [
-        RegionVertex(x_raw=float(int(round(x_mil * 10000.0))), y_raw=float(int(round(y_mil * 10000.0))))
+        RegionVertex(
+            x_raw=float(int(round(x_mil * 10000.0))),
+            y_raw=float(int(round(y_mil * 10000.0))),
+        )
         for x_mil, y_mil in outline_points_mils
     ]
     region.hole_vertices = [
         [
-            RegionVertex(x_raw=float(int(round(x_mil * 10000.0))), y_raw=float(int(round(y_mil * 10000.0))))
+            RegionVertex(
+                x_raw=float(int(round(x_mil * 10000.0))),
+                y_raw=float(int(round(y_mil * 10000.0))),
+            )
             for x_mil, y_mil in hole
         ]
         for hole in holes
@@ -150,13 +172,16 @@ def build_authored_region_pair(
     shape_region.net_index = 0xFFFF if net_index is None else int(net_index)
     shape_region.polygon_index = int(polygon_index)
     shape_region.component_index = 0xFFFF
-    shape_region.kind = parsed_region_kind
-    shape_region.is_shapebased = False
+    shape_region.kind = (
+        PcbRegionKind.BOARD_CUTOUT if effective_board_cutout else parsed_region_kind
+    )
+    shape_region.is_board_cutout = effective_board_cutout
+    shape_region.is_shapebased = bool(is_shapebased)
     shape_region.subpoly_index = int(subpoly_index)
     shape_region.keepout_restrictions = 31
     shape_region.union_index = int(union_index)
     shape_region._flags1_raw = 0x0C
-    shape_region._header_skip5 = b"\xFF\xFF\xFF\xFF\x00"
+    shape_region._header_skip5 = b"\xff\xff\xff\xff\x00"
     shape_region._header_skip2 = b"\x00\x00"
     shape_region._props_has_trailing_null = False
     shape_region.properties = {
@@ -166,7 +191,7 @@ def build_authored_region_pair(
         "SUBPOLYINDEX": str(int(subpoly_index)),
         "UNIONINDEX": str(int(union_index)),
         "ARCRESOLUTION": "0.5mil",
-        "ISSHAPEBASED": "FALSE",
+        "ISSHAPEBASED": shapebased_text,
         "CAVITYHEIGHT": "0mil",
     }
     outline: list[PcbExtendedVertex] = list(shape_outline)

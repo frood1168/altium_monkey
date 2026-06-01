@@ -67,6 +67,7 @@ from .altium_pcb_mask_expansion import (
     resolve_pcb_mask_expansion,
     resolve_pcb_mask_expansion_with_legacy_alias,
 )
+from .altium_pcb_via_authoring import apply_authored_via_surface_policy
 from .altium_pcbdoc_builder_text import (
     PCB_TEXT_BARCODE_MARGIN_MILS,
     PCB_TEXT_BARCODE_MIN_WIDTH_MILS,
@@ -97,47 +98,6 @@ from .altium_record_types import PcbLayer, generate_unique_id
 _PAD_SUBRECORD2_DEFAULT = b"\x00"
 _PAD_SUBRECORD3_DEFAULT = b"\x04|&|0"
 _PAD_SUBRECORD4_DEFAULT = b"\x00"
-_VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU = 40000
-
-
-def _mil_to_iu(value_mil: float) -> int:
-    return int(round(float(value_mil) * 10000.0))
-
-
-def _apply_authored_via_surface_policy(
-    via: AltiumPcbVia,
-    *,
-    is_tent_top: bool | None,
-    is_tent_bottom: bool | None,
-    solder_mask_expansion_top_mil: float | None,
-    solder_mask_expansion_bottom_mil: float | None,
-) -> None:
-    if is_tent_top is not None:
-        via.is_tent_top = bool(is_tent_top)
-    if is_tent_bottom is not None:
-        via.is_tent_bottom = bool(is_tent_bottom)
-
-    if via.is_tent_top or via.is_tent_bottom:
-        via.solder_mask_expansion_mode = 2
-        via.soldermask_expansion_front = _VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU
-        via.soldermask_expansion_back = _VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU
-        via._has_soldermask_expansion_front = True
-        via._has_soldermask_expansion_back = True
-
-    if solder_mask_expansion_top_mil is not None:
-        via.solder_mask_expansion_mode = 2
-        via.soldermask_expansion_front = _mil_to_iu(solder_mask_expansion_top_mil)
-        via._has_soldermask_expansion_front = True
-    if solder_mask_expansion_bottom_mil is not None:
-        via.solder_mask_expansion_mode = 2
-        via.soldermask_expansion_back = _mil_to_iu(solder_mask_expansion_bottom_mil)
-        via._has_soldermask_expansion_back = True
-
-    via.soldermask_expansion_linked = (
-        via._has_soldermask_expansion_front
-        and via._has_soldermask_expansion_back
-        and via.soldermask_expansion_front == via.soldermask_expansion_back
-    )
 
 
 def _build_library_data(header_bytes: bytes, footprint_names: list[str]) -> bytes:
@@ -2565,6 +2525,8 @@ class PcbLibBuilder:
         width_mil: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mil: float | None = None,
+        paste_mask_expansion_mil: float | None = None,
     ) -> AltiumPcbTrack:
         """
         Add a track primitive to a footprint.
@@ -2591,8 +2553,16 @@ class PcbLibBuilder:
         track.is_keepout = False
         track.is_polygon_outline = False
         track.user_routed = True
-        track.solder_mask_expansion = 0
-        track.paste_mask_expansion = 0
+        track.solder_mask_expansion = (
+            0
+            if solder_mask_expansion_mil is None
+            else self._mil_to_internal_units(solder_mask_expansion_mil)
+        )
+        track.paste_mask_expansion = (
+            0
+            if paste_mask_expansion_mil is None
+            else self._mil_to_internal_units(paste_mask_expansion_mil)
+        )
         track.keepout_restrictions = 0
         track._original_content_len = 49
         self._append_primitive(footprint, track)
@@ -2610,6 +2580,8 @@ class PcbLibBuilder:
         width_mil: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mil: float | None = None,
+        paste_mask_expansion_mil: float | None = None,
     ) -> AltiumPcbArc:
         arc = AltiumPcbArc()
         layer_id = int(layer)
@@ -2634,8 +2606,16 @@ class PcbLibBuilder:
         arc.is_keepout = False
         arc.is_polygon_outline = False
         arc.user_routed = True
-        arc.solder_mask_expansion = 0
-        arc.paste_mask_expansion = 0
+        arc.solder_mask_expansion = (
+            0
+            if solder_mask_expansion_mil is None
+            else self._mil_to_internal_units(solder_mask_expansion_mil)
+        )
+        arc.paste_mask_expansion = (
+            0
+            if paste_mask_expansion_mil is None
+            else self._mil_to_internal_units(paste_mask_expansion_mil)
+        )
         arc.keepout_restrictions = 0
         arc._original_content_len = 60
         self._append_primitive(footprint, arc)
@@ -2652,6 +2632,8 @@ class PcbLibBuilder:
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mil: float | None = None,
+        paste_mask_expansion_mil: float | None = None,
     ) -> AltiumPcbFill:
         fill = AltiumPcbFill()
         layer_id = int(layer)
@@ -2674,8 +2656,16 @@ class PcbLibBuilder:
         fill.is_keepout = False
         fill.is_polygon_outline = False
         fill.user_routed = True
-        fill.solder_mask_expansion = 0
-        fill.paste_mask_expansion = 0
+        fill.solder_mask_expansion = (
+            0
+            if solder_mask_expansion_mil is None
+            else self._mil_to_internal_units(solder_mask_expansion_mil)
+        )
+        fill.paste_mask_expansion = (
+            0
+            if paste_mask_expansion_mil is None
+            else self._mil_to_internal_units(paste_mask_expansion_mil)
+        )
         fill.keepout_restrictions = 0
         fill._original_content_len = 50
         self._append_primitive(footprint, fill)
@@ -2717,7 +2707,7 @@ class PcbLibBuilder:
         ):
             if 1 <= layer_id <= 32:
                 via.diameter_by_layer[layer_id - 1] = via.diameter
-        _apply_authored_via_surface_policy(
+        apply_authored_via_surface_policy(
             via,
             is_tent_top=is_tent_top,
             is_tent_bottom=is_tent_bottom,
@@ -2826,6 +2816,8 @@ class PcbLibBuilder:
         inverted_margin_mil: float = 0.0,
         use_inverted_rectangle: bool = False,
         inverted_rectangle_size_mil: tuple[float, float] | None = None,
+        is_frame: bool = False,
+        frame_size_mil: tuple[float, float] | None = None,
         text_justification: int | None = None,
     ) -> AltiumPcbText:
         """
@@ -2861,6 +2853,8 @@ class PcbLibBuilder:
             inverted_margin_mils=inverted_margin_mil,
             use_inverted_rectangle=use_inverted_rectangle,
             inverted_rectangle_size_mils=inverted_rectangle_size_mil,
+            is_frame=is_frame,
+            frame_size_mils=frame_size_mil,
             text_justification=text_justification,
         )
         text_record.net_index = None

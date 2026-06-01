@@ -1,3 +1,53 @@
+# altium-monkey 2026.06.01-2 Release Notes
+
+Package version: `2026.6.1.post1`
+
+`2026.06.01-2` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.1.post1`.
+
+This second 2026.06.01 release expands public PcbDoc/PcbLib authoring parity
+for downstream board generation workflows. The changes are additive and
+preserve existing documented APIs.
+
+## PcbDoc Writer API
+
+`AltiumPcbDoc.add_via(...)` now mirrors PcbLib via surface controls by
+accepting independent signed top/front and bottom/back solder-mask expansion
+values in addition to top/bottom tenting flags.
+
+`AltiumPcbDoc.add_pad(...)` and `PcbDocBuilder.add_pad(...)` now support
+local-stack pad body geometry. Callers can provide top/mid/bottom shape and
+size overrides; the writer emits native `pad_mode=1` and preserves the parsed
+per-layer fields on round trip.
+
+`AltiumPcbDoc.add_pad(...)` now also accepts the structured
+`PcbMaskExpansion` / `PcbMaskExpansionMode` solder/paste mask-expansion
+contract while preserving existing manual mil aliases.
+
+PcbDoc region authoring exposes region kind, board-cutout, shape-based,
+keepout, and subpoly metadata.
+
+## PcbLib Writer API
+
+PcbLib track, arc, and fill authoring now accepts solder-mask and paste-mask
+expansion values.
+
+PcbLib text authoring accepts frame options for authored non-barcode text,
+matching the PcbDoc text surface where the native format supports it.
+
+## Validation
+
+Focused Python package tests, generated-public-package tests, and native C++
+tests cover the shared primitive option cleanup, including component-body option
+parity and R082-style local stack pad geometry.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new writer controls are
+additive.
+
+---
+
 # altium-monkey 2026.06.01 Release Notes
 
 Package version: `2026.6.1`

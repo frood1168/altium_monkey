@@ -1885,6 +1885,32 @@ def test_pcbdoc_via_ipc4761_examples_write_expected_via_state(
     assert mutation_summary["matched_via_count"] == len(matched_vias)
 
 
+def test_pcbdoc_public_via_surface_policy_roundtrip(tmp_path: Path) -> None:
+    from altium_monkey import AltiumPcbDoc
+
+    pcbdoc = AltiumPcbDoc()
+    pcbdoc.add_via(
+        position_mils=(100.0, 0.0),
+        diameter_mils=30.0,
+        hole_size_mils=12.0,
+        is_tent_top=True,
+        is_tent_bottom=False,
+        solder_mask_expansion_top_mils=-3.0,
+        solder_mask_expansion_bottom_mils=5.0,
+    )
+
+    output_path = tmp_path / "public_via_surface_policy.PcbDoc"
+    pcbdoc.save(output_path)
+    parsed = AltiumPcbDoc.from_file(output_path)
+    assert len(parsed.vias) == 1
+    via = parsed.vias[0]
+    assert via.is_tent_top is True
+    assert via.is_tent_bottom is False
+    assert via.solder_mask_expansion_mode == 2
+    assert via.soldermask_expansion_front == -30000
+    assert via.soldermask_expansion_back == 50000
+
+
 def test_pcbdoc_differential_pair_examples_write_expected_state(
     check_examples_root: Path,
 ) -> None:
@@ -2196,6 +2222,7 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
         PadShape,
         PcbLayer,
         PcbMaskExpansion,
+        PcbTextJustification,
         PcbTextKind,
     )
 
@@ -2238,6 +2265,28 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
         solder_mask_expansion_top_mils=-3.0,
         solder_mask_expansion_bottom_mils=5.0,
     )
+    footprint.add_track(
+        (0.0, 50.0),
+        (100.0, 50.0),
+        width_mils=6.0,
+        solder_mask_expansion_mils=1.5,
+        paste_mask_expansion_mils=-0.5,
+    )
+    footprint.add_arc(
+        center_mils=(150.0, 50.0),
+        radius_mils=20.0,
+        start_angle_degrees=0.0,
+        end_angle_degrees=180.0,
+        width_mils=5.0,
+        solder_mask_expansion_mils=2.0,
+        paste_mask_expansion_mils=0.018,
+    )
+    footprint.add_fill(
+        (200.0, 40.0),
+        (240.0, 70.0),
+        solder_mask_expansion_mils=3.0,
+        paste_mask_expansion_mils=0.019,
+    )
     footprint.add_text(
         text="SERIF",
         position_mils=(0.0, 100.0),
@@ -2253,6 +2302,14 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
         bold=True,
         is_inverted=True,
         inverted_margin_mils=5.0,
+    )
+    footprint.add_text(
+        text="FRAME",
+        position_mils=(0.0, 300.0),
+        height_mils=60.0,
+        is_frame=True,
+        frame_size_mils=(300.0, 120.0),
+        text_justification=PcbTextJustification.CENTER_CENTER,
     )
 
     output_path = tmp_path / "public_mask_text.PcbLib"
@@ -2282,6 +2339,12 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
     assert parsed_footprint.vias[0].is_tent_bottom is False
     assert parsed_footprint.vias[0].soldermask_expansion_front == -30000
     assert parsed_footprint.vias[0].soldermask_expansion_back == 50000
+    assert parsed_footprint.tracks[0].solder_mask_expansion == 15000
+    assert parsed_footprint.tracks[0].paste_mask_expansion == -5000
+    assert parsed_footprint.arcs[0].solder_mask_expansion == 20000
+    assert parsed_footprint.arcs[0].paste_mask_expansion == 180
+    assert parsed_footprint.fills[0].solder_mask_expansion == 30000
+    assert parsed_footprint.fills[0].paste_mask_expansion == 190
     assert texts_by_content["SERIF"].font_type == 0
     assert texts_by_content["SERIF"].stroke_font_type == 3
     assert texts_by_content["TT"].font_type == 1
@@ -2289,6 +2352,102 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
     assert texts_by_content["TT"].is_bold is True
     assert texts_by_content["TT"].is_inverted is True
     assert texts_by_content["TT"].margin_border_width == 50000
+    assert texts_by_content["FRAME"].is_frame is True
+    assert texts_by_content["FRAME"].textbox_rect_width == 3000000
+    assert texts_by_content["FRAME"].textbox_rect_height == 1200000
+
+
+def test_pcbdoc_public_shared_primitive_option_roundtrip(tmp_path: Path) -> None:
+    from altium_monkey import (
+        AltiumPcbDoc,
+        PadShape,
+        PcbLayer,
+        PcbMaskExpansion,
+        PcbRegionKind,
+    )
+
+    pcbdoc = AltiumPcbDoc()
+    pcbdoc.add_pad(
+        designator="P1",
+        position_mils=(0.0, 0.0),
+        width_mils=40.0,
+        height_mils=30.0,
+        solder_mask_expansion=PcbMaskExpansion.manual(4.0),
+        paste_mask_expansion_mode="none",
+    )
+    pcbdoc.add_pad(
+        designator="LS",
+        position_mils=(80.0, 0.0),
+        width_mils=60.0,
+        height_mils=60.0,
+        layer=PcbLayer.MULTI_LAYER,
+        shape=PadShape.CIRCLE,
+        mid_shape=PadShape.RECTANGLE,
+        mid_width_mils=50.0,
+        mid_height_mils=50.0,
+        bottom_shape=PadShape.OCTAGONAL,
+        bottom_width_mils=55.0,
+        bottom_height_mils=55.0,
+        hole_size_mils=30.0,
+        plated=True,
+    )
+    pcbdoc.add_track(
+        (0.0, 50.0),
+        (100.0, 50.0),
+        width_mils=6.0,
+        solder_mask_expansion_mils=1.5,
+        paste_mask_expansion_mils=-0.5,
+    )
+    pcbdoc.add_arc(
+        center_mils=(150.0, 50.0),
+        radius_mils=20.0,
+        start_angle_degrees=0.0,
+        end_angle_degrees=180.0,
+        width_mils=5.0,
+        solder_mask_expansion_mils=2.0,
+        paste_mask_expansion_mils=0.018,
+    )
+    pcbdoc.add_fill(
+        (200.0, 40.0),
+        (240.0, 70.0),
+        solder_mask_expansion_mils=3.0,
+        paste_mask_expansion_mils=0.019,
+    )
+    pcbdoc.add_region(
+        outline_points_mils=[
+            (0.0, 100.0),
+            (100.0, 100.0),
+            (100.0, 200.0),
+            (0.0, 200.0),
+        ],
+        kind=PcbRegionKind.BOARD_CUTOUT,
+        is_board_cutout=True,
+        is_shapebased=True,
+        subpoly_index=3,
+    )
+
+    output_path = tmp_path / "public_shared_options.PcbDoc"
+    pcbdoc.save(output_path)
+    parsed = AltiumPcbDoc.from_file(output_path)
+
+    assert parsed.pads[0].soldermask_expansion_mode == 2
+    assert parsed.pads[0].soldermask_expansion_manual == 40000
+    assert parsed.pads[0].pastemask_expansion_mode == 0
+    assert parsed.pads[1].pad_mode == 1
+    assert parsed.pads[1].mid_shape == PadShape.RECTANGLE
+    assert parsed.pads[1].mid_width == 500000
+    assert parsed.pads[1].bot_shape == PadShape.OCTAGONAL
+    assert parsed.pads[1].bot_width == 550000
+    assert parsed.tracks[0].solder_mask_expansion == 15000
+    assert parsed.tracks[0].paste_mask_expansion == -5000
+    assert parsed.arcs[0].solder_mask_expansion == 20000
+    assert parsed.arcs[0].paste_mask_expansion == 180
+    assert parsed.fills[0].solder_mask_expansion == 30000
+    assert parsed.fills[0].paste_mask_expansion == 190
+    assert parsed.regions[0].is_board_cutout is True
+    assert parsed.regions[0].is_shapebased is True
+    assert parsed.regions[0].subpoly_index == 3
+    assert parsed.shapebased_regions[0].properties["ISBOARDCUTOUT"] == "TRUE"
 
 
 def test_pcblib_power_resistor_synthesis_writes_parseable_libraries(

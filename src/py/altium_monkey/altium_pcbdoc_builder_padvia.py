@@ -13,12 +13,21 @@ from typing import Sequence
 
 from .altium_pcb_enums import PadHoleShape, PadShape
 from .altium_pcb_pad_authoring import (
+    OptionalPadShapeInput,
     ROUND_HOLE_SHAPE,
     SQUARE_HOLE_SHAPE,
     SLOT_HOLE_SHAPE,
+    apply_authored_pad_local_stack,
     apply_authored_pad_shape,
     normalize_pad_hole_shape,
     validate_non_negative,
+)
+from .altium_pcb_mask_expansion import (
+    PcbMaskExpansionInput,
+    PcbMaskExpansionMode,
+    PcbMaskExpansionModeInput,
+    apply_pcb_mask_expansion_to_pad,
+    resolve_pcb_mask_expansion_with_manual_alias,
 )
 from .altium_record_pcb__pad import AltiumPcbPad
 from .altium_record_pcb__via import AltiumPcbVia
@@ -88,10 +97,24 @@ def build_authored_pad(
     hole_size_mils: float = 0.0,
     plated: bool | None = None,
     corner_radius_percent: int | None = None,
+    top_shape: OptionalPadShapeInput = None,
+    top_width_mils: float | None = None,
+    top_height_mils: float | None = None,
+    mid_shape: OptionalPadShapeInput = None,
+    mid_width_mils: float | None = None,
+    mid_height_mils: float | None = None,
+    bottom_shape: OptionalPadShapeInput = None,
+    bottom_width_mils: float | None = None,
+    bottom_height_mils: float | None = None,
+    pad_mode: int | None = None,
     slot_length_mils: float = 0.0,
     slot_rotation_degrees: float = 0.0,
     hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
+    solder_mask_expansion: PcbMaskExpansionInput = None,
+    solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
     solder_mask_expansion_mils: float | None = None,
+    paste_mask_expansion: PcbMaskExpansionInput = None,
+    paste_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
     paste_mask_expansion_mils: float | None = None,
     hole_positive_tolerance_mils: float | None = None,
     hole_negative_tolerance_mils: float | None = None,
@@ -155,6 +178,35 @@ def build_authored_pad(
     pad.pad_mode = 0
     pad.user_routed = True
     pad._flags = 0x000C
+    apply_authored_pad_local_stack(
+        pad,
+        base_shape=shape,
+        base_width_iu=width_iu,
+        base_height_iu=height_iu,
+        top_shape=top_shape,
+        top_width_iu=None
+        if top_width_mils is None
+        else pad._to_internal_units(top_width_mils),
+        top_height_iu=None
+        if top_height_mils is None
+        else pad._to_internal_units(top_height_mils),
+        mid_shape=mid_shape,
+        mid_width_iu=None
+        if mid_width_mils is None
+        else pad._to_internal_units(mid_width_mils),
+        mid_height_iu=None
+        if mid_height_mils is None
+        else pad._to_internal_units(mid_height_mils),
+        bottom_shape=bottom_shape,
+        bottom_width_iu=None
+        if bottom_width_mils is None
+        else pad._to_internal_units(bottom_width_mils),
+        bottom_height_iu=None
+        if bottom_height_mils is None
+        else pad._to_internal_units(bottom_height_mils),
+        pad_mode=pad_mode,
+        corner_radius_percent=corner_radius_percent,
+    )
     pad._subrecord2_data = _PAD_SUBRECORD2_DEFAULT
     pad._subrecord3_data = _PAD_SUBRECORD3_DEFAULT
     pad._subrecord4_data = _PAD_SUBRECORD4_DEFAULT
@@ -166,18 +218,34 @@ def build_authored_pad(
         pad.hole_shape = SQUARE_HOLE_SHAPE
     else:
         pad.hole_shape = ROUND_HOLE_SHAPE
-    if solder_mask_expansion_mils is not None:
-        pad.soldermask_expansion_mode = 2
-        pad.soldermask_expansion_manual = pad._to_internal_units(
-            solder_mask_expansion_mils
+    if any(
+        item is not None
+        for item in (
+            solder_mask_expansion,
+            solder_mask_expansion_mode,
+            solder_mask_expansion_mils,
+            paste_mask_expansion,
+            paste_mask_expansion_mode,
+            paste_mask_expansion_mils,
         )
-        pad._has_mask_expansion = True
-    if paste_mask_expansion_mils is not None:
-        pad.pastemask_expansion_mode = 2
-        pad.pastemask_expansion_manual = pad._to_internal_units(
-            paste_mask_expansion_mils
+    ):
+        apply_pcb_mask_expansion_to_pad(
+            pad,
+            paste=resolve_pcb_mask_expansion_with_manual_alias(
+                value=paste_mask_expansion,
+                mode=paste_mask_expansion_mode,
+                expansion_mils=paste_mask_expansion_mils,
+                field_name="paste_mask_expansion",
+                default_mode=PcbMaskExpansionMode.NONE,
+            ),
+            solder=resolve_pcb_mask_expansion_with_manual_alias(
+                value=solder_mask_expansion,
+                mode=solder_mask_expansion_mode,
+                expansion_mils=solder_mask_expansion_mils,
+                field_name="solder_mask_expansion",
+                default_mode=PcbMaskExpansionMode.NONE,
+            ),
         )
-        pad._has_mask_expansion = True
     if (
         hole_positive_tolerance_mils is not None
         or hole_negative_tolerance_mils is not None

@@ -15,6 +15,7 @@ SQUARE_HOLE_SHAPE = int(PadHoleShape.SQUARE)
 SLOT_HOLE_SHAPE = 2
 PadHoleShapeInput = PadHoleShape | int | str
 PadShapeInput = PadShape | int | str
+OptionalPadShapeInput = PadShapeInput | None
 
 
 def validate_non_negative(value: float, name: str) -> None:
@@ -137,6 +138,167 @@ def apply_authored_pad_shape(
             corner_pct,
         )
     ]
+
+
+def apply_authored_pad_local_stack(
+    pad: AltiumPcbPad,
+    *,
+    base_shape: PadShapeInput,
+    base_width_iu: int,
+    base_height_iu: int,
+    top_shape: OptionalPadShapeInput = None,
+    top_width_iu: int | None = None,
+    top_height_iu: int | None = None,
+    mid_shape: OptionalPadShapeInput = None,
+    mid_width_iu: int | None = None,
+    mid_height_iu: int | None = None,
+    bottom_shape: OptionalPadShapeInput = None,
+    bottom_width_iu: int | None = None,
+    bottom_height_iu: int | None = None,
+    pad_mode: int | None = None,
+    corner_radius_percent: int | None = None,
+) -> None:
+    """
+    Apply public top/mid/bottom pad-body options to native local-stack fields.
+
+    Altium's local-stack mode stores the top, middle, and bottom pad body
+    geometry in SubRecord 5, with inner-layer body arrays in SubRecord 6. The
+    public API keeps the simpler single-body pad path untouched and only enters
+    this mode when a caller supplies a layer-specific override or explicitly
+    requests `pad_mode=1`.
+    """
+    local_stack_values = (
+        top_shape,
+        top_width_iu,
+        top_height_iu,
+        mid_shape,
+        mid_width_iu,
+        mid_height_iu,
+        bottom_shape,
+        bottom_width_iu,
+        bottom_height_iu,
+    )
+    has_local_stack_override = any(value is not None for value in local_stack_values)
+    if pad_mode is None and not has_local_stack_override:
+        return
+
+    resolved_mode = 1 if pad_mode is None else int(pad_mode)
+    if resolved_mode not in (0, 1):
+        raise ValueError("pad_mode must be 0 or 1")
+    if resolved_mode == 0:
+        if has_local_stack_override:
+            raise ValueError("top/mid/bottom pad body overrides require pad_mode=1")
+        return
+
+    base = normalize_pad_shape(base_shape)
+    if base == PadShape.CUSTOM:
+        raise ValueError("local-stack pad body overrides do not support custom shape")
+
+    corner_pct = _normalize_corner_radius_percent(corner_radius_percent)
+    pad.pad_mode = 1
+
+    top_body = _resolve_layer_body(
+        shape=top_shape,
+        width_iu=top_width_iu,
+        height_iu=top_height_iu,
+        fallback_shape=base,
+        fallback_width_iu=base_width_iu,
+        fallback_height_iu=base_height_iu,
+        label="top",
+    )
+    mid_body = _resolve_layer_body(
+        shape=mid_shape,
+        width_iu=mid_width_iu,
+        height_iu=mid_height_iu,
+        fallback_shape=base,
+        fallback_width_iu=base_width_iu,
+        fallback_height_iu=base_height_iu,
+        label="mid",
+    )
+    bottom_body = _resolve_layer_body(
+        shape=bottom_shape,
+        width_iu=bottom_width_iu,
+        height_iu=bottom_height_iu,
+        fallback_shape=base,
+        fallback_width_iu=base_width_iu,
+        fallback_height_iu=base_height_iu,
+        label="bottom",
+    )
+
+    pad.top_width = top_body.width_iu
+    pad.top_height = top_body.height_iu
+    pad.mid_width = mid_body.width_iu
+    pad.mid_height = mid_body.height_iu
+    pad.bot_width = bottom_body.width_iu
+    pad.bot_height = bottom_body.height_iu
+
+    pad.top_shape = _native_layer_shape(top_body.shape)
+    pad.mid_shape = _native_layer_shape(mid_body.shape)
+    pad.bot_shape = _native_layer_shape(bottom_body.shape)
+    pad.inner_size_x = [mid_body.width_iu] * 29
+    pad.inner_size_y = [mid_body.height_iu] * 29
+    pad.inner_shape = [pad.mid_shape] * 29
+
+    if has_local_stack_override:
+        pad.alt_shape = [0] * 32
+        pad.corner_radius = [0] * 32
+        pad.full_stack_layer_entries = []
+
+    _apply_rounded_layer_markers(pad, top_body.shape, (0,), corner_pct)
+    _apply_rounded_layer_markers(pad, mid_body.shape, range(1, 30), corner_pct)
+    _apply_rounded_layer_markers(pad, bottom_body.shape, (31,), corner_pct)
+
+
+class _PadLayerBody:
+    def __init__(self, shape: PadShape, width_iu: int, height_iu: int) -> None:
+        self.shape = shape
+        self.width_iu = width_iu
+        self.height_iu = height_iu
+
+
+def _resolve_layer_body(
+    *,
+    shape: OptionalPadShapeInput,
+    width_iu: int | None,
+    height_iu: int | None,
+    fallback_shape: PadShape,
+    fallback_width_iu: int,
+    fallback_height_iu: int,
+    label: str,
+) -> _PadLayerBody:
+    resolved_shape = fallback_shape if shape is None else normalize_pad_shape(shape)
+    if resolved_shape == PadShape.CUSTOM:
+        raise ValueError(f"{label}_shape does not support custom shape")
+    resolved_width = fallback_width_iu if width_iu is None else int(width_iu)
+    resolved_height = fallback_height_iu if height_iu is None else int(height_iu)
+    if resolved_width <= 0:
+        raise ValueError(f"{label}_width_mils must be positive")
+    if resolved_height <= 0:
+        raise ValueError(f"{label}_height_mils must be positive")
+    return _PadLayerBody(resolved_shape, resolved_width, resolved_height)
+
+
+def _native_layer_shape(shape: PadShape) -> int:
+    if shape == PadShape.ROUNDED_RECTANGLE:
+        return int(PadShape.CIRCLE)
+    return int(shape)
+
+
+def _apply_rounded_layer_markers(
+    pad: AltiumPcbPad,
+    shape: PadShape,
+    layer_indices: range | tuple[int, ...],
+    corner_pct: int,
+) -> None:
+    if shape != PadShape.ROUNDED_RECTANGLE:
+        return
+    if len(pad.alt_shape) < 32:
+        pad.alt_shape = [0] * 32
+    if len(pad.corner_radius) < 32:
+        pad.corner_radius = [0] * 32
+    for index in layer_indices:
+        pad.alt_shape[index] = ROUNDED_RECTANGLE_ALT_SHAPE
+        pad.corner_radius[index] = corner_pct
 
 
 def _normalize_corner_radius_percent(value: int | None) -> int:
