@@ -118,6 +118,12 @@ methods until metric helper functions are added.
 Low-level PCB record fields may expose Altium internal integer units. Prefer
 public helper methods for authored geometry.
 
+## Pads
+
+`AltiumPcbDoc.add_pad(...)` accepts `hole_shape="round"`, `"square"`, or
+`"slot"` through `PadHoleShape`. Square holes require a positive drill size.
+Slotted holes require `slot_length_mils`.
+
 ## Text
 
 `AltiumPcbDoc.add_text(...)` accepts `font_kind="stroke"`, `"truetype"`, or

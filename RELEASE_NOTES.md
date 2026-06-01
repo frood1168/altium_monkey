@@ -1,3 +1,34 @@
+# altium-monkey 2026.06.01 Release Notes
+
+Package version: `2026.6.1`
+
+`2026.06.01` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.1`.
+
+This release adds PcbLib writer controls needed by downstream footprint and
+library-generation workflows, so callers no longer need to patch native records
+after using the public authoring API.
+
+## PcbLib Writer API
+
+`AltiumPcbFootprint.add_via(...)` now accepts top/bottom tenting flags and
+independent top/bottom solder-mask expansion values.
+
+`AltiumPcbFootprint.add_custom_pad(...)` now exposes custom-pad anchor width,
+height, rotation, and shape. Generated custom-pad regions now use the authored
+anchor pad's native 1-based `PADINDEX`, including when the custom pad is not
+the first pad in a footprint.
+
+`AltiumPcbFootprint.add_pad(...)` and `AltiumPcbDoc.add_pad(...)` now expose
+the public `PadHoleShape` enum for round, square, and slotted drill holes.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new writer controls are
+additive.
+
+---
+
 # altium-monkey 2026.05.29 Release Notes
 
 Package version: `2026.5.29`

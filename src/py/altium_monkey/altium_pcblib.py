@@ -31,6 +31,7 @@ from .altium_pcb_extended_primitive_information import (
 )
 from .altium_ole import AltiumOleFile, AltiumOleWriter
 from .altium_pcb_enums import (
+    PadHoleShape,
     PadShape,
     PcbBarcodeKind,
     PcbBarcodeRenderMode,
@@ -259,13 +260,14 @@ class AltiumPcbFootprint:
         width_mils: float,
         height_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP,
-        shape: int | PadShape = PadShape.RECTANGLE,
+        shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mils: float = 0.0,
         plated: bool | None = None,
         corner_radius_percent: int | None = None,
         slot_length_mils: float = 0.0,
         slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
         solder_mask_expansion: PcbMaskExpansionInput = None,
         solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -291,6 +293,8 @@ class AltiumPcbFootprint:
             corner_radius_percent: Optional rounded-rectangle corner radius percentage.
             slot_length_mils: Optional total slotted-hole length in mils.
             slot_rotation_degrees: Optional slotted-hole rotation in degrees.
+            hole_shape: Drill shape: `"round"`, `"square"`, or `"slot"`.
+                Slots also require `slot_length_mils`.
             solder_mask_expansion: Optional `PcbMaskExpansion`, mode string, or
                 native mode id for solder-mask expansion.
             solder_mask_expansion_mode: Optional solder-mask mode string/id:
@@ -320,13 +324,14 @@ class AltiumPcbFootprint:
             width_mil=width_mils,
             height_mil=height_mils,
             layer=layer,
-            shape=int(shape),
+            shape=shape,
             rotation_degrees=rotation_degrees,
             hole_size_mil=hole_size_mils,
             plated=plated,
             corner_radius_percent=corner_radius_percent,
             slot_length_mil=slot_length_mils,
             slot_rotation_degrees=slot_rotation_degrees,
+            hole_shape=hole_shape,
             solder_mask_expansion=solder_mask_expansion,
             solder_mask_expansion_mode=solder_mask_expansion_mode,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
@@ -346,6 +351,11 @@ class AltiumPcbFootprint:
         layer: int | PcbLayer = PcbLayer.TOP,
         offset_mils: PcbPointMils = (0.0, 0.0),
         anchor_diameter_mils: float = 1.0,
+        anchor_width_mils: float | None = None,
+        anchor_height_mils: float | None = None,
+        anchor_rotation_degrees: float = 0.0,
+        anchor_shape: int | str | PadShape = PadShape.CIRCLE,
+        pad_index: int | None = None,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
         outline_points_are_local: bool = True,
         paste_rule_expansion: bool | None = None,
@@ -367,6 +377,14 @@ class AltiumPcbFootprint:
             layer: Target PCB layer.
             offset_mils: Offset from anchor center to custom shape center.
             anchor_diameter_mils: Diameter of the small anchor pad in mils.
+            anchor_width_mils: Optional anchor pad width in mils. Defaults to
+                `anchor_diameter_mils`.
+            anchor_height_mils: Optional anchor pad height in mils. Defaults to
+                `anchor_diameter_mils`.
+            anchor_rotation_degrees: Anchor pad rotation in degrees.
+            anchor_shape: Anchor pad shape.
+            pad_index: Optional 1-based native PADINDEX override for advanced
+                compatibility. Omit for the actual authored pad index.
             hole_points_mils: Optional cutout polygons in mils.
             outline_points_are_local: Treat outline points as shape-local offsets.
             paste_rule_expansion: Compatibility alias. `True` maps to
@@ -403,6 +421,11 @@ class AltiumPcbFootprint:
             offset_x_mil=offset_x_mils,
             offset_y_mil=offset_y_mils,
             anchor_diameter_mil=anchor_diameter_mils,
+            anchor_width_mil=anchor_width_mils,
+            anchor_height_mil=anchor_height_mils,
+            anchor_rotation_degrees=anchor_rotation_degrees,
+            anchor_shape=anchor_shape,
+            pad_index=pad_index,
             hole_points_mil=hole_points_mils,
             outline_points_are_local=outline_points_are_local,
             paste_rule_expansion=paste_rule_expansion,
@@ -535,6 +558,10 @@ class AltiumPcbFootprint:
         layer_end: int | PcbLayer = PcbLayer.BOTTOM,
         hole_positive_tolerance_mils: float | None = None,
         hole_negative_tolerance_mils: float | None = None,
+        is_tent_top: bool | None = None,
+        is_tent_bottom: bool | None = None,
+        solder_mask_expansion_top_mils: float | None = None,
+        solder_mask_expansion_bottom_mils: float | None = None,
     ) -> AltiumPcbVia:
         """
         Add a via primitive to this footprint using mil units.
@@ -549,6 +576,12 @@ class AltiumPcbFootprint:
                 in mils.
             hole_negative_tolerance_mils: Optional lower drill-hole tolerance
                 magnitude in mils.
+            is_tent_top: Optional top-side tenting flag.
+            is_tent_bottom: Optional bottom-side tenting flag.
+            solder_mask_expansion_top_mils: Optional signed top/front manual
+                solder-mask expansion in mils.
+            solder_mask_expansion_bottom_mils: Optional signed bottom/back
+                manual solder-mask expansion in mils.
 
         Returns:
             The authored `AltiumPcbVia` record.
@@ -564,6 +597,10 @@ class AltiumPcbFootprint:
             layer_end=layer_end,
             hole_positive_tolerance_mil=hole_positive_tolerance_mils,
             hole_negative_tolerance_mil=hole_negative_tolerance_mils,
+            is_tent_top=is_tent_top,
+            is_tent_bottom=is_tent_bottom,
+            solder_mask_expansion_top_mil=solder_mask_expansion_top_mils,
+            solder_mask_expansion_bottom_mil=solder_mask_expansion_bottom_mils,
         )
 
     def add_region(

@@ -94,6 +94,7 @@ from .altium_record_pcb__shapebased_region import (
     PcbExtendedVertex,
 )
 from .altium_pcb_enums import (
+    PadHoleShape,
     PadShape,
     PcbBarcodeKind,
     PcbBarcodeRenderMode,
@@ -2145,7 +2146,7 @@ class AltiumPcbDoc:
         width_mils: float,
         height_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP,
-        shape: int | PadShape = PadShape.RECTANGLE,
+        shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mils: float = 0.0,
         plated: bool | None = None,
@@ -2153,6 +2154,7 @@ class AltiumPcbDoc:
         corner_radius_percent: int | None = None,
         slot_length_mils: float = 0.0,
         slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
         solder_mask_expansion_mils: float | None = None,
         paste_mask_expansion_mils: float | None = None,
         hole_positive_tolerance_mils: float | None = None,
@@ -2186,6 +2188,8 @@ class AltiumPcbDoc:
             corner_radius_percent: Rounded-rectangle corner radius percentage.
             slot_length_mils: Optional total slot length in mils.
             slot_rotation_degrees: Slot rotation in degrees.
+            hole_shape: Drill shape: `"round"`, `"square"`, or `"slot"`.
+                Slots also require `slot_length_mils`.
             solder_mask_expansion_mils: Optional manual solder-mask expansion
                 in mils.
             paste_mask_expansion_mils: Optional manual paste-mask expansion in
@@ -2207,7 +2211,7 @@ class AltiumPcbDoc:
             width_mils=width_mils,
             height_mils=height_mils,
             layer=layer,
-            shape=int(shape),
+            shape=shape,
             rotation_degrees=rotation_degrees,
             hole_size_mils=hole_size_mils,
             plated=plated,
@@ -2215,6 +2219,7 @@ class AltiumPcbDoc:
             corner_radius_percent=corner_radius_percent,
             slot_length_mils=slot_length_mils,
             slot_rotation_degrees=slot_rotation_degrees,
+            hole_shape=hole_shape,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
             hole_positive_tolerance_mils=hole_positive_tolerance_mils,

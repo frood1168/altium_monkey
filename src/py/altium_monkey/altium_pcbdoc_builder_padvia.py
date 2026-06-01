@@ -11,10 +11,13 @@ import struct
 import uuid
 from typing import Sequence
 
-from .altium_pcb_enums import PadShape
+from .altium_pcb_enums import PadHoleShape, PadShape
 from .altium_pcb_pad_authoring import (
+    ROUND_HOLE_SHAPE,
+    SQUARE_HOLE_SHAPE,
     SLOT_HOLE_SHAPE,
     apply_authored_pad_shape,
+    normalize_pad_hole_shape,
     validate_non_negative,
 )
 from .altium_record_pcb__pad import AltiumPcbPad
@@ -80,13 +83,14 @@ def build_authored_pad(
     width_mils: float,
     height_mils: float,
     layer: int | PcbLayer = PcbLayer.TOP,
-    shape: int | PadShape = PadShape.RECTANGLE,
+    shape: int | str | PadShape = PadShape.RECTANGLE,
     rotation_degrees: float = 0.0,
     hole_size_mils: float = 0.0,
     plated: bool | None = None,
     corner_radius_percent: int | None = None,
     slot_length_mils: float = 0.0,
     slot_rotation_degrees: float = 0.0,
+    hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
     solder_mask_expansion_mils: float | None = None,
     paste_mask_expansion_mils: float | None = None,
     hole_positive_tolerance_mils: float | None = None,
@@ -111,6 +115,15 @@ def build_authored_pad(
         raise ValueError(
             "slot_length_mils must be greater than or equal to hole_size_mils"
         )
+    resolved_hole_shape = normalize_pad_hole_shape(hole_shape)
+    if slot_iu > 0:
+        if resolved_hole_shape not in (PadHoleShape.ROUND, PadHoleShape.SLOT):
+            raise ValueError("slotted pads cannot use square hole_shape")
+        resolved_hole_shape = PadHoleShape.SLOT
+    elif resolved_hole_shape == PadHoleShape.SLOT:
+        raise ValueError("hole_shape='slot' requires a positive slot_length_mils")
+    elif hole_iu <= 0 and resolved_hole_shape != PadHoleShape.ROUND:
+        raise ValueError("non-round hole_shape requires a positive hole_size_mils")
 
     pad.designator = str(designator)
     pad.layer = layer_id
@@ -149,6 +162,10 @@ def build_authored_pad(
         pad.hole_shape = SLOT_HOLE_SHAPE
         pad.slot_size = slot_iu
         pad.slot_rotation = float(slot_rotation_degrees)
+    elif resolved_hole_shape == PadHoleShape.SQUARE:
+        pad.hole_shape = SQUARE_HOLE_SHAPE
+    else:
+        pad.hole_shape = ROUND_HOLE_SHAPE
     if solder_mask_expansion_mils is not None:
         pad.soldermask_expansion_mode = 2
         pad.soldermask_expansion_manual = pad._to_internal_units(

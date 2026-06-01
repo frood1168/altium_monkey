@@ -2190,7 +2190,14 @@ def test_pcblib_add_free_3d_extruded_writes_component_body(
 
 
 def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None:
-    from altium_monkey import AltiumPcbLib, PcbMaskExpansion, PcbTextKind
+    from altium_monkey import (
+        AltiumPcbLib,
+        PadHoleShape,
+        PadShape,
+        PcbLayer,
+        PcbMaskExpansion,
+        PcbTextKind,
+    )
 
     pcblib = AltiumPcbLib()
     footprint = pcblib.add_footprint("PUBLIC_MASK_TEXT")
@@ -2206,7 +2213,30 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
         designator="2",
         position_mils=(100.0, 0.0),
         outline_points_mils=[(-10.0, -10.0), (10.0, -10.0), (0.0, 10.0)],
+        anchor_width_mils=14.0,
+        anchor_height_mils=8.0,
+        anchor_rotation_degrees=37.0,
+        anchor_shape=PadShape.RECTANGLE,
         paste_mask_expansion_mode="none",
+    )
+    footprint.add_pad(
+        designator="SQ",
+        position_mils=(200.0, 0.0),
+        width_mils=60.0,
+        height_mils=60.0,
+        layer=PcbLayer.MULTI_LAYER,
+        hole_size_mils=30.0,
+        plated=True,
+        hole_shape=PadHoleShape.SQUARE,
+    )
+    footprint.add_via(
+        position_mils=(300.0, 0.0),
+        diameter_mils=30.0,
+        hole_size_mils=12.0,
+        is_tent_top=True,
+        is_tent_bottom=False,
+        solder_mask_expansion_top_mils=-3.0,
+        solder_mask_expansion_bottom_mils=5.0,
     )
     footprint.add_text(
         text="SERIF",
@@ -2236,6 +2266,22 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
     assert pads_by_designator["1"].pastemask_expansion_manual == -400000
     assert pads_by_designator["1"].soldermask_expansion_mode == 1
     assert pads_by_designator["2"].pastemask_expansion_mode == 0
+    assert pads_by_designator["2"].width == 140000
+    assert pads_by_designator["2"].height == 80000
+    assert pads_by_designator["2"].rotation == 37.0
+    assert pads_by_designator["2"].shape == PadShape.RECTANGLE
+    assert pads_by_designator["2"].custom_shape is not None
+    assert pads_by_designator["2"].custom_shape.anchor_pad_index == 1
+    assert any(
+        region.properties.get("PADINDEX") == "2" for region in parsed_footprint.regions
+    )
+    assert pads_by_designator["SQ"].hole_size == 300000
+    assert pads_by_designator["SQ"].hole_shape == PadHoleShape.SQUARE
+    assert len(parsed_footprint.vias) == 1
+    assert parsed_footprint.vias[0].is_tent_top is True
+    assert parsed_footprint.vias[0].is_tent_bottom is False
+    assert parsed_footprint.vias[0].soldermask_expansion_front == -30000
+    assert parsed_footprint.vias[0].soldermask_expansion_back == 50000
     assert texts_by_content["SERIF"].font_type == 0
     assert texts_by_content["SERIF"].stroke_font_type == 3
     assert texts_by_content["TT"].font_type == 1

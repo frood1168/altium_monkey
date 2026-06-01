@@ -61,6 +61,32 @@ and `rule` should leave the manual value omitted. `PcbMaskExpansion` and
 `solder_rule_expansion` for compatibility. Those booleans map to `rule` when
 true and `none` when false. New code should prefer the explicit expansion API.
 
+`add_pad(...)` also accepts `hole_shape="round"`, `"square"`, or `"slot"`
+through `PadHoleShape`. Square holes require a positive drill size. Slotted
+holes require `slot_length_mils`.
+
+Custom pads can set the anchor pad independently from the outline:
+`anchor_width_mils`, `anchor_height_mils`, `anchor_rotation_degrees`, and
+`anchor_shape` control the native anchor pad, while the generated custom-pad
+region writes the correct 1-based native `PADINDEX`.
+
+## Vias
+
+`AltiumPcbFootprint.add_via(...)` supports top/bottom tenting and independent
+manual solder-mask expansion values:
+
+```python
+footprint.add_via(
+    position_mils=(100, 0),
+    diameter_mils=24,
+    hole_size_mils=10,
+    is_tent_top=True,
+    is_tent_bottom=False,
+    solder_mask_expansion_top_mils=-3,
+    solder_mask_expansion_bottom_mils=5,
+)
+```
+
 ## Text
 
 `AltiumPcbFootprint.add_text(...)` supports stroke, TrueType, and barcode text

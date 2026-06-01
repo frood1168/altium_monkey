@@ -242,6 +242,7 @@ from .altium_record_pcb__arc import AltiumPcbArc
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
 from .altium_pcb_enums import (
+    PadHoleShape,
     PadShape,
     PcbBarcodeKind,
     PcbBarcodeRenderMode,
@@ -447,6 +448,7 @@ __all__ = [
     "PcbRecordType",
     "AltiumPcbTrack",
     "AltiumPcbArc",
+    "PadHoleShape",
     "PadShape",
     "PcbMaskExpansion",
     "PcbMaskExpansionMode",

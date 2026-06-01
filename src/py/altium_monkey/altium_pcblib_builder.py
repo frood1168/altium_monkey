@@ -52,8 +52,12 @@ from .altium_pcblib import (
     _sanitize_ole_name,
 )
 from .altium_pcb_pad_authoring import (
+    ROUND_HOLE_SHAPE,
+    SQUARE_HOLE_SHAPE,
     SLOT_HOLE_SHAPE,
     apply_authored_pad_shape,
+    normalize_pad_hole_shape,
+    normalize_pad_shape,
     validate_non_negative,
 )
 from .altium_pcb_mask_expansion import (
@@ -77,6 +81,7 @@ from .altium_pcb_enums import PcbRegionKind
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
+from .altium_pcb_enums import PadHoleShape
 from .altium_pcb_enums import PadShape
 from .altium_record_pcb__pad import AltiumPcbPad
 from .altium_record_pcb__region import AltiumPcbRegion, RegionVertex
@@ -92,6 +97,47 @@ from .altium_record_types import PcbLayer, generate_unique_id
 _PAD_SUBRECORD2_DEFAULT = b"\x00"
 _PAD_SUBRECORD3_DEFAULT = b"\x04|&|0"
 _PAD_SUBRECORD4_DEFAULT = b"\x00"
+_VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU = 40000
+
+
+def _mil_to_iu(value_mil: float) -> int:
+    return int(round(float(value_mil) * 10000.0))
+
+
+def _apply_authored_via_surface_policy(
+    via: AltiumPcbVia,
+    *,
+    is_tent_top: bool | None,
+    is_tent_bottom: bool | None,
+    solder_mask_expansion_top_mil: float | None,
+    solder_mask_expansion_bottom_mil: float | None,
+) -> None:
+    if is_tent_top is not None:
+        via.is_tent_top = bool(is_tent_top)
+    if is_tent_bottom is not None:
+        via.is_tent_bottom = bool(is_tent_bottom)
+
+    if via.is_tent_top or via.is_tent_bottom:
+        via.solder_mask_expansion_mode = 2
+        via.soldermask_expansion_front = _VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU
+        via.soldermask_expansion_back = _VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU
+        via._has_soldermask_expansion_front = True
+        via._has_soldermask_expansion_back = True
+
+    if solder_mask_expansion_top_mil is not None:
+        via.solder_mask_expansion_mode = 2
+        via.soldermask_expansion_front = _mil_to_iu(solder_mask_expansion_top_mil)
+        via._has_soldermask_expansion_front = True
+    if solder_mask_expansion_bottom_mil is not None:
+        via.solder_mask_expansion_mode = 2
+        via.soldermask_expansion_back = _mil_to_iu(solder_mask_expansion_bottom_mil)
+        via._has_soldermask_expansion_back = True
+
+    via.soldermask_expansion_linked = (
+        via._has_soldermask_expansion_front
+        and via._has_soldermask_expansion_back
+        and via.soldermask_expansion_front == via.soldermask_expansion_back
+    )
 
 
 def _build_library_data(header_bytes: bytes, footprint_names: list[str]) -> bytes:
@@ -2222,13 +2268,14 @@ class PcbLibBuilder:
         width_mil: float,
         height_mil: float,
         layer: int | PcbLayer = PcbLayer.TOP,
-        shape: int = PadShape.RECTANGLE,
+        shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mil: float = 0.0,
         plated: bool | None = None,
         corner_radius_percent: int | None = None,
         slot_length_mil: float = 0.0,
         slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
         solder_mask_expansion: PcbMaskExpansionInput = None,
         solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -2257,6 +2304,15 @@ class PcbLibBuilder:
             raise ValueError(
                 "slot_length_mil must be greater than or equal to hole_size_mil"
             )
+        resolved_hole_shape = normalize_pad_hole_shape(hole_shape)
+        if slot_iu > 0:
+            if resolved_hole_shape not in (PadHoleShape.ROUND, PadHoleShape.SLOT):
+                raise ValueError("slotted pads cannot use square hole_shape")
+            resolved_hole_shape = PadHoleShape.SLOT
+        elif resolved_hole_shape == PadHoleShape.SLOT:
+            raise ValueError("hole_shape='slot' requires a positive slot_length_mil")
+        elif hole_iu <= 0 and resolved_hole_shape != PadHoleShape.ROUND:
+            raise ValueError("non-round hole_shape requires a positive hole_size_mil")
         pad.designator = designator
         pad.layer = layer_id
         pad.x = self._mil_to_internal_units(x_mil)
@@ -2309,6 +2365,10 @@ class PcbLibBuilder:
             pad.hole_shape = SLOT_HOLE_SHAPE
             pad.slot_size = slot_iu
             pad.slot_rotation = float(slot_rotation_degrees)
+        elif resolved_hole_shape == PadHoleShape.SQUARE:
+            pad.hole_shape = SQUARE_HOLE_SHAPE
+        else:
+            pad.hole_shape = ROUND_HOLE_SHAPE
         if (
             hole_positive_tolerance_mil is not None
             or hole_negative_tolerance_mil is not None
@@ -2336,6 +2396,11 @@ class PcbLibBuilder:
         offset_x_mil: float = 0.0,
         offset_y_mil: float = 0.0,
         anchor_diameter_mil: float = 1.0,
+        anchor_width_mil: float | None = None,
+        anchor_height_mil: float | None = None,
+        anchor_rotation_degrees: float = 0.0,
+        anchor_shape: int | str | PadShape = PadShape.CIRCLE,
+        pad_index: int | None = None,
         hole_points_mil: list[list[tuple[float, float]]] | None = None,
         outline_points_are_local: bool = True,
         paste_rule_expansion: bool | None = None,
@@ -2352,6 +2417,21 @@ class PcbLibBuilder:
         """
         if len(outline_points_mil) < 3:
             raise ValueError("Custom pad outline requires at least 3 points")
+        anchor_width = (
+            float(anchor_diameter_mil)
+            if anchor_width_mil is None
+            else float(anchor_width_mil)
+        )
+        anchor_height = (
+            float(anchor_diameter_mil)
+            if anchor_height_mil is None
+            else float(anchor_height_mil)
+        )
+        if anchor_width <= 0.0 or anchor_height <= 0.0:
+            raise ValueError("Custom pad anchor dimensions must be positive")
+        if pad_index is not None and int(pad_index) <= 0:
+            raise ValueError("pad_index must be a positive 1-based native index")
+        resolved_anchor_shape = normalize_pad_shape(anchor_shape)
 
         layer_id = int(layer)
         pad = self.add_pad(
@@ -2359,11 +2439,11 @@ class PcbLibBuilder:
             designator=designator,
             x_mil=x_mil,
             y_mil=y_mil,
-            width_mil=anchor_diameter_mil,
-            height_mil=anchor_diameter_mil,
+            width_mil=anchor_width,
+            height_mil=anchor_height,
             layer=layer_id,
-            shape=PadShape.CIRCLE,
-            rotation_degrees=0.0,
+            shape=resolved_anchor_shape,
+            rotation_degrees=anchor_rotation_degrees,
             solder_mask_expansion=resolve_pcb_mask_expansion_with_legacy_alias(
                 value=solder_mask_expansion,
                 mode=solder_mask_expansion_mode,
@@ -2379,13 +2459,15 @@ class PcbLibBuilder:
                 field_name="paste_mask_expansion",
             ),
         )
+        native_pad_index = len(footprint.pads)
+        region_pad_index = native_pad_index if pad_index is None else int(pad_index)
 
         offset_x_iu = self._mil_to_internal_units(offset_x_mil)
         offset_y_iu = self._mil_to_internal_units(offset_y_mil)
         if offset_x_iu or offset_y_iu:
             pad.hole_offset_x = [offset_x_iu] * 32
             pad.hole_offset_y = [offset_y_iu] * 32
-            pad.alt_shape = [int(PadShape.CIRCLE)] * 32
+            pad.alt_shape = [int(resolved_anchor_shape)] * 32
             pad.corner_radius = [0] * 32
 
         center_x_mil = float(x_mil) + float(offset_x_mil)
@@ -2421,7 +2503,7 @@ class PcbLibBuilder:
             "ARCRESOLUTION": "0.1mil",
             "ISSHAPEBASED": "TRUE",
             "CAVITYHEIGHT": "0mil",
-            "PADINDEX": "1",
+            "PADINDEX": str(region_pad_index),
         }
         absolute_outline = _to_absolute(outline_points_mil)
         outline_vertices: list[PcbExtendedVertex] = []
@@ -2455,12 +2537,13 @@ class PcbLibBuilder:
             source="builder",
             region=region,
             shape_region=shape_region,
+            pad_index=region_pad_index - 1,
             shape_kind=int(PadShape.CUSTOM),
         )
         region.properties = build_pcblib_custom_pad_region_properties(
             region=region,
             shape_region=shape_region,
-            pad_index=1,
+            pad_index=region_pad_index,
         )
         primitive_index = footprint._record_order.index(region)
         footprint.extended_primitive_information.append(
@@ -2610,6 +2693,10 @@ class PcbLibBuilder:
         layer_end: int | PcbLayer = PcbLayer.BOTTOM,
         hole_positive_tolerance_mil: float | None = None,
         hole_negative_tolerance_mil: float | None = None,
+        is_tent_top: bool | None = None,
+        is_tent_bottom: bool | None = None,
+        solder_mask_expansion_top_mil: float | None = None,
+        solder_mask_expansion_bottom_mil: float | None = None,
     ) -> AltiumPcbVia:
         via = AltiumPcbVia()
         via.layer = int(PcbLayer.MULTI_LAYER)
@@ -2630,6 +2717,13 @@ class PcbLibBuilder:
         ):
             if 1 <= layer_id <= 32:
                 via.diameter_by_layer[layer_id - 1] = via.diameter
+        _apply_authored_via_surface_policy(
+            via,
+            is_tent_top=is_tent_top,
+            is_tent_bottom=is_tent_bottom,
+            solder_mask_expansion_top_mil=solder_mask_expansion_top_mil,
+            solder_mask_expansion_bottom_mil=solder_mask_expansion_bottom_mil,
+        )
         if (
             hole_positive_tolerance_mil is not None
             or hole_negative_tolerance_mil is not None

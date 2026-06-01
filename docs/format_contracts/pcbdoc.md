@@ -17,6 +17,8 @@
 - Read and write promoted via metadata such as IPC-4761 type, via feature
   rows, solder-mask tenting, hole tolerance, fabrication/assembly testpoint
   flags, and propagation delay.
+- Author round, square, and slotted pad drill-hole shapes. Slotted holes
+  require a positive slot length; square holes require a positive drill size.
 - Inspect user-defined PCB unions through union-name records, typed smart-union
   records, and computed user-union member summaries.
 - Render PCB SVG and PCB layer SVGs.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .altium_pcb_enums import PadShape
+from .altium_pcb_enums import PadHoleShape, PadShape
 from .altium_record_pcb__pad import AltiumPcbPad
 
 ROUNDED_RECTANGLE_ALT_SHAPE = 9
@@ -10,7 +10,11 @@ ROUNDED_RECTANGLE_FULL_STACK_LAYER_CODE = 4
 ROUNDED_RECTANGLE_FULL_STACK_MODE_FLAGS = 0x0180
 ROUNDED_RECTANGLE_FULL_STACK_ENABLED = 9
 DEFAULT_ROUNDED_RECTANGLE_CORNER_RADIUS_PERCENT = 50
+ROUND_HOLE_SHAPE = int(PadHoleShape.ROUND)
+SQUARE_HOLE_SHAPE = int(PadHoleShape.SQUARE)
 SLOT_HOLE_SHAPE = 2
+PadHoleShapeInput = PadHoleShape | int | str
+PadShapeInput = PadShape | int | str
 
 
 def validate_non_negative(value: float, name: str) -> None:
@@ -18,10 +22,80 @@ def validate_non_negative(value: float, name: str) -> None:
         raise ValueError(f"{name} must be non-negative")
 
 
+def normalize_pad_hole_shape(value: PadHoleShapeInput) -> PadHoleShape:
+    """
+    Normalize public pad hole-shape input.
+    """
+    if isinstance(value, PadHoleShape):
+        return value
+    if isinstance(value, int):
+        try:
+            return PadHoleShape(value)
+        except ValueError as exc:
+            raise ValueError("hole_shape must be round, square, or slot") from exc
+
+    normalized = str(value).strip().lower().replace("_", "-")
+    aliases = {
+        "0": PadHoleShape.ROUND,
+        "round": PadHoleShape.ROUND,
+        "circular": PadHoleShape.ROUND,
+        "circle": PadHoleShape.ROUND,
+        "1": PadHoleShape.SQUARE,
+        "square": PadHoleShape.SQUARE,
+        "2": PadHoleShape.SLOT,
+        "slot": PadHoleShape.SLOT,
+        "slotted": PadHoleShape.SLOT,
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise ValueError("hole_shape must be round, square, or slot") from exc
+
+
+def normalize_pad_shape(value: PadShapeInput) -> PadShape:
+    """
+    Normalize public pad shape input.
+    """
+    if isinstance(value, PadShape):
+        return value
+    if isinstance(value, int):
+        try:
+            return PadShape(value)
+        except ValueError as exc:
+            raise ValueError(
+                "shape must be circle, rectangle, octagonal, rounded_rectangle, or custom"
+            ) from exc
+
+    normalized = str(value).strip().lower().replace("_", "-").replace(" ", "-")
+    aliases = {
+        "1": PadShape.CIRCLE,
+        "circle": PadShape.CIRCLE,
+        "round": PadShape.CIRCLE,
+        "circular": PadShape.CIRCLE,
+        "2": PadShape.RECTANGLE,
+        "rect": PadShape.RECTANGLE,
+        "rectangle": PadShape.RECTANGLE,
+        "3": PadShape.OCTAGONAL,
+        "octagon": PadShape.OCTAGONAL,
+        "octagonal": PadShape.OCTAGONAL,
+        "4": PadShape.ROUNDED_RECTANGLE,
+        "rounded-rect": PadShape.ROUNDED_RECTANGLE,
+        "rounded-rectangle": PadShape.ROUNDED_RECTANGLE,
+        "10": PadShape.CUSTOM,
+        "custom": PadShape.CUSTOM,
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise ValueError(
+            "shape must be circle, rectangle, octagonal, rounded_rectangle, or custom"
+        ) from exc
+
+
 def apply_authored_pad_shape(
     pad: AltiumPcbPad,
     *,
-    shape: int | PadShape,
+    shape: PadShapeInput,
     width_iu: int,
     height_iu: int,
     corner_radius_percent: int | None,
@@ -34,7 +108,7 @@ def apply_authored_pad_shape(
     data. Keeping that encoding here prevents public API callers from writing
     files that reopen with invalid pad-shape state.
     """
-    shape_id = int(shape)
+    shape_id = int(normalize_pad_shape(shape))
     if shape_id != int(PadShape.ROUNDED_RECTANGLE):
         pad.shape = shape_id
         pad.top_shape = shape_id

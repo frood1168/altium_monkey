@@ -14,6 +14,13 @@
 - Author pad solder-mask and paste-mask expansion modes with the stable
   vocabulary `none`, `rule`, and `manual`. Manual expansion values are signed
   mil-unit values.
+- Author round, square, and slotted drill-hole pads. Slotted holes require a
+  positive slot length; square holes require a positive drill size.
+- Author footprint vias with top/bottom tenting flags and independent
+  top/bottom solder-mask expansion values.
+- Author custom-pad anchor geometry with explicit anchor width, height,
+  rotation, and shape. Custom-pad regions use the native 1-based `PADINDEX`
+  that corresponds to the authored anchor pad.
 - Author footprint text as stroke, TrueType, or barcode text. Stroke fonts use
   the stable vocabulary `default`, `sans-serif`, and `serif`. Barcode text
   supports Code 39 and Code 128 option sets shared with PcbDoc text authoring.

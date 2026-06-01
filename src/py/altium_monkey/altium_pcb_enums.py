@@ -174,6 +174,19 @@ class PadShape(IntEnum):
     CUSTOM = 10
 
 
+class PadHoleShape(IntEnum):
+    """
+    PCB pad drill-hole geometry.
+
+    Native PAD records encode these values as 0=round, 1=square, and 2=slot.
+    Slots also require a positive slot length.
+    """
+
+    ROUND = 0
+    SQUARE = 1
+    SLOT = 2
+
+
 class PcbTextKind(str, Enum):
     """
     PCB text primitive rendering mode.
