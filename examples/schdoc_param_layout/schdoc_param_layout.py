@@ -13,6 +13,7 @@ from altium_monkey import (
     AltiumSchDesignator,
     AltiumSchDoc,
     AltiumSchParameter,
+    AltiumSchPin,
     CoordPoint,
     TextJustification,
     TextOrientation,
@@ -28,6 +29,7 @@ _DEFAULT_LAYOUT_TOML = SAMPLE_DIR / "param_layout.toml"
 
 _ROT_KEY = {0: "DEG_0", 1: "DEG_90", 2: "DEG_180", 3: "DEG_270"}
 _LAYOUT_OPT_PARAM = "sch_layout_opt"
+_PINS_KEY = "__pins__"
 
 _ORIENT_MAP = {"DEGREES_0": 0, "DEGREES_90": 1, "DEGREES_180": 2, "DEGREES_270": 3}
 _JUST_MAP = {
@@ -113,6 +115,16 @@ def _apply_matched_component(
         else:
             # Not listed in the template for this component → hide
             param.is_hidden = True
+
+    pin_vis = rot_layout.get(_PINS_KEY)
+    if pin_vis:
+        for pin in getattr(component, "pins", []):
+            if not isinstance(pin, AltiumSchPin):
+                continue
+            entry = pin_vis.get(pin.designator)
+            if entry is not None:
+                pin.show_name = bool(entry.get("show_name", True))
+                pin.show_designator = bool(entry.get("show_designator", True))
 
 
 def _apply_default_visibility(

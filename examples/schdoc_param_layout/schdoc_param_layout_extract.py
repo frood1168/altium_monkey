@@ -9,6 +9,7 @@ from altium_monkey import (
     AltiumSchDesignator,
     AltiumSchDoc,
     AltiumSchParameter,
+    AltiumSchPin,
 )
 
 
@@ -19,6 +20,7 @@ _DEFAULT_REF_SCHDOC = ASSETS_DIR / "projects" / "hydroscope" / "CPU.SchDoc"
 _DEFAULT_OUTPUT = SAMPLE_DIR / "output" / "param_layout.toml"
 
 _BASE_ROT_ORDER = ["DEG_0", "DEG_90", "DEG_180", "DEG_270"]
+_PINS_KEY = "__pins__"
 _ROT_KEY = {0: "DEG_0", 1: "DEG_90", 2: "DEG_180", 3: "DEG_270"}
 _LAYOUT_OPT_PARAM = "sch_layout_opt"
 
@@ -51,7 +53,7 @@ _DEFAULT_SECTION = """\
 # Visibility for parameters on components not matched above.
 # true = visible on schematic, false = hidden.
 # No position is applied for default entries.
-Comment = true
+Comment = false
 Value = true
 PartNumber = true
 """
@@ -73,6 +75,26 @@ def _layout_lines(layout: dict[str, Any]) -> list[str]:
         f"orientation = \"{layout['orientation']}\"",
         f"justification = \"{layout['justification']}\"",
     ]
+
+
+def _extract_pin_visibility(component: object) -> dict[str, dict[str, bool]] | None:
+    """Return {pin_designator: {show_name, show_designator}} if any pin hides name or number."""
+    result: dict[str, dict[str, bool]] = {}
+    for pin in getattr(component, "pins", []):
+        if not isinstance(pin, AltiumSchPin):
+            continue
+        desig = pin.designator
+        if not desig:
+            continue
+        result[desig] = {
+            "show_name": bool(pin.show_name),
+            "show_designator": bool(pin.show_designator),
+        }
+    if not result:
+        return None
+    if all(v["show_name"] and v["show_designator"] for v in result.values()):
+        return None
+    return result
 
 
 def _extract_layout(component: object, param: object) -> dict[str, Any]:
@@ -116,6 +138,8 @@ def extract_param_layouts(schdoc: AltiumSchDoc) -> tuple[_CanonicalT, _Conflicts
         opt_suffix = f"_OPT{opt}" if opt is not None else ""
         rot_key = f"{base_rot_key}{mirror}{opt_suffix}"
 
+        rot_entry = canonical.setdefault(lib_ref, {}).setdefault(rot_key, {})
+
         for param in getattr(component, "parameters", []):
             if isinstance(param, AltiumSchDesignator):
                 param_name = "Designator"
@@ -131,7 +155,6 @@ def extract_param_layouts(schdoc: AltiumSchDoc) -> tuple[_CanonicalT, _Conflicts
                 continue
 
             layout = _extract_layout(component, param)
-            rot_entry = canonical.setdefault(lib_ref, {}).setdefault(rot_key, {})
 
             if param_name not in rot_entry:
                 rot_entry[param_name] = layout
@@ -142,6 +165,19 @@ def extract_param_layouts(schdoc: AltiumSchDoc) -> tuple[_CanonicalT, _Conflicts
                     .setdefault(rot_key, {})
                     .setdefault(param_name, [])
                     .append(layout)
+                )
+
+        pin_vis = _extract_pin_visibility(component)
+        if pin_vis is not None:
+            if _PINS_KEY not in rot_entry:
+                rot_entry[_PINS_KEY] = pin_vis
+            elif rot_entry[_PINS_KEY] != pin_vis:
+                (
+                    conflicts
+                    .setdefault(lib_ref, {})
+                    .setdefault(rot_key, {})
+                    .setdefault(_PINS_KEY, [])
+                    .append(pin_vis)
                 )
 
     return canonical, conflicts
@@ -160,6 +196,9 @@ def _generate_toml(
             if rot_key not in rot_map:
                 continue
             for param_name, layout in rot_map[rot_key].items():
+                if param_name == _PINS_KEY:
+                    continue
+
                 lines.append(_toml_section(lib_ref, rot_key, param_name))
                 lines.extend(_layout_lines(layout))
 
@@ -170,6 +209,27 @@ def _generate_toml(
                     for line in _layout_lines(conflict):
                         lines.append(f"# {line}")
 
+                lines.append("")
+
+            if _PINS_KEY in rot_map[rot_key]:
+                pin_vis = rot_map[rot_key][_PINS_KEY]
+                lines.append(f"[{_toml_key(lib_ref)}.{rot_key}.{_PINS_KEY}]")
+                for pin_desig, vis in sorted(pin_vis.items()):
+                    sn = "true" if vis["show_name"] else "false"
+                    sd = "true" if vis["show_designator"] else "false"
+                    lines.append(
+                        f"{_toml_key(pin_desig)} = {{show_name = {sn}, show_designator = {sd}}}"
+                    )
+                for conflict in (
+                    conflicts.get(lib_ref, {}).get(rot_key, {}).get(_PINS_KEY, [])
+                ):
+                    lines.append("# Conflicts found:")
+                    for pin_desig, vis in sorted(conflict.items()):
+                        sn = "true" if vis["show_name"] else "false"
+                        sd = "true" if vis["show_designator"] else "false"
+                        lines.append(
+                            f"# {_toml_key(pin_desig)} = {{show_name = {sn}, show_designator = {sd}}}"
+                        )
                 lines.append("")
 
     lines.append(_DEFAULT_SECTION)
@@ -241,6 +301,9 @@ def main() -> None:
         "# justification: BOTTOM_LEFT / BOTTOM_CENTER / BOTTOM_RIGHT",
         "#                CENTER_LEFT / CENTER_CENTER / CENTER_RIGHT",
         "#                TOP_LEFT    / TOP_CENTER    / TOP_RIGHT",
+        "# Pin visibility: [LibRef.Rotation.__pins__] pin_desig = {show_name, show_designator}",
+        "#   Only written when at least one pin hides name or number (non-default).",
+        "#   show_name: show pin name label; show_designator: show pin number label.",
     ]
 
     output_toml.parent.mkdir(parents=True, exist_ok=True)

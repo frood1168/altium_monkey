@@ -1347,6 +1347,85 @@ requires_extra = []
 tags = ["schdoc", "mutation", "clean", "normalize", "project"]
 
 [[examples]]
+id = "pcb_orientation_snapshot"
+title = "Snapshot schematic and PCB component orientations"
+summary = "Capture a before/after JSON snapshot of schematic component orientations and PCB component locations, rotations, and designator text (position, font, size) for a full project."
+areas = ["schdoc", "pcbdoc", "prjpcb"]
+status = "ready"
+entrypoint = "pcb_orientation_sync/pcb_orientation_snapshot.py"
+doc = "pcb_orientation_sync/README.md"
+inputs = []
+assets = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PrjPcb",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.SchDoc",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PCBdoc",
+]
+outputs = [
+  "pcb_orientation_sync/output/snapshot_<timestamp>.json",
+]
+requires_extra = []
+tags = ["schdoc", "pcbdoc", "orientation", "snapshot", "designator", "font"]
+
+[[examples]]
+id = "pcb_orientation_sync"
+title = "Rotate PCB components to match schematic orientation changes"
+summary = "Diff a before-snapshot against the current schematic, compute per-component rotation deltas, and rotate matching PCB components plus their designator overlay text."
+areas = ["pcbdoc", "schdoc", "mutation", "prjpcb"]
+status = "ready"
+entrypoint = "pcb_orientation_sync/pcb_orientation_sync.py"
+doc = "pcb_orientation_sync/README.md"
+inputs = []
+assets = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PrjPcb",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.SchDoc",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PCBdoc",
+]
+outputs = [
+  "pcb_orientation_sync/output/RT_SUPER_C1_synced.PCBdoc",
+  "pcb_orientation_sync/output/RT_SUPER_C1_synced.sync_report.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "schdoc", "orientation", "rotation", "sync", "mutation", "designator"]
+
+[[examples]]
+id = "schlib_style_apply_extract"
+title = "Extract symbol style settings from a reference SchLib"
+summary = "Read a reference SchLib where symbols are manually styled, extract pin visibility, pin text fonts, body rectangle color/line width, and write a schlib_style.toml template."
+areas = ["schlib"]
+status = "ready"
+entrypoint = "schlib_style_apply/schlib_style_apply_extract.py"
+doc = "schlib_style_apply/README.md"
+inputs = []
+assets = [
+  "assets/schlib/IIM-42352.SchLib",
+]
+outputs = [
+  "schlib_style_apply/clean/schlib_style.toml",
+]
+requires_extra = []
+tags = ["schlib", "symbol", "style", "pin", "rectangle", "extract", "template"]
+
+[[examples]]
+id = "schlib_style_apply"
+title = "Apply style template to SchLib symbol libraries"
+summary = "Read schlib_style.toml and stamp pin visibility, pin text fonts, body rectangle style, and line style onto every symbol in each target SchLib."
+areas = ["schlib", "mutation"]
+status = "ready"
+entrypoint = "schlib_style_apply/schlib_style_apply.py"
+doc = "schlib_style_apply/README.md"
+inputs = []
+assets = [
+  "assets/schlib/",
+  "schlib_style_apply/clean/schlib_style.toml",
+]
+outputs = [
+  "schlib_style_apply/output/",
+  "schlib_style_apply/output/schlib_style_apply_manifest.json",
+]
+requires_extra = []
+tags = ["schlib", "symbol", "style", "pin", "rectangle", "mutation", "template"]
+
+[[examples]]
 id = "schdoc_param_layout_extract"
 title = "Extract parameter positions from a reference schematic"
 summary = "Read a reference SchDoc where parameters are manually positioned, compute component-local offsets (rotation/mirror aware), and write a param_layout.toml template."
