@@ -90,6 +90,18 @@ def test_public_gitignore_tracks_lockfile_and_ignores_example_outputs() -> None:
     assert "examples/**/output/" in gitignore_lines
 
 
+def test_manifest_inputs_and_assets_do_not_use_ignored_output_dirs() -> None:
+    offenders: list[str] = []
+    for example in _load_examples():
+        for key in ("inputs", "assets"):
+            for declared_path in _declared_paths(example, key):
+                normalized = declared_path.replace("\\", "/")
+                if "/output/" in f"/{normalized}":
+                    offenders.append(f"{example['id']} {key[:-1]}: {declared_path}")
+
+    assert not offenders, "\n".join(offenders)
+
+
 def test_public_lockfile_matches_release_dependency_shape() -> None:
     lock_data = tomllib.loads((PUBLIC_ROOT / "uv.lock").read_text(encoding="utf-8"))
     packages = lock_data.get("package", [])
@@ -2129,10 +2141,13 @@ def test_pcbdoc_rigid_flex_create_examples_verify_native_readback(
             for key, expected in case["geometry"].items():
                 assert geometry[key] == expected
         if "stream_sha256" in case:
-            assert _pcbdoc_stream_sha256(
-                check_examples_root / manifest["output_pcbdoc"],
-                case["stream_sha256"],
-            ) == case["stream_sha256"]
+            assert (
+                _pcbdoc_stream_sha256(
+                    check_examples_root / manifest["output_pcbdoc"],
+                    case["stream_sha256"],
+                )
+                == case["stream_sha256"]
+            )
 
         output_pcbdoc = AltiumPcbDoc.from_file(
             check_examples_root / manifest["output_pcbdoc"]
@@ -2654,7 +2669,9 @@ def _assert_board6_stack_source_entries_match_spec(
     pcbdoc_path: Path,
     spec: dict[str, object],
 ) -> None:
-    from altium_monkey.altium_layer_stack_document import is_layer_stack_source_entry_key
+    from altium_monkey.altium_layer_stack_document import (
+        is_layer_stack_source_entry_key,
+    )
     from altium_monkey.altium_ole import AltiumOleFile
     from altium_monkey.altium_pcbdoc_builder import PcbDocBoardData
 
@@ -4011,7 +4028,9 @@ def test_pcbdoc_create_cavity_placements_writes_board_side_cavities(
         "R0402_0.40MM_HD",
         "R0402_0.40MM_HD",
     ]
-    assert all(component.raw_record["COMMENTON"] == "FALSE" for component in pcbdoc.components)
+    assert all(
+        component.raw_record["COMMENTON"] == "FALSE" for component in pcbdoc.components
+    )
     assert not any(text.is_comment for text in pcbdoc.texts)
     assert {pad.layer for pad in pcbdoc.pads if pad.component_index == 1} == {
         PcbLayer.MID2

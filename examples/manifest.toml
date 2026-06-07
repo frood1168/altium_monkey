@@ -85,8 +85,8 @@ entrypoint = "schdoc_add_harness_connector/schdoc_add_harness_connector.py"
 doc = "schdoc_add_harness_connector/README.md"
 inputs = ["schdoc_add_harness_connector/input/blank.SchDoc"]
 assets = [
-  "schdoc_add_harness_connector/output/harness_example_ref.SchDoc",
-  "schdoc_add_harness_connector/output/harness_example_ref.Harness",
+  "schdoc_add_harness_connector/assets/reference/harness_example_ref.SchDoc",
+  "schdoc_add_harness_connector/assets/reference/harness_example_ref.Harness",
 ]
 outputs = [
   "schdoc_add_harness_connector/output/harness_example.SchDoc",
