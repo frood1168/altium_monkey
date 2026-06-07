@@ -11,7 +11,7 @@ import struct
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
 
 from .altium_api_markers import public_api
 from .altium_json_apply_helpers import JsonApplyMixin
@@ -99,15 +99,41 @@ from .altium_utilities import get_records_in_section, parse_storage_stream_raw
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
     from .altium_netlist_options import NetlistOptions
-    from .altium_sch_geometry_oracle import SchGeometryDocument, SchIrRenderProfile
+    from .altium_sch_geometry_oracle import (
+        SchGeometryDocument,
+        SchGeometryRecord,
+        SchIrRenderProfile,
+    )
     from .altium_sch_svg_renderer import SchSvgRenderOptions
 
 log = logging.getLogger(__name__)
 
 
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int | float | str):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, int | float | str):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass(frozen=True)
 class _SchGeometryOwnershipState:
-    template_obj: Any | None
+    template_obj: AltiumSchTemplate | None
     template_idx: int | None
     show_template_graphics: bool
     multipart_design_items: set[str]
@@ -317,11 +343,11 @@ class AltiumSchDoc(JsonApplyMixin):
         return self.objects
 
     @all_objects.setter
-    def all_objects(self, value: ObjectCollection) -> None:
+    def all_objects(self, value: ObjectCollection | Iterable[object]) -> None:
         if isinstance(value, ObjectCollection):
             self.objects = value
         else:
-            self.objects = ObjectCollection(value)
+            self.objects = ObjectCollection(list(value))
 
     # -- Typed convenience properties --
 
@@ -1728,10 +1754,9 @@ class AltiumSchDoc(JsonApplyMixin):
                 current_index = getattr(child, "index_in_sheet", None)
                 if current_index is None:
                     current_index = self._get_index_in_sheet(child)
-                try:
-                    reserved_indices.add(int(current_index))
-                except (TypeError, ValueError):
-                    continue
+                current_index_int = _optional_int(current_index)
+                if current_index_int is not None:
+                    reserved_indices.add(current_index_int)
 
         next_index = 1
         for child in children:
@@ -1883,7 +1908,7 @@ class AltiumSchDoc(JsonApplyMixin):
     @staticmethod
     def _set_owned_object_owner_index(obj: object, owner_pos: int) -> None:
         if hasattr(obj, "owner_index"):
-            obj.owner_index = owner_pos
+            _as_dynamic(obj).owner_index = owner_pos
 
         owner_index_text = str(owner_pos)
         raw_record = getattr(obj, "_raw_record", None)
@@ -1903,7 +1928,7 @@ class AltiumSchDoc(JsonApplyMixin):
         self._mark_default_source_stream(child)
         self._bind_schematic_object(child)
         if hasattr(child, "parent"):
-            child.parent = connector
+            _as_dynamic(child).parent = connector
         if isinstance(child, AltiumSchHarnessEntry):
             child.owner_index_additional_list = True
         elif isinstance(child, AltiumSchHarnessType):
@@ -2166,7 +2191,7 @@ class AltiumSchDoc(JsonApplyMixin):
     @staticmethod
     def _set_parent_if_supported(obj: object, owner: object) -> None:
         if hasattr(obj, "parent"):
-            obj.parent = owner
+            _as_dynamic(obj).parent = owner
 
     @staticmethod
     def _append_unique(collection: object, obj: object) -> None:
@@ -2330,13 +2355,13 @@ class AltiumSchDoc(JsonApplyMixin):
     @staticmethod
     def _clear_detached_object_state(obj: object) -> None:
         if hasattr(obj, "owner_index"):
-            obj.owner_index = 0
+            _as_dynamic(obj).owner_index = 0
         if hasattr(obj, "index_in_sheet"):
-            obj.index_in_sheet = None
+            _as_dynamic(obj).index_in_sheet = None
         if hasattr(obj, "parent"):
-            obj.parent = None
+            _as_dynamic(obj).parent = None
         if hasattr(obj, "_bound_schematic_context"):
-            obj._bound_schematic_context = None
+            _as_dynamic(obj)._bound_schematic_context = None
         raw_record = getattr(obj, "_raw_record", None)
         if raw_record:
             raw_record.pop("OwnerIndex", None)
@@ -2831,10 +2856,11 @@ class AltiumSchDoc(JsonApplyMixin):
             if getattr(obj, "parent", None) is template:
                 return True
             owner_index = getattr(obj, "owner_index", None)
-            try:
-                return int(owner_index) in template_owner_indexes
-            except (TypeError, ValueError):
-                return False
+            owner_index_int = _optional_int(owner_index)
+            return (
+                owner_index_int is not None
+                and owner_index_int in template_owner_indexes
+            )
 
         return [obj for obj in list(self.all_objects) if is_template_child(obj)]
 
@@ -2961,7 +2987,10 @@ class AltiumSchDoc(JsonApplyMixin):
                 and not isinstance(obj, AltiumSchParameter)
             ]
         else:
-            template = self._clone_detached_schematic_object(source_template)
+            cloned_template = self._clone_detached_schematic_object(source_template)
+            if not isinstance(cloned_template, AltiumSchTemplate):
+                raise TypeError("template clone did not produce an AltiumSchTemplate")
+            template = cloned_template
             child_objects = template_doc._template_child_objects(source_template)
 
         template.filename = template_filename
@@ -3453,9 +3482,8 @@ class AltiumSchDoc(JsonApplyMixin):
             content_part_ids: set[int] = set()
             for child in (*getattr(comp, "pins", []), *getattr(comp, "graphics", [])):
                 owner_part = getattr(child, "owner_part_id", None)
-                try:
-                    owner_part_id = int(owner_part)
-                except (TypeError, ValueError):
+                owner_part_id = _optional_int(owner_part)
+                if owner_part_id is None:
                     continue
                 if owner_part_id > 0:
                     content_part_ids.add(owner_part_id)
@@ -3719,23 +3747,24 @@ class AltiumSchDoc(JsonApplyMixin):
 
             text_restores: list[tuple[object, str]] = []
             for param in getattr(comp, "parameters", []):
-                if hasattr(param, "text") and param.text and param.text.startswith("="):
-                    param_name = param.text[1:]
+                param_text = getattr(param, "text", None)
+                if isinstance(param_text, str) and param_text.startswith("="):
+                    param_name = param_text[1:]
                     resolved_text = resolve_component_param_value(param_name)
                     if resolved_text is not None:
-                        text_restores.append((param, param.text))
-                        param.text = resolved_text
+                        text_restores.append((param, param_text))
+                        _as_dynamic(param).text = resolved_text
                     elif (
                         getattr(comp_ctx, "native_svg_export", False)
                         and param_name.lower() == "value"
                         and not has_explicit_value_param
                     ):
-                        text_restores.append((param, param.text))
-                        param.text = ""
+                        text_restores.append((param, param_text))
+                        _as_dynamic(param).text = ""
                 if (
                     isinstance(param, AltiumSchDesignator)
                     and show_multipart_suffix
-                    and hasattr(param, "text")
+                    and isinstance(getattr(param, "text", None), str)
                     and param.text
                 ):
                     text_restores.append((param, param.text))
@@ -3752,7 +3781,7 @@ class AltiumSchDoc(JsonApplyMixin):
                 )
             finally:
                 for param, original_text in reversed(text_restores):
-                    param.text = original_text
+                    _as_dynamic(param).text = original_text
 
     def _append_single_component_geometry_records(
         self,
@@ -3850,6 +3879,7 @@ class AltiumSchDoc(JsonApplyMixin):
                 units_per_px=units_per_px,
             )
             if geometry_record is not None:
+                geometry_record = cast("SchGeometryRecord", geometry_record)
                 if oracle_only_record:
                     geometry_record = replace(
                         geometry_record,
@@ -4695,7 +4725,7 @@ class AltiumSchDoc(JsonApplyMixin):
             SchCompileMaskRenderMode,
         )
 
-        render_hints = None
+        render_hints: dict[str, Any] | None = None
         if resolved_ir_profile == SchIrRenderProfile.ONSCREEN:
             render_hints = {"ir_profile": SchIrRenderProfile.ONSCREEN.value}
         if (
@@ -4956,7 +4986,7 @@ class AltiumSchDoc(JsonApplyMixin):
 
     def _append_title_block_geometry(
         self,
-        sheet_operations: list[object],
+        sheet_operations: list[Any],
         *,
         sheet_width_mils: int,
         sheet_height_mils: int,
@@ -5221,9 +5251,10 @@ class AltiumSchDoc(JsonApplyMixin):
                 )
 
         if include_border and render_options.truncate_font_size_for_baseline:
+            canvas = document.canvas or {}
             manual_junction_status = (
                 self._build_native_manual_junction_status_render_hints(
-                    sheet_height_px=int(document.canvas.get("height_px", 0) or 0)
+                    sheet_height_px=int(canvas.get("height_px", 0) or 0)
                 )
             )
             if manual_junction_status:
@@ -5399,7 +5430,14 @@ class AltiumSchDoc(JsonApplyMixin):
         entry: object,
     ) -> tuple[int, int]:
         side = int(getattr(entry, "side", 0) or 0)
-        offset = float(entry._distance_from_top_native_units())
+        distance_from_top = getattr(entry, "_distance_from_top_native_units", None)
+        offset = (
+            _optional_float(distance_from_top())
+            if callable(distance_from_top)
+            else None
+        )
+        if offset is None:
+            offset = 0.0
         location = getattr(sheet_symbol, "location", None)
         parent_x = int(getattr(location, "x", 0)) if location is not None else 0
         parent_y = int(getattr(location, "y", 0)) if location is not None else 0
@@ -5590,11 +5628,15 @@ class AltiumSchDoc(JsonApplyMixin):
         point_counts: Counter[tuple[int, int]] = Counter()
 
         # Collect all wire/bus/harness objects for segment checking
-        all_connectable = (
-            list(self.wires) + list(self.buses) + list(self.signal_harnesses)
-        )
+        all_connectable = [
+            obj
+            for obj in (
+                list(self.wires) + list(self.buses) + list(self.signal_harnesses)
+            )
+            if isinstance(obj, AltiumSchWire)
+        ]
 
-        def count_object_points(obj: object) -> None:
+        def count_object_points(obj: AltiumSchWire) -> None:
             """
             Count points from a wire/bus/harness object.
             """
@@ -6020,9 +6062,13 @@ class AltiumSchDoc(JsonApplyMixin):
         # Remaining records: All objects
         for obj in objects:
             try:
-                if hasattr(obj, "serialize_to_record"):
+                serialize_to_record = getattr(obj, "serialize_to_record", None)
+                if callable(serialize_to_record):
                     # OOP record class
-                    record = obj.serialize_to_record()
+                    record_obj = serialize_to_record()
+                    if not isinstance(record_obj, dict):
+                        continue
+                    record = {str(key): value for key, value in record_obj.items()}
                     records_data.append(encode_altium_record(record))
                 elif isinstance(obj, dict):
                     # Raw dict (component, PIN, etc.)
@@ -6215,17 +6261,23 @@ class AltiumSchDoc(JsonApplyMixin):
             Convert an OOP object or raw dict to JSON format.
             """
             # Handle OOP objects with serialize_to_record
-            if hasattr(obj, "serialize_to_record"):
-                record = obj.serialize_to_record()
+            serialize_to_record = getattr(obj, "serialize_to_record", None)
+            if callable(serialize_to_record):
+                record_obj = serialize_to_record()
+                if not isinstance(record_obj, dict):
+                    return None
+                record: dict[str, object] = {
+                    str(key): value for key, value in record_obj.items()
+                }
             elif isinstance(obj, dict):
-                record = obj
+                record = {str(key): value for key, value in obj.items()}
             else:
                 return None
 
             # Handle binary records (like PIN)
             if record.get("__BINARY_RECORD__"):
                 binary_data = record.get("__BINARY_DATA__", b"")
-                if binary_data and len(binary_data) > 0:
+                if isinstance(binary_data, bytes | bytearray) and len(binary_data) > 0:
                     record_type = binary_data[0]
                     object_type = sch_json_object_type_from_record(
                         {
@@ -6261,7 +6313,9 @@ class AltiumSchDoc(JsonApplyMixin):
 
             object_type = sch_json_object_type_from_record(record)
             if object_type is None:
-                record_type_int = int(record_num)
+                record_type_int = _optional_int(record_num)
+                if record_type_int is None:
+                    return None
                 object_type_name = f"Unknown_{record_type_int}"
             else:
                 object_type_name = object_type.value

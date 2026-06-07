@@ -1,7 +1,7 @@
 """Schematic record model for SchRecordType.POLYLINE."""
 
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .altium_record_types import (
     CoordPoint,
@@ -23,6 +23,9 @@ from .altium_sch_svg_renderer import (
     SchSvgRenderContext,
     compute_dash_segments,
 )
+
+if TYPE_CHECKING:
+    from .altium_sch_geometry_oracle import SchGeometryOp
 
 
 def _render_line_shape(
@@ -331,7 +334,7 @@ def _line_shape_geometry_ops(
     units_per_px: int,
     sheet_height_px: float,
     is_start: bool,
-) -> list[object]:
+) -> list["SchGeometryOp"]:
     """
     Build oracle-aligned geometry ops for polyline endpoint decorations.
     """
@@ -371,7 +374,7 @@ def _line_shape_geometry_ops(
     )
     brush = make_solid_brush(color_raw)
 
-    def geo_point(point_x: float, point_y: float) -> tuple[int, int]:
+    def geo_point(point_x: float, point_y: float) -> tuple[float, float]:
         return geometry_coord_tuple(
             point_x,
             point_y,
@@ -390,16 +393,16 @@ def _line_shape_geometry_ops(
         *,
         fill: bool = False,
         stroke: bool = False,
-    ) -> list[Any]:
+    ) -> list[SchGeometryOp]:
         geometry_points = [geo_point(px, py) for px, py in points]
-        ops = []
+        ops: list[SchGeometryOp] = []
         if fill:
             ops.append(SchGeometryOp.polygons([geometry_points], brush=brush))
         if stroke:
             ops.append(SchGeometryOp.polygons([geometry_points], pen=pen))
         return ops
 
-    operations: list[object] = []
+    operations: list[SchGeometryOp] = []
 
     if shape == LineShape.ARROW:
         arrow_length = stroke_width_mils * 4.0

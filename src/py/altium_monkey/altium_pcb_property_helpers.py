@@ -69,6 +69,12 @@ class PcbPropertyRecordMixin:
     properties: dict[str, str]
     _typed_signature_at_parse: tuple | None
 
+    def _typed_signature(self) -> tuple:
+        raise NotImplementedError("_typed_signature")
+
+    def _sync_typed_fields_to_properties(self) -> None:
+        raise NotImplementedError
+
     def to_record(self) -> dict[str, str]:
         if self._typed_signature_at_parse != self._typed_signature():
             self._sync_typed_fields_to_properties()
@@ -80,6 +86,9 @@ class PcbLengthPrefixedPropertyRecordMixin(PcbPropertyRecordMixin):
 
     raw_record_payload: bytes | None
     _properties_raw_signature: tuple | None
+
+    def _properties_signature(self) -> tuple:
+        raise NotImplementedError("_properties_signature")
 
     def can_passthrough_raw_payload(self) -> bool:
         return (

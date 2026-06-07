@@ -50,18 +50,11 @@ def _measure_ttf_pure(
     Measure text width using the resolved TrueType face.
     """
     try:
-        try:
-            from .altium_font_resolver import (
-                FontResolutionStatus,
-                resolve_font_with_style,
-            )
-            from .altium_ttf_metrics import get_font
-        except ImportError:
-            from altium_font_resolver import (
-                FontResolutionStatus,
-                resolve_font_with_style,
-            )
-            from altium_ttf_metrics import get_font
+        from .altium_font_resolver import (
+            FontResolutionStatus,
+            resolve_font_with_style,
+        )
+        from .altium_ttf_metrics import get_font
 
         resolution = resolve_font_with_style(font_name, bold=bold, italic=italic)
         font_path = None if resolution.path is None else str(resolution.path)
@@ -121,10 +114,7 @@ def _measure_gdiplus_named_instance(
         return None
 
     try:
-        try:
-            from .altium_windows_gdiplus import get_gdiplus_text_width
-        except ImportError:
-            from altium_windows_gdiplus import get_gdiplus_text_width
+        from .altium_windows_gdiplus import get_gdiplus_text_width
 
         width = float(
             get_gdiplus_text_width(
@@ -319,10 +309,7 @@ def _get_baseline_offset_ttf(font_size_px: float, font_name: str) -> float | Non
     Compute baseline offset from the resolved font metrics.
     """
     try:
-        try:
-            from .altium_ttf_metrics import get_font, get_font_path
-        except ImportError:
-            from altium_ttf_metrics import get_font, get_font_path
+        from .altium_ttf_metrics import get_font, get_font_path
 
         font_path = get_font_path(font_name)
         if not font_path:
@@ -379,10 +366,7 @@ def _measure_text_height_ttf(
     Measure text height using the resolved TrueType face.
     """
     try:
-        try:
-            from .altium_ttf_metrics import get_font, get_font_path
-        except ImportError:
-            from altium_ttf_metrics import get_font, get_font_path
+        from .altium_ttf_metrics import get_font, get_font_path
 
         variant_name = font_name
         if bold and italic:

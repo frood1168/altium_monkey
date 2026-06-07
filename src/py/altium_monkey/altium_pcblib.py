@@ -36,6 +36,7 @@ from .altium_pcb_enums import (
     PcbBarcodeKind,
     PcbBarcodeRenderMode,
     PcbBodyProjection,
+    PcbRegionKind,
     PcbTextJustification,
     PcbTextKind,
 )
@@ -62,6 +63,7 @@ from .altium_record_pcb__via import AltiumPcbVia
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
 
 if TYPE_CHECKING:
+    from .altium_pcblib_builder import PcbLibBuildProfile
     from .altium_pcb_svg_renderer import PcbSvgRenderOptions
     from .altium_pcbdoc import AltiumPcbDoc
 
@@ -208,7 +210,7 @@ class AltiumPcbFootprint:
         self.fills: list["AltiumPcbFill"] = []
         self.texts: list["AltiumPcbText"] = []
         self.vias: list["AltiumPcbVia"] = []
-        self.regions: list["AltiumPcbRegion"] = []
+        self.regions: list["AltiumPcbRegion | AltiumPcbShapeBasedRegion"] = []
         self.component_bodies: list["AltiumPcbComponentBody"] = []
 
         self.parameters: dict[str, str] = {}
@@ -627,12 +629,13 @@ class AltiumPcbFootprint:
         outline_points_mils: list[tuple[float, float]],
         layer: int | PcbLayer = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
-        kind: int = 0,
+        kind: int | PcbRegionKind = PcbRegionKind.COPPER,
         is_board_cutout: bool = False,
         is_shapebased: bool = False,
         is_keepout: bool = False,
         keepout_restrictions: int = 0,
         subpoly_index: int = 0,
+        cavity_height_mils: float = 0.0,
     ) -> AltiumPcbRegion:
         """
         Add a region polygon to this footprint using mil-unit vertices.
@@ -648,6 +651,8 @@ class AltiumPcbFootprint:
             is_keepout: Mark the region as a keepout.
             keepout_restrictions: Native keepout restriction bitmask.
             subpoly_index: Native sub-polygon index.
+            cavity_height_mils: Cavity definition height in mils for
+                `PcbRegionKind.CAVITY_DEFINITION` regions.
 
         Returns:
             The authored `AltiumPcbRegion` record.
@@ -663,6 +668,7 @@ class AltiumPcbFootprint:
             is_keepout=is_keepout,
             keepout_restrictions=keepout_restrictions,
             subpoly_index=subpoly_index,
+            cavity_height_mil=cavity_height_mils,
         )
 
     def add_text(
@@ -905,8 +911,11 @@ class AltiumPcbFootprint:
             if public_name in translated_kwargs:
                 translated_kwargs[builder_name] = translated_kwargs.pop(public_name)
         if "model_2d_mils" in translated_kwargs:
+            model_2d_raw = translated_kwargs.pop("model_2d_mils")
+            if not isinstance(model_2d_raw, Sequence):
+                raise TypeError("model_2d_mils must be a two-value sequence")
             model_2d_x_mils, model_2d_y_mils = _coerce_point_mils(
-                translated_kwargs.pop("model_2d_mils"),
+                model_2d_raw,
                 "model_2d_mils",
             )
             translated_kwargs["model_2d_x_mil"] = model_2d_x_mils
@@ -984,7 +993,14 @@ class AltiumPcbFootprint:
         pcbdoc.arcs = self.arcs
         pcbdoc.texts = self.texts
         pcbdoc.fills = self.fills
-        pcbdoc.regions = self.regions
+        pcbdoc.regions = [
+            region for region in self.regions if isinstance(region, AltiumPcbRegion)
+        ]
+        pcbdoc.shapebased_regions = [
+            region
+            for region in self.regions
+            if isinstance(region, AltiumPcbShapeBasedRegion)
+        ]
         pcbdoc.component_bodies = self.component_bodies
         return pcbdoc
 
@@ -1671,7 +1687,7 @@ class AltiumPcbLib:
         self.combine_provenance: dict[str, object] | None = None
         self._authoring_builder: Any | None = None
 
-    def _profile_for_authoring_builder(self) -> object:
+    def _profile_for_authoring_builder(self) -> "PcbLibBuildProfile":
         from .altium_pcblib_builder import PcbLibBuildProfile
 
         if self.filepath is not None and self.filepath.exists():
@@ -2713,6 +2729,8 @@ class AltiumPcbLib:
         seen_model_signatures: set[tuple] = set()
         used_output_names: set[str] = set()
         collision_counters: dict[str, int] = {}
+        provenance_footprints: list[dict[str, str]] = []
+        provenance_renamed_conflicts: list[dict[str, str]] = []
         provenance: dict[str, object] = {
             "kind": "pcblib_combine",
             "join_policy": "suffix",
@@ -2720,8 +2738,8 @@ class AltiumPcbLib:
             .replace(microsecond=0)
             .isoformat(),
             "inputs": [str(path) for path in paths],
-            "footprints": [],
-            "renamed_conflicts": [],
+            "footprints": provenance_footprints,
+            "renamed_conflicts": provenance_renamed_conflicts,
         }
 
         for path in paths:
@@ -2775,8 +2793,8 @@ class AltiumPcbLib:
                 }
                 if renamed:
                     entry["collision_group"] = original_name
-                    provenance["renamed_conflicts"].append(entry.copy())
-                provenance["footprints"].append(entry)
+                    provenance_renamed_conflicts.append(entry.copy())
+                provenance_footprints.append(entry)
 
         combined = builder.build()
         combined.combine_provenance = provenance

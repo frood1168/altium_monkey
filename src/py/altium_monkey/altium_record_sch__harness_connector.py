@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
@@ -745,7 +745,7 @@ class AltiumSchHarnessConnector(SchGraphicalObject):
         """
         Remove the first entry whose name matches ``name`` case-insensitively.
         """
-        return remove_named_entry(self, name)
+        return remove_named_entry(cast(Any, self), name)
 
     def move_entry(
         self, entry_or_name: AltiumSchHarnessEntry | str, *, index: int

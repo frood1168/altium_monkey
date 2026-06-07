@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
-    from .altium_sch_geometry_oracle import SchGeometryRecord
+    from .altium_sch_geometry_oracle import SchGeometryOp, SchGeometryRecord
     from .altium_schdoc import AltiumSchDoc
     from .altium_sch_svg_renderer import SchSvgRenderContext
 
@@ -66,8 +66,8 @@ class AltiumSchComponent(SchGraphicalObject):
         # Colors - Local Colors override (when override_colors=True)
         # Fills = area_color, Lines = color, Pins = pin_color
         self.override_colors: bool = False
-        self.color: int = 0x000000  # Lines color (Win32 BGR)
-        self.area_color: int = 0xFFFFFF  # Fills color (Win32 BGR)
+        self.color = 0x000000  # Lines color (Win32 BGR)
+        self.area_color = 0xFFFFFF  # Fills color (Win32 BGR)
         self.pin_color: int = 0x000000  # Pins color (Win32 BGR)
 
         # Component classification
@@ -470,22 +470,26 @@ class AltiumSchComponent(SchGraphicalObject):
                 force=self.override_colors,
             )
         if self._has_color or (self.override_colors and self.color != 0):
+            component_color = int(self.color if self.color is not None else 0)
             serializer.write_int(
                 record,
                 Fields.COLOR,
-                self.color,
+                component_color,
                 raw,
-                force=self.override_colors and self.color != 0,
+                force=self.override_colors and component_color != 0,
             )
         if self._has_area_color or (
             self.override_colors and self.area_color != 0xFFFFFF
         ):
+            component_area_color = int(
+                self.area_color if self.area_color is not None else 0xFFFFFF
+            )
             serializer.write_int(
                 record,
                 Fields.AREA_COLOR,
-                self.area_color,
+                component_area_color,
                 raw,
-                force=self.override_colors and self.area_color != 0xFFFFFF,
+                force=self.override_colors and component_area_color != 0xFFFFFF,
             )
         if self._has_pin_color or (self.override_colors and self.pin_color != 0):
             serializer.write_int(
@@ -1332,10 +1336,14 @@ class AltiumSchComponent(SchGraphicalObject):
     def _point_to_mils(point: object) -> tuple[float, float] | None:
         if point is None:
             return None
-        if hasattr(point, "x_mils") and hasattr(point, "y_mils"):
-            return (float(point.x_mils), float(point.y_mils))
-        if hasattr(point, "x") and hasattr(point, "y"):
-            return (float(point.x) * 10.0, float(point.y) * 10.0)
+        x_mils = getattr(point, "x_mils", None)
+        y_mils = getattr(point, "y_mils", None)
+        if isinstance(x_mils, int | float) and isinstance(y_mils, int | float):
+            return (float(x_mils), float(y_mils))
+        x = getattr(point, "x", None)
+        y = getattr(point, "y", None)
+        if isinstance(x, int | float) and isinstance(y, int | float):
+            return (float(x) * 10.0, float(y) * 10.0)
         if isinstance(point, (list, tuple)) and len(point) >= 2:
             return (float(point[0]), float(point[1]))
         return None
@@ -1630,11 +1638,11 @@ class AltiumSchComponent(SchGraphicalObject):
     @staticmethod
     def _native_export_component_junction_ops(
         pin: object,
-        child_geometry: list[object],
+        child_geometry: list["SchGeometryOp"],
         ctx: object,
         *,
         units_per_px: int,
-    ) -> list[object]:
+    ) -> list["SchGeometryOp"]:
         """
         Extract the pin-hotspot junction pair used by native multipart exports.
         """
@@ -1647,12 +1655,18 @@ class AltiumSchComponent(SchGraphicalObject):
         if len(child_geometry) < 2:
             return []
 
-        hot_spot = pin.get_hot_spot()
-        hot_spot_px = ctx.transform_coord_precise(hot_spot)
+        get_hot_spot = getattr(pin, "get_hot_spot", None)
+        transform_coord_precise = getattr(ctx, "transform_coord_precise", None)
+        if not callable(get_hot_spot) or not callable(transform_coord_precise):
+            return []
+        hot_spot = get_hot_spot()
+        hot_spot_px = transform_coord_precise(hot_spot)
+        if not isinstance(hot_spot_px, tuple | list) or len(hot_spot_px) < 2:
+            return []
         hot_spot_x, hot_spot_y = svg_coord_to_geometry(
             hot_spot_px[0],
             hot_spot_px[1],
-            sheet_height_px=float(ctx.sheet_height or 0.0),
+            sheet_height_px=float(getattr(ctx, "sheet_height", 0.0) or 0.0),
             units_per_px=units_per_px,
         )
 
@@ -1746,17 +1760,24 @@ class AltiumSchComponent(SchGraphicalObject):
                     document_id=document_id,
                     units_per_px=units_per_px,
                 )
+                if not isinstance(graphic_record, SchGeometryRecord):
+                    continue
                 child_geometry = unwrap_record_operations(
                     graphic_record,
                     unique_id=getattr(child, "unique_id", ""),
                 )
             else:
-                child_geometry = to_geometry(
+                raw_child_geometry = to_geometry(
                     ctx,
                     document_id=document_id,
                     units_per_px=units_per_px,
                     wrap_record=False,
                 )
+                if not isinstance(raw_child_geometry, list):
+                    continue
+                child_geometry = [
+                    op for op in raw_child_geometry if isinstance(op, SchGeometryOp)
+                ]
 
             if not child_geometry:
                 continue

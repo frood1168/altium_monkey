@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Callable, Protocol, TypeAlias
 from .altium_netlist_options import NetlistOptions
 from .altium_netlist_common import (
     CHASSIS_GND_MAPPINGS,
+    PinGroup,
     POWER_PIN_NAMES,
     _altium_net_total_sort_key,
     _emit_auto_named_nets,
@@ -53,14 +54,14 @@ log = logging.getLogger(__name__)
 
 
 RootPoint: TypeAlias = tuple[int, int]
-PinGroupsByRoot: TypeAlias = dict[RootPoint, list["SchPinInfo"]]
+PinGroupsByRoot: TypeAlias = dict[RootPoint, PinGroup]
 
 
 class _CreateNetFn(Protocol):
     def __call__(
         self,
         name: str,
-        pins: list["SchPinInfo"],
+        pins: PinGroup,
         root: RootPoint,
         is_auto_named: bool = False,
     ) -> Net: ...
@@ -979,7 +980,7 @@ class AltiumNetlistSingleSheetCompiler:
     def _create_net_from_pins(
         self,
         name: str,
-        pins: list,
+        pins: PinGroup,
         root: tuple[int, int],
         final_wire_ids: dict,
         final_nl_ids: dict,
@@ -1204,7 +1205,7 @@ class AltiumNetlistSingleSheetCompiler:
         # Shorthand for create_net with all the final maps
         def create_net(
             name: str,
-            pins: list[SchPinInfo],
+            pins: PinGroup,
             root: RootPoint,
             is_auto_named: bool = False,
         ) -> Net:

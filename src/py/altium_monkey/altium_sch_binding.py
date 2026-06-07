@@ -5,7 +5,7 @@ Internal schematic binding helpers for document/library-scoped resources.
 from __future__ import annotations
 
 import weakref
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from .altium_record_types import SchFontSpec
 
@@ -225,7 +225,7 @@ class SingleFontBindableRecordMixin:
             setattr(self, self._font_binding_slot_name(), 0)
 
     def _bind_to_schematic_context(self, context: SchematicBindingContext) -> None:
-        super()._bind_to_schematic_context(context)
+        cast(Any, super())._bind_to_schematic_context(context)
         self._resolve_pending_public_font_spec()
 
     def _ensure_bound_public_font_ready(self) -> None:

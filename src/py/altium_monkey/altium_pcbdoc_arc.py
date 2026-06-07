@@ -28,6 +28,7 @@ class PcbDocArc:
         layer: Layer name/number
         component_index: Component index (uint16, not GUID) linking the arc to a footprint
         net_index: Net index (uint16)
+        is_locked: True if arc cannot be edited
         is_keepout: True if this is a keepout arc
         is_polygonoutline: True if this is part of a polygon outline
         raw_data: Original binary data for debugging
@@ -42,6 +43,7 @@ class PcbDocArc:
     layer: int = 0
     component_index: int | None = None
     net_index: int | None = None
+    is_locked: bool = False
     is_keepout: bool = False
     is_polygonoutline: bool = False
     raw_data: bytes | None = None
@@ -114,14 +116,16 @@ def parse_arc_record(data: bytes, offset: int) -> PcbDocArc | None:
             pos = 0
 
             if len(content) < 47:
-                log.warning(f"SubRecord 1 too short at offset {offset}: {len(content)} bytes")
+                log.warning(
+                    f"SubRecord 1 too short at offset {offset}: {len(content)} bytes"
+                )
                 return None
 
             arc.layer = content[pos]
             pos += 1
 
             flags1 = content[pos]
-            (flags1 & 0x04) == 0
+            arc.is_locked = (flags1 & 0x04) == 0
             arc.is_polygonoutline = (flags1 & 0x02) != 0
             pos += 1
 

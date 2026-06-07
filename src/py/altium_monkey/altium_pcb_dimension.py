@@ -345,11 +345,25 @@ class AltiumPcbDimension(PcbPropertyRecordMixin):
                 y0 = self.references[0].point_y
                 x1 = self.references[1].point_x
                 y1 = self.references[1].point_y
-                if None not in (x0, y0, x1, y1):
+                if (
+                    x0 is not None
+                    and y0 is not None
+                    and x1 is not None
+                    and y1 is not None
+                ):
                     return math.hypot(float(x1 - x0), float(y1 - y0)) / 10000.0 * 0.0254
-            if None not in (self.x1, self.y1, self.x2, self.y2):
+            x1 = self.x1
+            y1 = self.y1
+            x2 = self.x2
+            y2 = self.y2
+            if (
+                x1 is not None
+                and y1 is not None
+                and x2 is not None
+                and y2 is not None
+            ):
                 return (
-                    math.hypot(float(self.x2 - self.x1), float(self.y2 - self.y1))
+                    math.hypot(float(x2 - x1), float(y2 - y1))
                     / 10000.0
                     * 0.0254
                 )
@@ -357,11 +371,18 @@ class AltiumPcbDimension(PcbPropertyRecordMixin):
         if kind in {"radial", "radial_diameter"}:
             if self.references:
                 ref = self.references[0]
-                if None not in (ref.point_x, ref.point_y, self.x1, self.y1):
+                ref_x = ref.point_x
+                ref_y = ref.point_y
+                x1 = self.x1
+                y1 = self.y1
+                if (
+                    ref_x is not None
+                    and ref_y is not None
+                    and x1 is not None
+                    and y1 is not None
+                ):
                     radius_mm = (
-                        math.hypot(
-                            float(self.x1 - ref.point_x), float(self.y1 - ref.point_y)
-                        )
+                        math.hypot(float(x1 - ref_x), float(y1 - ref_y))
                         / 10000.0
                         * 0.0254
                     )

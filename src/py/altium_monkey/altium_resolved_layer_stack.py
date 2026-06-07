@@ -38,6 +38,51 @@ def _normalize_layer_token(value: str) -> str:
     return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
 
 
+def _optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    token = str(value).strip().lower()
+    if token in {"1", "true", "yes", "on"}:
+        return True
+    if token in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if not isinstance(value, str):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _optional_float(value: object) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return 0.0
+    try:
+        return float(value or 0.0)
+    except ValueError:
+        return 0.0
+
+
 # Static fallback names matching IPC-2581 expectations.
 _LEGACY_TO_DISPLAY: dict[int, str] = {
     PcbLayer.TOP.value: "Top Layer",
@@ -227,6 +272,66 @@ class ResolvedLayer:
     stack_index: int | None = None
     thickness_mils: float = 0.0
     material: str | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedLayerEnvelopeRow:
+    """
+    One local-Z physical row inside a resolved substack envelope.
+    """
+
+    layer_key: str
+    display_name: str
+    family: str
+    stack_index: int | None
+    thickness_mils: float
+    z_top_mils: float
+    z_bottom_mils: float
+    z_center_mils: float
+
+    def to_debug_json(self) -> dict[str, object]:
+        return {
+            "layer_key": self.layer_key,
+            "display_name": self.display_name,
+            "family": self.family,
+            "stack_index": self.stack_index,
+            "thickness_mils": self.thickness_mils,
+            "z_top_mils": self.z_top_mils,
+            "z_bottom_mils": self.z_bottom_mils,
+            "z_center_mils": self.z_center_mils,
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedStackEnvelope:
+    """
+    Substack-local physical thickness envelope.
+
+    Coordinates are local to the substack. The zero plane is the midpoint of
+    that substack's enabled positive-thickness physical rows. This object does
+    not describe global board Z placement, folding, or branch transforms.
+    """
+
+    source_stackup_ref: str
+    substack_name: str
+    is_flex: bool | None
+    z_zero: str
+    total_thickness_mils: float
+    top_z_mils: float
+    bottom_z_mils: float
+    layers: tuple[ResolvedLayerEnvelopeRow, ...] = ()
+
+    def to_debug_json(self) -> dict[str, object]:
+        return {
+            "source_stackup_ref": self.source_stackup_ref,
+            "substack_name": self.substack_name,
+            "is_flex": self.is_flex,
+            "z_zero": self.z_zero,
+            "total_thickness_mils": self.total_thickness_mils,
+            "top_z_mils": self.top_z_mils,
+            "bottom_z_mils": self.bottom_z_mils,
+            "layers": [layer.to_debug_json() for layer in self.layers],
+        }
 
 
 @dataclass(frozen=True)
@@ -482,6 +587,45 @@ class ResolvedLayerStack:
             return ()
         return substack.layers
 
+    def stack_envelope_for_substack(
+        self,
+        source_stackup_ref: str,
+        *,
+        include_zero_thickness_layers: bool = False,
+    ) -> ResolvedStackEnvelope | None:
+        """
+        Return a substack-local Z envelope for enabled physical rows.
+
+        Positive-thickness physical rows are included by default. Set
+        ``include_zero_thickness_layers`` to include overlay/paste or other
+        zero-thickness rows in the ordered output without changing total
+        thickness. The returned coordinates are local to the substack midplane.
+        """
+        substack = self.substack_by_source_ref(source_stackup_ref)
+        if substack is None:
+            return None
+        return _stack_envelope_from_substack(
+            substack,
+            include_zero_thickness_layers=include_zero_thickness_layers,
+        )
+
+    def stack_envelope_for_board_region(
+        self,
+        board_region_or_layerstack_id: Any,
+        *,
+        include_zero_thickness_layers: bool = False,
+    ) -> ResolvedStackEnvelope | None:
+        """
+        Return a substack-local Z envelope for a board region or layerstack GUID.
+        """
+        substack = self.substack_for_board_region(board_region_or_layerstack_id)
+        if substack is None:
+            return None
+        return _stack_envelope_from_substack(
+            substack,
+            include_zero_thickness_layers=include_zero_thickness_layers,
+        )
+
     def drill_pairs_for_board_region(
         self,
         board_region_or_layerstack_id: Any,
@@ -536,6 +680,68 @@ class ResolvedLayerStack:
         if layer is not None:
             return layer
         return self.layer_by_name(token)
+
+
+def _resolved_layer_envelope_family(layer: ResolvedLayer) -> str:
+    if (
+        layer.legacy_id is not None
+        and PcbLayer.TOP.value <= layer.legacy_id <= PcbLayer.BOTTOM.value
+    ):
+        return "copper"
+    if layer.material:
+        return "dielectric"
+    name_token = _normalize_layer_token(layer.display_name)
+    if name_token.startswith("DIELECTRIC"):
+        return "dielectric"
+    if name_token in {"TOPLAYER", "BOTTOMLAYER"} or name_token.startswith("MID"):
+        return "copper"
+    return "physical"
+
+
+def _stack_envelope_from_substack(
+    substack: ResolvedSubstack,
+    *,
+    include_zero_thickness_layers: bool,
+) -> ResolvedStackEnvelope:
+    physical_layers = tuple(
+        layer
+        for layer in substack.layers
+        if include_zero_thickness_layers or layer.thickness_mils > 0.0
+    )
+    total_thickness_mils = sum(
+        layer.thickness_mils for layer in physical_layers if layer.thickness_mils > 0.0
+    )
+    top_z_mils = total_thickness_mils / 2.0
+    bottom_z_mils = -total_thickness_mils / 2.0
+    cursor_z_mils = top_z_mils
+    envelope_rows: list[ResolvedLayerEnvelopeRow] = []
+    for layer in physical_layers:
+        thickness_mils = max(float(layer.thickness_mils), 0.0)
+        row_top_z_mils = cursor_z_mils
+        row_bottom_z_mils = cursor_z_mils - thickness_mils
+        envelope_rows.append(
+            ResolvedLayerEnvelopeRow(
+                layer_key=layer.layer_key,
+                display_name=layer.display_name,
+                family=_resolved_layer_envelope_family(layer),
+                stack_index=layer.stack_index,
+                thickness_mils=thickness_mils,
+                z_top_mils=row_top_z_mils,
+                z_bottom_mils=row_bottom_z_mils,
+                z_center_mils=(row_top_z_mils + row_bottom_z_mils) / 2.0,
+            )
+        )
+        cursor_z_mils = row_bottom_z_mils
+    return ResolvedStackEnvelope(
+        source_stackup_ref=substack.source_stackup_ref,
+        substack_name=substack.name,
+        is_flex=substack.is_flex,
+        z_zero="substack.local_midplane",
+        total_thickness_mils=total_thickness_mils,
+        top_z_mils=top_z_mils,
+        bottom_z_mils=bottom_z_mils,
+        layers=tuple(envelope_rows),
+    )
 
 
 def _collect_pcbdoc_primitive_layer_ids(pcbdoc: Any) -> set[int]:
@@ -902,9 +1108,11 @@ def _substack_context_value(
 ) -> int | None:
     substack_layer_context_value = getattr(board, "substack_layer_context_value", None)
     if callable(substack_layer_context_value):
-        return substack_layer_context_value(
-            source_stackup_ref=source_stackup_ref,
-            layer_index=layer_index,
+        return _optional_int(
+            substack_layer_context_value(
+                source_stackup_ref=source_stackup_ref,
+                layer_index=layer_index,
+            )
         )
     return None
 
@@ -1005,9 +1213,11 @@ def _populate_seed_from_legacy_physical_stack(
         layer_name = str(entry["name"])
         seed.layer_names.append(layer_name)
         seed.legacy_stack_index[layer_name] = stack_index
-        seed.legacy_thickness_mils[layer_name] = float(entry["thickness_mils"] or 0.0)
+        seed.legacy_thickness_mils[layer_name] = _optional_float(
+            entry.get("thickness_mils")
+        )
 
-        legacy_id = entry["legacy_id"]
+        legacy_id = _optional_int(entry.get("legacy_id"))
         if legacy_id is not None:
             seed.layer_id_map[legacy_id] = layer_name
             if legacy_id == PcbLayer.TOP.value:
@@ -1015,11 +1225,11 @@ def _populate_seed_from_legacy_physical_stack(
             elif legacy_id == PcbLayer.BOTTOM.value:
                 seed.bottom_layer_name = layer_name
 
-        group = entry["group"]
+        group = _optional_int(entry.get("group"))
         if group is not None:
-            seed.layer_v9_group[layer_name] = int(group)
+            seed.layer_v9_group[layer_name] = group
 
-        material = entry["material"]
+        material = entry.get("material")
         if material:
             seed.legacy_material_by_name[layer_name] = str(material)
 
@@ -1488,12 +1698,18 @@ def _build_resolved_substacks(
             ResolvedSubstack(
                 source_stackup_ref=source_stackup_ref,
                 name=str(substack_fields.get("name", "") or ""),
-                is_flex=substack_fields.get("is_flex"),
+                is_flex=_optional_bool(substack_fields.get("is_flex")),
                 field_family=str(substack_fields.get("field_family", "") or ""),
-                show_top_dielectric=substack_fields.get("show_top_dielectric"),
-                show_bottom_dielectric=substack_fields.get("show_bottom_dielectric"),
-                service_stackup=substack_fields.get("service_stackup"),
-                used_by_primitives=substack_fields.get("used_by_primitives"),
+                show_top_dielectric=_optional_bool(
+                    substack_fields.get("show_top_dielectric")
+                ),
+                show_bottom_dielectric=_optional_bool(
+                    substack_fields.get("show_bottom_dielectric")
+                ),
+                service_stackup=_optional_bool(substack_fields.get("service_stackup")),
+                used_by_primitives=_optional_bool(
+                    substack_fields.get("used_by_primitives")
+                ),
                 raw_stackup_type=str(substack_fields.get("raw_stackup_type", "") or ""),
                 layers=filtered_layers,
                 drill_pairs=filtered_drill_pairs,
@@ -1625,13 +1841,43 @@ def resolved_layer_stack_from_board(
     )
 
 
+def _resolved_layer_stack_from_layer_stack_document(
+    document: object,
+    *,
+    primitive_layer_ids: set[int] | None = None,
+    drill_pairs: set[tuple[int, int]] | None = None,
+) -> ResolvedLayerStack:
+    """
+    Build the resolved consumer view from the source-aware layer-stack model.
+    """
+    from .altium_board import AltiumBoard
+
+    source = getattr(document, "source", None)
+    if source is None:
+        return _empty_resolved_layer_stack()
+    board_record = source.board_record_mapping()
+    board = AltiumBoard.from_record(board_record)
+    return resolved_layer_stack_from_board(
+        board,
+        primitive_layer_ids=primitive_layer_ids,
+        drill_pairs=drill_pairs,
+        board_regions=getattr(document, "board_regions", None),
+    )
+
+
 def resolved_layer_stack_from_pcbdoc(pcbdoc: object) -> ResolvedLayerStack:
     """
     Build a fully resolved layer stack from parsed Altium PcbDoc data.
     """
-    return resolved_layer_stack_from_board(
-        getattr(pcbdoc, "board", None),
+    from .altium_layer_stack_document import AltiumLayerStackDocument
+
+    board = getattr(pcbdoc, "board", None)
+    if board is None:
+        return _empty_resolved_layer_stack()
+
+    document = AltiumLayerStackDocument.from_pcbdoc(pcbdoc)
+    return _resolved_layer_stack_from_layer_stack_document(
+        document,
         primitive_layer_ids=_collect_pcbdoc_primitive_layer_ids(pcbdoc),
         drill_pairs=_collect_pcbdoc_drill_pairs(pcbdoc),
-        board_regions=getattr(pcbdoc, "board_regions", None),
     )

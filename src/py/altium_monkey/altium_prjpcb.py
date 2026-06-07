@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from .altium_api_markers import public_api
+from .altium_configparser_helpers import preserve_option_case as _preserve_option_case
 
 log = logging.getLogger(__name__)
 
@@ -43,13 +44,6 @@ class DocumentEntry(TypedDict):
     path: str
     unique_id: str
     options: list[DocumentOption]
-
-
-def _preserve_option_case(optionstr: str) -> str:
-    """
-    ConfigParser callback that preserves original key casing.
-    """
-    return optionstr
 
 
 def _decode_prjpcb_text(raw: bytes, filepath: Path) -> tuple[str, str]:
@@ -320,8 +314,7 @@ class AltiumPrjPcbDocumentClassGenerationOptions:
                 default=False,
             ),
             net_class_auto_scope=str(
-                _option_value(options, "ClassGenNCAutoScope", fallback="None")
-                or "None"
+                _option_value(options, "ClassGenNCAutoScope", fallback="None") or "None"
             ),
             generate_class_cluster=_parse_altium_bool(
                 _option_value(options, "GenerateClassCluster", fallback="0"),
@@ -1268,7 +1261,9 @@ class AltiumPrjPcb:
         in the `.PrjPcb`.
         """
         return {
-            document["path"]: AltiumPrjPcbDocumentClassGenerationOptions.from_document_options(
+            document[
+                "path"
+            ]: AltiumPrjPcbDocumentClassGenerationOptions.from_document_options(
                 document["options"]
             )
             for document in self.documents

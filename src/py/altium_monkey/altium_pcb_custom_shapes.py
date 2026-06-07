@@ -24,7 +24,6 @@ from .altium_pcb_mask_paste_rules import (
     get_pad_paste_expansion_iu,
 )
 from .altium_pcb_property_helpers import (
-    clean_pcb_property_text as _clean_text,
     parse_pcb_int_token as _parse_int_token,
     parse_pcb_property_payload,
     PcbLengthPrefixedPropertyRecordMixin,
@@ -275,16 +274,17 @@ def _region_contains_pad_center(region: object, pad: object) -> bool:
     verts = polygon
     if len(verts) < 3:
         return False
+    px = float(getattr(pad, "x", 0) or 0) / 10000.0
+    py = float(getattr(pad, "y", 0) or 0) / 10000.0
     center_fn = getattr(pad, "pad_center_mils", None)
     if callable(center_fn):
         try:
-            px, py = center_fn(getattr(pad, "layer", None))
+            center = center_fn(getattr(pad, "layer", None))
+            if isinstance(center, (list, tuple)) and len(center) >= 2:
+                px = float(center[0])
+                py = float(center[1])
         except Exception:
-            px = float(getattr(pad, "x", 0) or 0) / 10000.0
-            py = float(getattr(pad, "y", 0) or 0) / 10000.0
-    else:
-        px = float(getattr(pad, "x", 0) or 0) / 10000.0
-        py = float(getattr(pad, "y", 0) or 0) / 10000.0
+            pass
     return _point_in_polygon(px, py, polygon)
 
 
@@ -348,8 +348,13 @@ def find_best_pad_region(
 
 
 def _coerce_layer_id(value: object) -> int | None:
+    if value is None:
+        return None
     try:
-        return int(value) if value is not None else None
+        if isinstance(value, int):
+            return int(value)
+        text = str(value).strip()
+        return int(text) if text else None
     except (TypeError, ValueError):
         return None
 
@@ -488,7 +493,7 @@ def attach_custom_pad_shape(
     source: str,
     region: object | None,
     shape_region: object | None = None,
-    record: object | None = None,
+    record: AltiumPcbCustomShapeRecord | None = None,
     pad_index: int | None = None,
     shape_kind: int | None = 10,
     arcs: list[object] | None = None,
@@ -511,7 +516,7 @@ def attach_custom_pad_shape(
             source=source,
             anchor_pad_index=pad_index,
         )
-        pad.custom_shape = custom_shape
+        setattr(pad, "custom_shape", custom_shape)
 
     if pad_index is not None:
         custom_shape.anchor_pad_index = int(pad_index)
@@ -533,9 +538,11 @@ def resolve_pcbdoc_custom_pad_shapes(pcbdoc: object) -> None:
     regions = list(getattr(pcbdoc, "regions", []) or [])
     shape_regions = list(getattr(pcbdoc, "shapebased_regions", []) or [])
     for pad in pads:
-        pad.custom_shape = None
+        setattr(pad, "custom_shape", None)
 
     for record in list(getattr(pcbdoc, "custom_shapes", []) or []):
+        if not isinstance(record, AltiumPcbCustomShapeRecord):
+            continue
         pad_index = record.primitive_index
         if pad_index is None or not (0 <= pad_index < len(pads)):
             continue
@@ -582,7 +589,7 @@ def resolve_pcblib_custom_pad_shapes(footprint: object) -> None:
     pads = list(getattr(footprint, "pads", []) or [])
     regions = list(getattr(footprint, "regions", []) or [])
     for pad in pads:
-        pad.custom_shape = None
+        setattr(pad, "custom_shape", None)
 
     _attach_explicit_padindex_regions(
         pads=pads,
@@ -704,16 +711,6 @@ def build_pcblib_custom_pad_extended_info(
     item.primitive_index = int(primitive_index)
     item.primitive_object_id = "Region"
     item.info_type = "Mask"
-
-    base_layer = PcbLayer.TOP
-    try:
-        layer_enum = PcbLayer(int(layer)) if layer is not None else None
-    except (TypeError, ValueError):
-        layer_enum = None
-    if layer_enum is not None and layer_enum.is_bottom_side():
-        base_layer = PcbLayer.BOTTOM
-    elif _coerce_layer_id(getattr(pad, "layer", None)) == PcbLayer.BOTTOM.value:
-        base_layer = PcbLayer.BOTTOM
 
     if int(getattr(pad, "hole_size", 0) or 0) > 0 or has_explicit_paste_region:
         item.paste_mask_expansion_mode = "None"

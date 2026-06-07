@@ -28,6 +28,7 @@ from .altium_pcb_stream_helpers import (
     count_length_prefixed_records as _count_length_prefixed_records,
 )
 from .altium_pcb_stream_helpers import format_bool_text as _format_bool_text
+from .altium_pcb_stream_helpers import format_mil_value as _format_mil_value
 from .altium_pcb_stream_helpers import PcbKeyValueTextEntryMixin
 from .altium_pcblib_sections import PcbLibComponentParamsToc
 from .altium_pcblib_sections import PcbLibComponentParamsTocEntry
@@ -79,6 +80,8 @@ from .altium_pcb_enums import PcbBarcodeKind
 from .altium_pcb_enums import PcbBarcodeRenderMode
 from .altium_pcb_enums import PcbBodyProjection
 from .altium_pcb_enums import PcbRegionKind
+from .altium_pcb_enums import pcb_region_kind_from_native_kind
+from .altium_pcb_enums import pcb_region_kind_to_native_kind
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
@@ -2742,6 +2745,7 @@ class PcbLibBuilder:
         is_keepout: bool = False,
         keepout_restrictions: int = 0,
         subpoly_index: int = 0,
+        cavity_height_mil: float = 0.0,
     ) -> AltiumPcbRegion:
         if len(outline_points_mil) < 3:
             raise ValueError("Region outline requires at least 3 points")
@@ -2754,12 +2758,31 @@ class PcbLibBuilder:
         region.is_locked = False
         region.is_keepout = bool(is_keepout)
         region.is_polygon_outline = False
-        region.kind = int(kind)
+        semantic_kind = (
+            kind
+            if isinstance(kind, PcbRegionKind)
+            else pcb_region_kind_from_native_kind(
+                int(kind),
+                is_board_cutout=is_board_cutout,
+            )
+        )
+        region.kind = pcb_region_kind_to_native_kind(
+            semantic_kind,
+            is_board_cutout=is_board_cutout,
+        )
         region.is_board_cutout = bool(is_board_cutout)
         region.is_shapebased = bool(is_shapebased)
         region.keepout_restrictions = int(keepout_restrictions)
         region.subpoly_index = int(subpoly_index)
+        region.cavity_height = self._mil_to_internal_units(cavity_height_mil)
         region.properties = {}
+        if region.cavity_height or semantic_kind == PcbRegionKind.CAVITY_DEFINITION:
+            region.properties["V7_LAYER"] = PcbLayer(int(layer)).to_json_name()
+            region.properties["NAME"] = ""
+            region.properties["ARCRESOLUTION"] = "0.5mil"
+            region.properties["CAVITYHEIGHT"] = _format_mil_value(
+                float(cavity_height_mil)
+            )
         region.outline_vertices = [
             RegionVertex(
                 x_raw=float(self._mil_to_internal_units(x_mil)),
@@ -2931,8 +2954,8 @@ class PcbLibBuilder:
         for x_mil, y_mil in outline_points_mil:
             vertex = PcbExtendedVertex()
             vertex.is_round = False
-            vertex.x = float(self._mil_to_internal_units(x_mil))
-            vertex.y = float(self._mil_to_internal_units(y_mil))
+            vertex.x = self._mil_to_internal_units(x_mil)
+            vertex.y = self._mil_to_internal_units(y_mil)
             vertex.center_x = vertex.x
             vertex.center_y = vertex.y
             vertex.radius = 0
@@ -2988,7 +3011,26 @@ class PcbLibBuilder:
         bottom_mil: float,
         right_mil: float,
         top_mil: float,
-        **kwargs: object,
+        layer: int | PcbLayer = PcbLayer.MECHANICAL_1,
+        overall_height_mil: float,
+        standoff_height_mil: float = 0.5,
+        cavity_height_mil: float = 0.0,
+        body_projection: PcbBodyProjection = PcbBodyProjection.TOP,
+        model: AltiumPcbModel | None = None,
+        model_2d_x_mil: float = 0.0,
+        model_2d_y_mil: float = 0.0,
+        model_2d_rotation_degrees: float = 0.0,
+        model_3d_rotx_degrees: float | None = None,
+        model_3d_roty_degrees: float | None = None,
+        model_3d_rotz_degrees: float | None = None,
+        model_3d_dz_mil: float | None = None,
+        model_checksum: int | None = None,
+        identifier: str | None = None,
+        name: str = " ",
+        body_color_3d: int = 0x808080,
+        body_opacity_3d: float = 1.0,
+        model_type: int = 1,
+        model_source: str | None = None,
     ) -> AltiumPcbComponentBody:
         return self.add_component_body(
             footprint,
@@ -2998,7 +3040,26 @@ class PcbLibBuilder:
                 (right_mil, top_mil),
                 (left_mil, top_mil),
             ],
-            **kwargs,
+            layer=layer,
+            overall_height_mil=overall_height_mil,
+            standoff_height_mil=standoff_height_mil,
+            cavity_height_mil=cavity_height_mil,
+            body_projection=body_projection,
+            model=model,
+            model_2d_x_mil=model_2d_x_mil,
+            model_2d_y_mil=model_2d_y_mil,
+            model_2d_rotation_degrees=model_2d_rotation_degrees,
+            model_3d_rotx_degrees=model_3d_rotx_degrees,
+            model_3d_roty_degrees=model_3d_roty_degrees,
+            model_3d_rotz_degrees=model_3d_rotz_degrees,
+            model_3d_dz_mil=model_3d_dz_mil,
+            model_checksum=model_checksum,
+            identifier=identifier,
+            name=name,
+            body_color_3d=body_color_3d,
+            body_opacity_3d=body_opacity_3d,
+            model_type=model_type,
+            model_source=model_source,
         )
 
     def _assign_storage_names(self) -> bytes | None:

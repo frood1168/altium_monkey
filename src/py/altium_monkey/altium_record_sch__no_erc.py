@@ -198,12 +198,13 @@ class AltiumSchNoErc(RotatedLocalPointMixin, SchGraphicalObject):
         operations: list = []
 
         def coord(px: float, py: float) -> list[float]:
-            return geometry_coord_list(
+            coords = geometry_coord_list(
                 px,
                 py,
                 sheet_height_px=sheet_height_px,
                 units_per_px=units_per_px,
             )
+            return coords
 
         def pt(dx: float, dy: float) -> list[float]:
             px, py = self._transform_local_point(x, y, dx, dy)

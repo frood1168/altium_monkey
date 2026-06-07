@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Callable, Iterable
+from typing import Callable, NotRequired, TypedDict, Unpack
 
+from .altium_netlist_model import HierarchyPath
 from .altium_netlist_signal_objects import (
     AltiumObjectInfo,
+    AltiumObjectType,
     AltiumPortInfo,
     AltiumSheetEntryInfo,
 )
+
+
+class _AltiumObjectInfoKwargs(TypedDict):
+    object_type: AltiumObjectType
+    object_id: str
+    schematic_id: str
+    hierarchy_path: NotRequired[HierarchyPath]
+    bus_signal_index: NotRequired[int | None]
+    harness_entries_path: NotRequired[tuple[str, ...] | None]
+    repeat_value: NotRequired[int | None]
 
 
 class AltiumVisitedObjectsManager:
@@ -42,7 +54,7 @@ class AltiumVisitedObjectsManager:
         self._current_order[key] = None
         return True
 
-    def visit_core(self, **kwargs: object) -> bool:
+    def visit_core(self, **kwargs: Unpack[_AltiumObjectInfoKwargs]) -> bool:
         """Construct and visit a generic `AltiumObjectInfo` in one step."""
 
         return self.visit(AltiumObjectInfo(**kwargs))

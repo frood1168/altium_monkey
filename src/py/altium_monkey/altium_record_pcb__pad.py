@@ -6,7 +6,7 @@ import html
 import logging
 import math
 import struct
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from .altium_pcb_enums import PadShape
 from .altium_pcb_mask_paste_rules import (
@@ -30,6 +30,22 @@ if TYPE_CHECKING:
 _MIL_TO_MM = 0.0254
 
 log = logging.getLogger(__name__)
+
+
+class _PadSvgGeometryState(TypedDict):
+    use_side_expansion: bool
+    geometry_layer: PcbLayer
+    expansion_iu: int
+    base_width_mils: float
+    base_height_mils: float
+    width_mm: float
+    height_mm: float
+    cx: float
+    cy: float
+    half_w: float
+    half_h: float
+    shape: int
+    rotation: float
 
 
 # SubRecord 6 alt_shape values that override the base shape from SubRecord 5.
@@ -1795,7 +1811,7 @@ class AltiumPcbPad(PcbGraphicalObject):
     def _resolve_svg_target_layer(
         self,
         for_layer: PcbLayer | None,
-    ) -> tuple[PcbLayer, PcbLayer] | None:
+    ) -> tuple[PcbLayer, PcbLayer | None] | None:
         source_layer = self._source_layer()
         layer = for_layer
         if layer is None:
@@ -1823,11 +1839,11 @@ class AltiumPcbPad(PcbGraphicalObject):
             return None
 
         if render_holes and self.hole_size > 0 and layer.is_copper():
-            return self._hole_svg_elements(
+            return self._hole_knockout_svg_elements(
                 ctx,
                 layer,
-                stroke or ctx.layer_color(layer),
                 include_metadata=include_metadata,
+                hole_color=stroke or ctx.layer_color(layer),
             )
         return []
 
@@ -1837,7 +1853,7 @@ class AltiumPcbPad(PcbGraphicalObject):
         *,
         layer: PcbLayer,
         source_layer: PcbLayer | None,
-    ) -> dict[str, object] | None:
+    ) -> _PadSvgGeometryState | None:
         use_side_expansion = False
         geometry_layer = layer
         expansion_iu = 0
@@ -1922,21 +1938,21 @@ class AltiumPcbPad(PcbGraphicalObject):
         *,
         color: str,
         meta_attrs: list[str],
-        geometry: dict[str, object],
+        geometry: _PadSvgGeometryState,
     ) -> list[str]:
-        cx = float(geometry["cx"])
-        cy = float(geometry["cy"])
-        half_w = float(geometry["half_w"])
-        half_h = float(geometry["half_h"])
-        width_mm = float(geometry["width_mm"])
-        height_mm = float(geometry["height_mm"])
-        shape = int(geometry["shape"])
-        rotation = float(geometry["rotation"])
+        cx = geometry["cx"]
+        cy = geometry["cy"]
+        half_w = geometry["half_w"]
+        half_h = geometry["half_h"]
+        width_mm = geometry["width_mm"]
+        height_mm = geometry["height_mm"]
+        shape = geometry["shape"]
+        rotation = geometry["rotation"]
         geometry_layer = geometry["geometry_layer"]
-        base_width_mils = float(geometry["base_width_mils"])
-        base_height_mils = float(geometry["base_height_mils"])
-        use_side_expansion = bool(geometry["use_side_expansion"])
-        expansion_iu = int(geometry["expansion_iu"])
+        base_width_mils = geometry["base_width_mils"]
+        base_height_mils = geometry["base_height_mils"]
+        use_side_expansion = geometry["use_side_expansion"]
+        expansion_iu = geometry["expansion_iu"]
 
         if shape == PadShape.CIRCLE:
             transform = ""

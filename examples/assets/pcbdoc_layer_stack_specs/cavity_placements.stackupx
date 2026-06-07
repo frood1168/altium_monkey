@@ -1,0 +1,232 @@
+﻿<StackupDocument SerializerVersion="1.1.0.0" Version="2.1.0.0" Id="f7608a54-b86d-47fa-81bc-6594ddd9b1ab" RevisionId="660cd835-fe19-4a93-aed2-ccf47a5e6bea" RevisionDate="2026-06-04T14:00:02.0457995Z" xmlns="http://altium.com/ns/LayerStackManager">
+  <FeatureSet>
+    <Feature Id="c8939e8a-fd0e-4d52-8860-b7a98f452016">Standard Stackup</Feature>
+    <Feature Id="e3df2b86-5f1b-49ca-b266-d1ae57f0ba6f">Impedance Calculator</Feature>
+  </FeatureSet>
+  <TypeExtensions />
+  <Stackup Type="Standard" RoughnessType="NoRoughness" RoughnessFactorSR="0um" RoughnessFactorRF="1%" RealisticRatio="True" CopperResistance="17.24nohm" ViaPlatingThickness="0.6mil" AmbientTemperature="20C" TemperatureRise="50C">
+    <Stacks>
+      <Stack Id="4a78dd29-73b2-45a7-afcc-b408ed93ab2d" Name="Board Layer Stack" TemplateId="712cb1a5-87e7-411a-bde0-ebbb4bb3e518">
+        <Layers>
+          <Layer Id="22ae4569-b487-42e2-95ad-e84e75cef182" TypeId="c7ef040e-8d00-490b-b00c-a7e7823ff174" Name="Top Overlay" IsShared="True">
+            <Properties>
+              <Property Name="Weight" Type="MassValue">0.125oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="b640b57f-e413-4c1c-89ff-e57311dc9d75" TypeId="7b384237-13d8-4318-8bcb-accd8d9a51e7" Name="Top Solder" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1mil</Property>
+              <Property Name="Material" Type="EntityReference">583ed6a3-fb3b-43b1-9abd-d383cc68e86d:SM-001</Property>
+              <Property Name="DielectricConstant" Type="String">4</Property>
+              <Property Name="LossTangent" Type="String">0.03</Property>
+              <Property Name="CoverlayExpansion" Type="LengthValue">0mil</Property>
+              <Property Name="Material.Color" Type="System.Windows.Media.Color, PresentationCore, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35">#FF008000</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.Solid" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">1%</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">257F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">Solder Mask</Property>
+              <Property Name="Weight" Type="MassValue">0.75oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="175a5993-20f0-4b1b-9ad4-59f04a7156cf" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Top Layer" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyUp</Property>
+              <Property Name="CopperOrientation" Type="Int32">0</Property>
+              <Property Name="Weight" Type="MassValue">1oz</Property>
+              <Property Name="Material" Type="EntityReference">e85f4f0a-a124-40fc-8272-9070953eff8f:CF-004</Property>
+              <Property Name="Process" Type="String">ED</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">Copper Foil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="c3d285f4-43e8-466a-9268-2daac5161c67" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 1" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">18mil</Property>
+              <Property Name="Material" Type="EntityReference">ef90d8c7-a102-4f10-948b-01044fa1799d:PP-017</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.3</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+              <Property Name="Material.Constructions" Type="String">2116</Property>
+              <Property Name="Material.Resin" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">57%</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">356F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Weight" Type="MassValue">4oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="dce7438e-cb7a-4df3-8914-b5386a12f3b2" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 2" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">18mil</Property>
+              <Property Name="Material" Type="EntityReference">ef90d8c7-a102-4f10-948b-01044fa1799d:PP-017</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.3</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+              <Property Name="Material.Constructions" Type="String">2116</Property>
+              <Property Name="Material.Resin" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">57%</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">356F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Weight" Type="MassValue">4oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="9eb84821-5231-4633-8a67-0e874d211596" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="IN1" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyUp</Property>
+              <Property Name="CopperOrientation" Type="Int32">0</Property>
+              <Property Name="Weight" Type="MassValue">1oz</Property>
+              <Property Name="PullbackDistance" Type="LengthValue">20mil</Property>
+              <Property Name="Material" Type="EntityReference">e85f4f0a-a124-40fc-8272-9070953eff8f:CF-004</Property>
+              <Property Name="Process" Type="String">ED</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">Copper Foil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="4196f508-8e4a-4c46-a852-d08284a3d45d" TypeId="136c62ef-1fa6-4897-ae71-7e797b632b92" Name="Dielectric 3" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">18mil</Property>
+              <Property Name="Material" Type="EntityReference">680f9bc9-ecc7-4b2a-8f6d-9db6c65cf572:Core-039</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.8</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+              <Property Name="Material.Constructions" Type="String">4-7628</Property>
+              <Property Name="Material.Resin" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">40%</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">356F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">FR4</Property>
+              <Property Name="Weight" Type="MassValue">20oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="6ed2af70-10d8-44ba-9f55-1286bca218e4" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="IN2" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">None</Property>
+              <Property Name="CopperOrientation" Type="Int32">0</Property>
+              <Property Name="Weight" Type="MassValue">1oz</Property>
+              <Property Name="Material" Type="EntityReference">e85f4f0a-a124-40fc-8272-9070953eff8f:CF-004</Property>
+              <Property Name="Process" Type="String">ED</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Material.Description" Type="String">Copper Foil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="8b4f0693-166a-4e39-939c-6840fabfdc92" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 7" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">18mil</Property>
+              <Property Name="Material" Type="EntityReference">ef276e5f-84aa-4704-bba3-5eac9085db70:PP-006</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.1</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+              <Property Name="Material.Constructions" Type="String">1080</Property>
+              <Property Name="Material.Resin" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">62%</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">356F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Weight" Type="MassValue">2oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="336068be-3198-4a47-82e9-85abd57f87f8" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="IN3" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyDown</Property>
+              <Property Name="CopperOrientation" Type="Int32">1</Property>
+              <Property Name="Weight" Type="MassValue">1oz</Property>
+              <Property Name="Material" Type="EntityReference">e85f4f0a-a124-40fc-8272-9070953eff8f:CF-004</Property>
+              <Property Name="Process" Type="String">ED</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Material.Description" Type="String">Copper Foil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="977d3281-a013-4a46-8385-c0892745eabb" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 6" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">18mil</Property>
+              <Property Name="Material" Type="EntityReference">ef276e5f-84aa-4704-bba3-5eac9085db70:PP-006</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.1</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+              <Property Name="Material.Constructions" Type="String">1080</Property>
+              <Property Name="Material.Resin" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">62%</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">356F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Weight" Type="MassValue">2oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="f742594a-c692-4ef5-9598-185d1d111de5" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="IN4" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyDown</Property>
+              <Property Name="CopperOrientation" Type="Int32">1</Property>
+              <Property Name="Weight" Type="MassValue">1oz</Property>
+              <Property Name="PullbackDistance" Type="LengthValue">20mil</Property>
+              <Property Name="Material" Type="EntityReference">e85f4f0a-a124-40fc-8272-9070953eff8f:CF-004</Property>
+              <Property Name="Process" Type="String">ED</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">Copper Foil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="db38f31c-0874-4459-8b2a-df29be43b233" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 4" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">18mil</Property>
+              <Property Name="Material" Type="EntityReference">ef90d8c7-a102-4f10-948b-01044fa1799d:PP-017</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.3</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+              <Property Name="Material.Constructions" Type="String">2116</Property>
+              <Property Name="Material.Resin" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">57%</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">356F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="Weight" Type="MassValue">4oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="bfd6e5b4-f8f1-49c2-bd58-d1c79ab940e9" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Bottom Layer" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyDown</Property>
+              <Property Name="CopperOrientation" Type="Int32">1</Property>
+              <Property Name="Weight" Type="MassValue">1oz</Property>
+              <Property Name="Material" Type="EntityReference">e85f4f0a-a124-40fc-8272-9070953eff8f:CF-004</Property>
+              <Property Name="Process" Type="String">ED</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">Copper Foil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="4eb0d8b5-25ff-4bb1-bbdc-a8712d33f359" TypeId="7b384237-13d8-4318-8bcb-accd8d9a51e7" Name="Bottom Solder" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1mil</Property>
+              <Property Name="Material" Type="EntityReference">583ed6a3-fb3b-43b1-9abd-d383cc68e86d:SM-001</Property>
+              <Property Name="DielectricConstant" Type="String">4</Property>
+              <Property Name="LossTangent" Type="String">0.03</Property>
+              <Property Name="CoverlayExpansion" Type="LengthValue">0mil</Property>
+              <Property Name="Material.Color" Type="System.Windows.Media.Color, PresentationCore, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35">#FF008000</Property>
+              <Property Name="Material.Frequency" Type="FrequencyValue">1GHz</Property>
+              <Property Name="Material.Solid" Type="Altium.Data.Dimensional.RelativePercentValue, Altium.Data.Dimensional, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">1%</Property>
+              <Property Name="Material.GlassTransTemp" Type="TemperatureValue">257F</Property>
+              <Property Name="Material.Manufacturer" Type="String">Altium Designer</Property>
+              <Property Name="MaterialDescription" Type="String">Solder Mask</Property>
+              <Property Name="Weight" Type="MassValue">0.75oz</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="106420a1-ba2b-4627-8116-728a1d19d887" TypeId="c7ef040e-8d00-490b-b00c-a7e7823ff174" Name="Bottom Overlay" IsShared="True">
+            <Properties>
+              <Property Name="Weight" Type="MassValue">0.125oz</Property>
+            </Properties>
+          </Layer>
+        </Layers>
+        <ViaSpans>
+          <ViaSpan Id="98d4663f-ea54-4b7b-91eb-cbb7e8031bab" AutoName="Thru 1:6" Type="ThruVia" StartLayerId="175a5993-20f0-4b1b-9ad4-59f04a7156cf" StopLayerId="bfd6e5b4-f8f1-49c2-bd58-d1c79ab940e9" />
+        </ViaSpans>
+        <DrillSpans />
+      </Stack>
+    </Stacks>
+    <ImpedanceProfiles />
+    <Branches>
+      <Branch Id="cf7d9830-b4ea-48ac-8091-9a02a2d9a8ca" Name="Board" Description="">
+        <Sections>
+          <BranchSection Id="14e76942-4522-4189-a550-a2004a199c23" Name="Branch Section-1">
+            <Stacks>
+              <BranchSectionStack Id="3f1a4fd8-2fdc-4c5e-9993-bb873ec7a866" LayerStackId="4a78dd29-73b2-45a7-afcc-b408ed93ab2d" Description="Board Layer Stack" MaterialUsage="Common" Source="Design" IsLeftIntrusionsLinked="True" IntrusionLeftBottom="0m" IntrusionLeftTop="0m" IsRightIntrusionsLinked="True" IntrusionRightBottom="0m" IntrusionRightTop="0m" />
+            </Stacks>
+          </BranchSection>
+        </Sections>
+      </Branch>
+    </Branches>
+  </Stackup>
+</StackupDocument>

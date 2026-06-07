@@ -7,13 +7,32 @@ from __future__ import annotations
 import struct
 import zlib
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from .altium_pintextdata_modifier import PinTextData
 from .altium_sch_enums import PinItemMode, PinTextAnchor
 
 if TYPE_CHECKING:
     from .altium_record_sch__pin import AltiumSchPin, PinTextSettings
+
+
+class _PinTextContext(TypedDict):
+    pintextdata_designator: str
+    name_font_id: int
+    designator_font_id: int
+    name_color: int
+    designator_color: int
+    name_rotation: int
+    designator_rotation: int
+    name_ref_to_comp: bool
+    des_ref_to_comp: bool
+    name_needs_position: bool
+    des_needs_position: bool
+    name_margin_mils: float
+    des_margin_mils: float
+    name_has_customization: bool
+    des_has_customization: bool
+    has_custom_font: bool
 
 
 def build_pintextdata_stream_for_pins(
@@ -28,7 +47,9 @@ def build_pintextdata_stream_for_pins(
     libraries so new-object save paths and extracted-symbol save paths can share
     one implementation.
     """
-    pins_with_pintextdata = [pin for pin in pins if pin.needs_pintextdata]
+    pins_with_pintextdata = [
+        (pin_index, pin) for pin_index, pin in enumerate(pins) if pin.needs_pintextdata
+    ]
     if not pins_with_pintextdata:
         return None
 
@@ -39,7 +60,9 @@ def build_pintextdata_stream_for_pins(
     result.extend(header_bytes)
     result.append(0x00)
 
-    for pin_index, pin in enumerate(pins_with_pintextdata):
+    # Altium keys each PinTextData record by the pin's full symbol-list index,
+    # not by a dense index over only customized pins.
+    for pin_index, pin in pins_with_pintextdata:
         ctx = _resolve_pintext_context(
             pin,
             pin_index,
@@ -110,7 +133,7 @@ def _resolve_pintext_context(
     *,
     resolve_name_font_id: Callable[["PinTextSettings"], int],
     resolve_designator_font_id: Callable[["PinTextSettings"], int],
-) -> dict[str, object]:
+) -> _PinTextContext:
     name_settings = pin.name_settings
     designator_settings = pin.designator_settings
 
@@ -318,7 +341,7 @@ def _build_pintext_single_custom_attrs(
     return bytes(attrs)
 
 
-def _build_pintext_attrs(ctx: dict[str, object]) -> bytes:
+def _build_pintext_attrs(ctx: _PinTextContext) -> bytes:
     name_needs_position = bool(ctx["name_needs_position"])
     des_needs_position = bool(ctx["des_needs_position"])
     has_custom_font = bool(ctx["has_custom_font"])

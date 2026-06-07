@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import zlib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from . import (
     AltiumSchDesignator,
@@ -238,7 +238,7 @@ class AltiumSymbol:
         self.original_name = original_name or name
         self.component_record = None
         self.objects: ObjectCollection = ObjectCollection()
-        self.raw_records: list[dict[str, str]] = []
+        self.raw_records: list[dict[str, object]] = []
         self._schematic_binding_context: SchematicBindingContext | None = None
 
         # Component metadata
@@ -290,9 +290,11 @@ class AltiumSymbol:
             if self._schematic_binding_context is not None
             else None
         )
-        if owner is None or not hasattr(owner, "embedded_images"):
+        if owner is None:
             return
-        owner.embedded_images[obj.filename] = obj.image_data
+        embedded_images = getattr(owner, "embedded_images", None)
+        if isinstance(embedded_images, dict):
+            embedded_images[obj.filename] = obj.image_data
 
     def set_description(self, description: str) -> AltiumSymbol:
         """
@@ -399,9 +401,12 @@ class AltiumSymbol:
                 AltiumSchRectangle,
                 AltiumSchRoundedRectangle,
             )
+        graphics_types = AltiumSymbol._GRAPHICS_TYPES
+        if graphics_types is None:
+            return ObjectCollectionView(self.objects, lambda _o: False)
         return ObjectCollectionView(
             self.objects,
-            lambda o: isinstance(o, AltiumSymbol._GRAPHICS_TYPES),
+            lambda o: isinstance(o, graphics_types),
         )
 
     # -- Specific shape properties --
@@ -745,7 +750,7 @@ class AltiumSymbol:
         *,
         color: int = 0x000000,
         font_id: int = 1,
-        orientation: "TextOrientation" = 0,
+        orientation: "TextOrientation" = TextOrientation.DEGREES_0,
         owner_part_id: int = -1,
     ) -> AltiumSchLabel:
         """
@@ -1174,7 +1179,11 @@ class AltiumSymbol:
         if not owner_record.get("__BINARY_RECORD__"):
             return False
         binary_data = owner_record.get("__BINARY_DATA__")
-        return bool(binary_data and len(binary_data) > 0 and binary_data[0] == 0x02)
+        return bool(
+            isinstance(binary_data, bytes | bytearray)
+            and len(binary_data) > 0
+            and binary_data[0] == 0x02
+        )
 
     def _store_pin_parameter(
         self,
@@ -1380,7 +1389,7 @@ class AltiumSymbol:
         records.extend(self.graphic_primitives)
         return records
 
-    def synthesize_raw_records(self) -> list[dict[str, str]]:
+    def synthesize_raw_records(self) -> list[dict[str, object]]:
         """
         Generate raw_records from OOP objects in self.objects.
 
@@ -1393,7 +1402,7 @@ class AltiumSymbol:
         """
         import struct
 
-        records: list[dict[str, str]] = []
+        records: list[dict[str, object]] = []
 
         # Component record must be first
         comp_record = self.component_record
@@ -1446,7 +1455,7 @@ class AltiumSymbol:
             if implementation_list is not None
             else {"RECORD": "44"}
         )
-        records.append(clean_implementation_record_fields(marker_record))
+        records.append(clean_implementation_record_fields(dict(marker_record)))
         implementation_list_index = len(records) - 1
 
         for implementation, children in implementation_groups:
@@ -1621,11 +1630,14 @@ class AltiumSchLib(JsonApplyMixin):
         one_based = (not zero_based) and ptd_keys == {
             str(j + 1) for j in range(n_entries)
         }
+        numeric_keys = all(key.isdigit() for key in ptd_keys)
 
         if zero_based:
             return modifier.get_entry(str(index))
         if one_based:
             return modifier.get_entry(str(index + 1))
+        if numeric_keys:
+            return modifier.get_entry(str(index))
 
         candidate_keys: list[str] = []
         if getattr(pin, "designator", ""):
@@ -1824,8 +1836,9 @@ class AltiumSchLib(JsonApplyMixin):
         return count
 
     def _get_polygon_vertex_count(self, graphic: object) -> int | None:
-        if hasattr(graphic, "vertices"):
-            return len(graphic.vertices)
+        vertices = getattr(graphic, "vertices", None)
+        if isinstance(vertices, list | tuple):
+            return len(vertices)
         if isinstance(graphic, dict):
             record_type = graphic.get("RECORD")
             if record_type == str(SchRecordType.POLYGON.value):
@@ -2038,7 +2051,7 @@ class AltiumSchLib(JsonApplyMixin):
                 )
 
             return build_pintextdata_stream_for_pins(
-                symbol.pins,
+                [cast(AltiumSchPin, pin) for pin in symbol.pins],
                 resolve_font_id=_resolve_font_id,
             )
 
@@ -2047,7 +2060,7 @@ class AltiumSchLib(JsonApplyMixin):
             PinTextDataModifier,
             PinTextPosition,
         )
-        from .altium_sch_enums import PinItemMode, PinTextAnchor
+        from .altium_sch_enums import PinItemMode, PinTextAnchor, PinTextOrientation
 
         def _margin_mils(pin: AltiumSchPin, *, for_name: bool) -> float | None:
             if for_name:
@@ -2075,7 +2088,9 @@ class AltiumSchLib(JsonApplyMixin):
                 margin_mils = _margin_mils(pin, for_name=True) or 0.0
                 name_position = PinTextPosition(
                     margin_mils=margin_mils,
-                    orientation=int(name_settings.rotation.value) * 90,
+                    orientation=PinTextOrientation(
+                        int(name_settings.rotation.value) * 90
+                    ),
                     reference_to_component=(
                         name_settings.rotation_anchor == PinTextAnchor.COMPONENT
                     ),
@@ -2086,7 +2101,9 @@ class AltiumSchLib(JsonApplyMixin):
                 margin_mils = _margin_mils(pin, for_name=False) or 0.0
                 designator_position = PinTextPosition(
                     margin_mils=margin_mils,
-                    orientation=int(des_settings.rotation.value) * 90,
+                    orientation=PinTextOrientation(
+                        int(des_settings.rotation.value) * 90
+                    ),
                     reference_to_component=(
                         des_settings.rotation_anchor == PinTextAnchor.COMPONENT
                     ),
@@ -2157,7 +2174,9 @@ class AltiumSchLib(JsonApplyMixin):
         """
         Build PinFrac stream bytes from current OOP PIN settings for one symbol.
         """
-        return build_pinfrac_stream_for_pins(symbol.pins)
+        return build_pinfrac_stream_for_pins(
+            [cast(AltiumSchPin, pin) for pin in symbol.pins]
+        )
 
     def _copy_original_ole_structure(
         self,
@@ -2475,7 +2494,7 @@ class AltiumSchLib(JsonApplyMixin):
         name_pattern: str = "{symbol_name}.SchLib",
         symbol_filter: list[str] | None = None,
         verbose: bool = True,
-    ) -> dict[str, Path]:
+    ) -> dict[str, Path | None]:
         """
         Split this multi-symbol SchLib into individual files.
 
@@ -3115,7 +3134,7 @@ class AltiumSchLib(JsonApplyMixin):
             # Handle binary records (like PIN)
             if record.get("__BINARY_RECORD__"):
                 binary_data = record.get("__BINARY_DATA__", b"")
-                if binary_data and len(binary_data) > 0:
+                if isinstance(binary_data, bytes | bytearray) and len(binary_data) > 0:
                     record_type = binary_data[0]
                     object_type = sch_json_object_type_from_record(
                         {
@@ -3145,7 +3164,12 @@ class AltiumSchLib(JsonApplyMixin):
 
             object_type = sch_json_object_type_from_record(record)
             if object_type is None:
-                record_type_int = int(record_num)
+                if not isinstance(record_num, int | float | str):
+                    return None
+                try:
+                    record_type_int = int(record_num)
+                except (TypeError, ValueError):
+                    return None
                 object_type_name = f"Unknown_{record_type_int}"
             else:
                 object_type_name = object_type.value

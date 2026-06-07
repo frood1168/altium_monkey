@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from collections.abc import Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING, Protocol
 
 from .altium_netlist_common import _points_connected
 from .altium_netlist_model import UnionFind
+from .altium_sch_enums import PinElectrical
 
 if TYPE_CHECKING:
     from .altium_schdoc import AltiumSchDoc
@@ -17,27 +18,57 @@ Point = tuple[int, int]
 
 
 class _PointLike(Protocol):
-    x: int
-    y: int
+    @property
+    def x(self) -> int:
+        raise NotImplementedError("point x")
+
+    @property
+    def y(self) -> int:
+        raise NotImplementedError("point y")
 
 
 class _WireLike(Protocol):
-    points: list[_PointLike]
+    @property
+    def points(self) -> Sequence[_PointLike]:
+        raise NotImplementedError("wire points")
 
 
 class _HasLocationRecord(Protocol):
-    location: _PointLike
+    @property
+    def location(self) -> _PointLike:
+        raise NotImplementedError("record location")
 
 
 class _NetLabelLike(Protocol):
-    record: _HasLocationRecord
+    @property
+    def record(self) -> _HasLocationRecord:
+        raise NotImplementedError("label record")
 
 
 class _PinLike(Protocol):
-    connection_point: Point
+    @property
+    def connection_point(self) -> Point:
+        raise NotImplementedError("wire pin connection point")
 
+    @property
+    def component_designator(self) -> str:
+        raise NotImplementedError("wire pin component designator")
 
-PinLike = TypeVar("PinLike", bound=_PinLike)
+    @property
+    def designator(self) -> str:
+        raise NotImplementedError("wire pin designator")
+
+    @property
+    def name(self) -> str:
+        raise NotImplementedError("wire pin name")
+
+    @property
+    def electrical(self) -> PinElectrical:
+        raise NotImplementedError("wire pin electrical")
+
+    @property
+    def unique_id(self) -> str:
+        raise NotImplementedError("wire pin unique id")
 
 
 def points_connected(
@@ -191,7 +222,7 @@ class WireGeometryIndex:
                 cells.append((cx, cy))
         return cells
 
-    def get_points(self, wire: _WireLike) -> list[Point]:
+    def get_points(self, wire: object) -> list[Point]:
         return self._wire_points.get(id(wire), [])
 
     def get_all_endpoints(self) -> list[Point]:
@@ -356,16 +387,16 @@ def group_pins_by_network(
     wire_index: WireGeometryIndex,
     tolerance: int = 0,
     *,
-    pins: Iterable[PinLike] | None = None,
-) -> tuple[dict[Point, list[PinLike]], set[Point]]:
+    pins: Iterable[_PinLike] | None = None,
+) -> tuple[dict[Point, list[_PinLike]], set[Point]]:
     """Group schematic pins by the wire network they connect to."""
 
     if pins is None:
-        pins = list(schdoc.get_all_pins())
+        pin_list = list(schdoc.get_all_pins())
     else:
-        pins = list(pins)
-    pins_by_location: dict[Point, list[PinLike]] = defaultdict(list)
-    for pin in pins:
+        pin_list = list(pins)
+    pins_by_location: dict[Point, list[_PinLike]] = defaultdict(list)
+    for pin in pin_list:
         pins_by_location[pin.connection_point].append(pin)
     for location, pins_at_location in pins_by_location.items():
         if len(pins_at_location) <= 1:
@@ -377,9 +408,9 @@ def group_pins_by_network(
             union_find.add_root(location)
         for pin in pins_at_location:
             union_find.union(pin.connection_point, location)
-    pin_groups: dict[Point, list[PinLike]] = defaultdict(list)
+    pin_groups: dict[Point, list[_PinLike]] = defaultdict(list)
     floating_pin_roots: set[Point] = set()
-    for pin in pins:
+    for pin in pin_list:
         connection_point = pin.connection_point
         if union_find.contains(connection_point):
             root = union_find.find(connection_point)

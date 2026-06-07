@@ -337,6 +337,10 @@ class PcbNetClassKind(IntEnum):
 class PcbRegionKind(IntEnum):
     """
     PCB region semantic kind used when authoring or interpreting region records.
+
+    These values are public semantic identifiers, not a 1:1 copy of every
+    native Altium region-kind enum value. Use
+    `pcb_region_kind_to_native_kind(...)` when writing the native `KIND` field.
     """
 
     COPPER = 0
@@ -346,6 +350,63 @@ class PcbRegionKind(IntEnum):
     UNKNOWN_3 = 4
     CAVITY_DEFINITION = 5
     UNKNOWN = 99
+
+
+def pcb_region_kind_to_native_kind(
+    kind: int | PcbRegionKind,
+    *,
+    is_board_cutout: bool = False,
+) -> int:
+    """
+    Map public region semantics to Altium's native `KIND` field.
+
+    Existing board-cutout authoring uses the historical writer contract of
+    `KIND=1` plus `ISBOARDCUTOUT=TRUE`. Cavity definitions use native
+    region kind 4.
+    """
+    if not isinstance(kind, PcbRegionKind):
+        raw_kind = int(kind)
+        if is_board_cutout and raw_kind in (0, 1):
+            return 1
+        return raw_kind
+    if kind == PcbRegionKind.COPPER:
+        return 0
+    if kind in (PcbRegionKind.BOARD_CUTOUT, PcbRegionKind.POLYGON_CUTOUT):
+        return 1
+    if kind == PcbRegionKind.DASHED_OUTLINE:
+        return 2
+    if kind == PcbRegionKind.UNKNOWN_3:
+        return 3
+    if kind == PcbRegionKind.CAVITY_DEFINITION:
+        return 4
+    if is_board_cutout:
+        return 1
+    return int(kind)
+
+
+def pcb_region_kind_from_native_kind(
+    kind: int,
+    *,
+    is_board_cutout: bool = False,
+) -> PcbRegionKind:
+    """
+    Map Altium's native `KIND` field to the public semantic enum.
+    """
+    if int(kind) == 0:
+        return PcbRegionKind.BOARD_CUTOUT if is_board_cutout else PcbRegionKind.COPPER
+    if int(kind) == 1:
+        return (
+            PcbRegionKind.BOARD_CUTOUT
+            if is_board_cutout
+            else PcbRegionKind.POLYGON_CUTOUT
+        )
+    if int(kind) == 2:
+        return PcbRegionKind.DASHED_OUTLINE
+    if int(kind) == 3:
+        return PcbRegionKind.UNKNOWN_3
+    if int(kind) == 4:
+        return PcbRegionKind.CAVITY_DEFINITION
+    return PcbRegionKind.UNKNOWN
 
 
 class PcbBodyProjection(IntEnum):

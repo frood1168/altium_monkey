@@ -2,6 +2,8 @@
 Low-level schematic record factory helpers.
 """
 
+from typing import Any, cast
+
 from .altium_record_sch__arc import AltiumSchArc
 from .altium_record_sch__bezier import AltiumSchBezier
 from .altium_record_sch__blanket import AltiumSchBlanket
@@ -226,7 +228,7 @@ def create_record_from_record(record: dict[str, object]) -> SchPrimitive | None:
         return None
 
     try:
-        record_type = SchRecordType(int(record_value))
+        record_type = SchRecordType(int(cast(Any, record_value)))
     except (TypeError, ValueError):
         return None
 

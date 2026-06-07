@@ -41,20 +41,26 @@ def _format_legacy_scientific(value: float) -> str:
 
 def _normalize_component_layer(layer: str | PcbLayer | int) -> str:
     if isinstance(layer, PcbLayer):
-        if layer == PcbLayer.TOP:
-            return "TOP"
-        if layer == PcbLayer.BOTTOM:
-            return "BOTTOM"
+        if layer.is_copper():
+            return layer.to_json_name()
     if isinstance(layer, int):
-        if layer == PcbLayer.TOP.value:
-            return "TOP"
-        if layer == PcbLayer.BOTTOM.value:
-            return "BOTTOM"
+        try:
+            candidate = PcbLayer(layer)
+        except ValueError:
+            candidate = None
+        if candidate is not None and candidate.is_copper():
+            return candidate.to_json_name()
     text = str(layer).strip().upper()
-    if "BOTTOM" in text:
-        return "BOTTOM"
-    if "TOP" in text:
+    if text in {"TOP", "TOPLAYER", "TOP LAYER"}:
         return "TOP"
+    if text in {"BOTTOM", "BOTTOMLAYER", "BOTTOM LAYER"}:
+        return "BOTTOM"
+    try:
+        candidate = PcbLayer.from_json_name(text.replace(" ", ""))
+    except ValueError:
+        candidate = None
+    if candidate is not None and candidate.is_copper():
+        return candidate.to_json_name()
     raise ValueError(f"Unsupported component layer: {layer!r}")
 
 
@@ -150,7 +156,7 @@ def build_component_stream(components: Sequence[AltiumPcbComponent]) -> bytes:
     Serialize component records back into `Components6/Data`.
     """
     return create_stream_from_records(
-        [component.raw_record for component in components]
+        [dict(component.raw_record or {}) for component in components]
     )
 
 

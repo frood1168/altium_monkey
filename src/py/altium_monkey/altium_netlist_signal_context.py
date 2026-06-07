@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Iterable
 
 from .altium_netlist_model import HierarchyPath
 from .altium_netlist_signal_objects import AltiumObjectInfo, AltiumObjectType
+from .altium_netlist_visited import AltiumVisitedObjectsManager
 
 if TYPE_CHECKING:
     from .altium_netlist_signal_info import AltiumSignalInfo
-    from .altium_netlist_visited import AltiumVisitedObjectsManager
 
 
 class AltiumSignalType(Enum):
@@ -245,7 +245,7 @@ class AltiumSignalContext:
         """Attach and store objects from an iterable or visited manager."""
 
         signal = self._require_signal()
-        if hasattr(new_objects, "get_visited_objects"):
+        if isinstance(new_objects, AltiumVisitedObjectsManager):
             iterable = new_objects.get_visited_objects()
         else:
             iterable = new_objects
@@ -381,8 +381,10 @@ def _location_sort_key(obj: AltiumObjectInfo) -> tuple:
     ):
         if isinstance(candidate, tuple) and len(candidate) >= 2:
             return (0, candidate[0], candidate[1])
-        if hasattr(candidate, "x") and hasattr(candidate, "y"):
-            return (0, candidate.x, candidate.y)
+        candidate_x = getattr(candidate, "x", None)
+        candidate_y = getattr(candidate, "y", None)
+        if isinstance(candidate_x, int) and isinstance(candidate_y, int):
+            return (0, candidate_x, candidate_y)
     return (1, 0, 0)
 
 

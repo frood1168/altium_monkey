@@ -5,6 +5,7 @@ Shared construction helpers for public schematic object creation APIs.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 from .altium_record_sch__arc import AltiumSchArc
 from .altium_record_sch__bezier import AltiumSchBezier
@@ -2108,7 +2109,7 @@ def make_sch_off_sheet_connector(
     connector.orientation = validated_orientation
     connector.show_net_name = show_net_name
     connector.is_cross_sheet_connector = True
-    connector.style = validated_style
+    connector.style = cast(Any, validated_style)
     return connector
 
 

@@ -45,6 +45,12 @@ class AltiumSchSignalHarness(AltiumSchBus):
         *,
         document_id: str,
         units_per_px: int = 64,
+        kind: str = "signalharness",
+        object_id: str = "eSignalHarness",
+        default_color_raw: int = 0xE8C59F,
+        stroke_width_mils_override: float | None = None,
+        junction_color_raw: int = 0x800000,
+        junction_size_px: float = 10.0,
     ) -> "SchGeometryRecord | None":
         """
         Build an oracle-aligned geometry record for a signal harness.
@@ -63,7 +69,7 @@ class AltiumSchSignalHarness(AltiumSchBus):
         if len(self.points) < 2:
             return None
 
-        DEFAULT_HARNESS_BLUE = 0xE8C59F
+        DEFAULT_HARNESS_BLUE = int(default_color_raw)
         line_width_map = {0: 2, 1: 3, 2: 5, 3: 7}
 
         def lighten_color(color_int: int) -> int:
@@ -259,12 +265,12 @@ class AltiumSchSignalHarness(AltiumSchBus):
                 source_points=[(self.points[0].x, self.points[0].y)],
                 connection_points=ctx.harness_junction_points,
                 units_per_px=units_per_px,
-                size_px=10.0,
-                color_raw=0x800000,
+                size_px=junction_size_px,
+                color_raw=junction_color_raw,
             )
         )
 
-        inflate = max(float(background_width_px), 1.0)
+        inflate = max(float(stroke_width_mils_override or background_width_px), 1.0)
         min_x = min(point[0] for point in raw_points) - inflate
         max_x = max(point[0] for point in raw_points) + inflate
         min_y = min(point[1] for point in raw_points) - inflate
@@ -273,8 +279,8 @@ class AltiumSchSignalHarness(AltiumSchBus):
         return SchGeometryRecord(
             handle=f"{document_id}\\{self.unique_id}",
             unique_id=self.unique_id,
-            kind="signalharness",
-            object_id="eSignalHarness",
+            kind=kind,
+            object_id=object_id,
             bounds=SchGeometryBounds(
                 left=int(round(min_x * 100000)),
                 top=int(round(max_y * 100000)),

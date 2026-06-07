@@ -447,10 +447,7 @@ class AltiumSchTextFrame(
         if not text:
             return 0.0
 
-        try:
-            from .altium_ttf_metrics import get_font, get_font_path
-        except ImportError:
-            from altium_ttf_metrics import get_font, get_font_path
+        from .altium_ttf_metrics import get_font, get_font_path
 
         font_path = None
         candidate_names: list[str] = []
@@ -589,7 +586,7 @@ class AltiumSchTextFrame(
         clip_height: float,
         sheet_height_px: float,
         units_per_px: int,
-    ) -> tuple[int, int, int, int] | None:
+    ) -> tuple[float, float, float, float] | None:
         from .altium_sch_geometry_oracle import svg_coord_to_geometry
 
         if not self.clip_to_rect:
@@ -683,9 +680,9 @@ class AltiumSchTextFrame(
         self,
         operations: list[Any],
         *,
-        clip_geometry: tuple[int, int, int, int] | None,
-        geometry_x: int,
-        geometry_y: int,
+        clip_geometry: tuple[float, float, float, float] | None,
+        geometry_x: float,
+        geometry_y: float,
         payload_text: str,
         font_payload: Any,
         text_brush: Any,

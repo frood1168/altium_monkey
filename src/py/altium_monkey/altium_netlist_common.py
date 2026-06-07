@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Protocol, TypeAlias
 
 from .altium_sch_enums import PinElectrical
@@ -14,8 +15,7 @@ def _natural_sort_key(s: str) -> list:
     """Natural-sort key (`C9` < `C10`)."""
 
     return [
-        int(part) if part.isdigit() else part.lower()
-        for part in re.split(r"(\d+)", s)
+        int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", s)
     ]
 
 
@@ -54,41 +54,92 @@ CHAR_REPLACEMENTS = {
 }
 
 
-POWER_PIN_NAMES = frozenset({
-    "GND", "VCC", "VDD", "VSS", "VEE",
-    "AVDD", "AVSS", "DVDD", "DVSS",
-    "AGND", "DGND", "PGND", "VSS_PA",
-})
+POWER_PIN_NAMES = frozenset(
+    {
+        "GND",
+        "VCC",
+        "VDD",
+        "VSS",
+        "VEE",
+        "AVDD",
+        "AVSS",
+        "DVDD",
+        "DVSS",
+        "AGND",
+        "DGND",
+        "PGND",
+        "VSS_PA",
+    }
+)
 
 
-CHASSIS_GND_MAPPINGS = frozenset({
-    "CHASSI", "CHASSIS", "SHIELD", "EARTH", "GND_CHASSIS",
-})
+CHASSIS_GND_MAPPINGS = frozenset(
+    {
+        "CHASSI",
+        "CHASSIS",
+        "SHIELD",
+        "EARTH",
+        "GND_CHASSIS",
+    }
+)
 
 
 RootPoint: TypeAlias = tuple[int, int]
 
 
 class _ParameterLike(Protocol):
-    name: str
-    text: str
+    @property
+    def name(self) -> str:
+        raise NotImplementedError("parameter name")
+
+    @property
+    def text(self) -> str:
+        raise NotImplementedError("parameter text")
 
 
 class _DisplayValueComponent(Protocol):
-    comment: str
-    value: str
-    parameters: list[_ParameterLike]
+    @property
+    def comment(self) -> str:
+        raise NotImplementedError("component comment")
 
-    def get_parameter(self, name: str) -> str | None:
-        ...
+    @property
+    def value(self) -> str:
+        raise NotImplementedError("component value")
+
+    @property
+    def parameters(self) -> Sequence[_ParameterLike]:
+        raise NotImplementedError("component parameters")
+
+    def get_parameter(self, name: str) -> str | None: ...
 
 
 class _NetPinLike(Protocol):
-    component_designator: str
-    designator: str
+    @property
+    def component_designator(self) -> str:
+        raise NotImplementedError("pin component designator")
+
+    @property
+    def designator(self) -> str:
+        raise NotImplementedError("pin designator")
+
+    @property
+    def name(self) -> str:
+        raise NotImplementedError("pin name")
+
+    @property
+    def electrical(self) -> PinElectrical:
+        raise NotImplementedError("pin electrical")
+
+    @property
+    def unique_id(self) -> str:
+        raise NotImplementedError("pin unique id")
+
+    @property
+    def connection_point(self) -> RootPoint:
+        raise NotImplementedError("pin connection point")
 
 
-PinGroup: TypeAlias = list[_NetPinLike]
+PinGroup: TypeAlias = Sequence[_NetPinLike]
 PinGroupsByRoot: TypeAlias = dict[RootPoint, PinGroup]
 RootsByName: TypeAlias = dict[str, list[RootPoint]]
 
@@ -100,8 +151,7 @@ class _CreateNetFn(Protocol):
         pins: PinGroup,
         root: RootPoint,
         is_auto_named: bool = False,
-    ) -> Net:
-        ...
+    ) -> Net: ...
 
 
 def _normalize_text(text: str, strict: bool = True) -> str:
@@ -132,9 +182,9 @@ def _evaluate_altium_expression(expr: str, params: dict[str, str]) -> str:
         if ch == "'":
             end = expr.find("'", i + 1)
             if end == -1:
-                result_parts.append(expr[i + 1:])
+                result_parts.append(expr[i + 1 :])
                 break
-            result_parts.append(expr[i + 1:end])
+            result_parts.append(expr[i + 1 : end])
             i = end + 1
             continue
         if ch.isalpha() or ch == "_":

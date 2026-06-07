@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from lxml import etree
+import lxml.etree as etree
 
 DRAFTSMAN_V1_NAMESPACE = (
     "http://schemas.datacontract.org/2004/07/"

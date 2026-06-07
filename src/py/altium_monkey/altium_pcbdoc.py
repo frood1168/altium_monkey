@@ -7,7 +7,7 @@ import logging
 import math
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Required, Sequence, TypedDict, Unpack
 import zlib
 
 from .altium_api_markers import public_api
@@ -138,12 +138,35 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .altium_board import BoardOutlineVertex
+    from .altium_pcbdoc_builder import PcbDocBuildProfile
     from .altium_pcb_surface import PCB_SurfaceRole, PCB_SurfaceSide
     from .altium_pcb_svg_renderer import PcbSvgRenderOptions
     from .altium_pcblib import AltiumPcbLib
 
 PcbDocPointMils = Sequence[float]
 PcbDocBoundsMils = Sequence[float]
+
+
+class _ComponentBodyRectangleKwargs(TypedDict, total=False):
+    layer: int | PcbLayer
+    overall_height_mils: Required[float]
+    standoff_height_mils: float
+    cavity_height_mils: float
+    body_projection: PcbBodyProjection
+    model: AltiumPcbModel | None
+    model_2d_mils: PcbDocPointMils
+    model_2d_rotation_degrees: float
+    model_3d_rotx_degrees: float | None
+    model_3d_roty_degrees: float | None
+    model_3d_rotz_degrees: float | None
+    model_3d_dz_mils: float | None
+    model_checksum: int | None
+    identifier: str | None
+    name: str
+    body_color_3d: int
+    body_opacity_3d: float
+    model_type: int
+    model_source: str | None
 
 
 def _coerce_pcbdoc_point_mils(
@@ -759,6 +782,8 @@ def _localize_custom_pad_contract(
             )
             footprint.regions.append(local_region)
             footprint._record_order.append(local_region)
+        if not isinstance(local_region, AltiumPcbRegion):
+            continue
 
         source_shape_region = getattr(source_layer_shape, "shape_region", None)
         local_shape_region = None
@@ -1045,7 +1070,7 @@ class AltiumPcbDoc:
         self.raw_custom_shapes_data: bytes | None = None
         self._authoring_builder: Any | None = None
 
-    def _profile_for_authoring_builder(self) -> object:
+    def _profile_for_authoring_builder(self) -> "PcbDocBuildProfile":
         from .altium_pcbdoc_builder import PcbDocBuildProfile
 
         if self.filepath is not None and self.filepath.exists():
@@ -1485,7 +1510,7 @@ class AltiumPcbDoc:
         bottom_mils: float,
         right_mils: float,
         top_mils: float,
-        **kwargs: object,
+        **kwargs: Unpack[_ComponentBodyRectangleKwargs],
     ) -> AltiumPcbComponentBody:
         """
         Add a rectangular free 3D component body using mil-unit bounds.
@@ -2376,6 +2401,8 @@ class AltiumPcbDoc:
         keepout_restrictions: int = 0,
         subpoly_index: int = -1,
         net: str | None = None,
+        cavity_height_mils: float = 0.0,
+        v7_layer: str | None = None,
     ) -> AltiumPcbRegion:
         """
         Add a region polygon using mil-unit vertices.
@@ -2392,6 +2419,10 @@ class AltiumPcbDoc:
             keepout_restrictions: Native keepout restriction bitmask.
             subpoly_index: Native sub-polygon index.
             net: Optional net name. The net is created if needed.
+            cavity_height_mils: Cavity definition height in mils for
+                `PcbRegionKind.CAVITY_DEFINITION` regions.
+            v7_layer: Optional native `V7_LAYER` property override for
+                advanced fixture recreation.
 
         Returns:
             The authored `AltiumPcbRegion` record.
@@ -2408,6 +2439,8 @@ class AltiumPcbDoc:
             keepout_restrictions=keepout_restrictions,
             subpoly_index=subpoly_index,
             net=net,
+            cavity_height_mils=cavity_height_mils,
+            v7_layer=v7_layer,
         )
         self._mirror_authoring_builder_state()
         return self.regions[-1]
@@ -2579,14 +2612,18 @@ class AltiumPcbDoc:
             current_uid: str | None = None
             for record in param_records:
                 if "PRIMITIVEID" in record:
-                    current_uid = record["PRIMITIVEID"]
+                    current_uid = str(record["PRIMITIVEID"] or "")
+                    if not current_uid:
+                        continue
                     if "COUNT" in record and current_uid not in parameter_map:
                         parameter_map[current_uid] = {}
                     continue
                 if "NAME" in record and "VALUE" in record and current_uid:
-                    parameter_map.setdefault(current_uid, {})[record["NAME"]] = record[
-                        "VALUE"
-                    ]
+                    name = record["NAME"]
+                    value = record["VALUE"]
+                    if name is None or value is None:
+                        continue
+                    parameter_map.setdefault(current_uid, {})[str(name)] = str(value)
             if verbose:
                 log.info(f"    Found parameters for {len(parameter_map)} components")
         except Exception as exc:
@@ -2611,22 +2648,30 @@ class AltiumPcbDoc:
             log.info("  Parsing Components6/Data...")
         component_records = get_records_in_section(ole, "Components6/Data")
         for index, record in enumerate(component_records):
-            unique_id = record.get("UNIQUEID", "")
+            unique_id = str(record.get("UNIQUEID") or "")
+            component_parameters: dict[str, object] = {
+                key: value for key, value in parameter_map.get(unique_id, {}).items()
+            }
+            raw_record: dict[str, object] = {
+                str(key): value for key, value in record.items() if value is not None
+            }
             self.components.append(
                 AltiumPcbComponent(
-                    designator=designator_map.get(
-                        index, record.get("SOURCEDESIGNATOR", "")
+                    designator=str(
+                        designator_map.get(index)
+                        or record.get("SOURCEDESIGNATOR")
+                        or ""
                     ),
-                    footprint=record.get("PATTERN", ""),
-                    layer=record.get("LAYER", ""),
-                    x=record.get("X", ""),
-                    y=record.get("Y", ""),
-                    rotation=record.get("ROTATION", ""),
+                    footprint=str(record.get("PATTERN") or ""),
+                    layer=str(record.get("LAYER") or ""),
+                    x=str(record.get("X") or ""),
+                    y=str(record.get("Y") or ""),
+                    rotation=str(record.get("ROTATION") or ""),
                     unique_id=unique_id,
                     union_index=int(record.get("UNIONINDEX", "0") or "0"),
-                    description=record.get("SOURCEDESCRIPTION", ""),
-                    parameters=parameter_map.get(unique_id, {}),
-                    raw_record=record,
+                    description=str(record.get("SOURCEDESCRIPTION") or ""),
+                    parameters=component_parameters,
+                    raw_record=raw_record,
                     component_kind=parse_component_kind(record),
                 )
             )
@@ -5507,7 +5552,8 @@ class AltiumPcbDoc:
         """
         String representation.
         """
-        return f"AltiumPcbDoc({self.filepath.name}, {len(self.components)} components, {len(self.get_unique_footprints())} unique footprints)"
+        name = self.filepath.name if self.filepath is not None else "<memory>"
+        return f"AltiumPcbDoc({name}, {len(self.components)} components, {len(self.get_unique_footprints())} unique footprints)"
 
     def __repr__(self) -> str:
         """

@@ -722,7 +722,7 @@ class AltiumSchPowerPort(SingleFontBindableRecordMixin, SchGraphicalObject):
         custom_prims: list[dict],
         x: float,
         y: float,
-        orient: int,
+        orient: TextOrientation,
         sheet_height_px: float,
         stroke_raw: int,
         font_name: str,

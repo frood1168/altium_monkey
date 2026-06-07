@@ -14,7 +14,7 @@ from .altium_record_types import (
     color_to_hex,
     hex_to_win32_color,
 )
-from .altium_serializer import AltiumSerializer, CaseMode, Fields
+from .altium_serializer import AltiumSerializer, Fields
 from .altium_sch_record_helpers import (
     derive_triangle_indicator_colors,
     detect_case_mode_from_uppercase_fields,
@@ -239,7 +239,6 @@ class AltiumSchCompileMask(AltiumSchRectangle):
             SchGeometryRecord,
             make_pen,
             make_solid_brush,
-            svg_coord_to_geometry,
             wrap_record_operations,
         )
 
@@ -251,12 +250,14 @@ class AltiumSchCompileMask(AltiumSchRectangle):
         max_y = max(float(y1), float(y2))
         sheet_height_px = float(ctx.sheet_height or 0.0)
 
-        coord = lambda px, py: geometry_coord_list(
-            px,
-            py,
-            sheet_height_px=sheet_height_px,
-            units_per_px=units_per_px,
-        )
+        def coord(px: float, py: float) -> list[float]:
+            point = geometry_coord_list(
+                px,
+                py,
+                sheet_height_px=sheet_height_px,
+                units_per_px=units_per_px,
+            )
+            return point
 
         if self.is_collapsed:
             border_points_svg = [

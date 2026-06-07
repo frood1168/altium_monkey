@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from .altium_record_sch__power_port import AltiumSchPowerPort
 from .altium_sch_enums import OffSheetConnectorStyle
@@ -19,7 +19,7 @@ class AltiumSchCrossSheetConnector(AltiumSchPowerPort):
     def __init__(self) -> None:
         super().__init__()
         self.is_cross_sheet_connector = True
-        self.style: OffSheetConnectorStyle | int = OffSheetConnectorStyle.LEFT
+        self.style = cast(Any, OffSheetConnectorStyle.LEFT)
 
     def parse_from_record(
         self,
@@ -29,6 +29,6 @@ class AltiumSchCrossSheetConnector(AltiumSchPowerPort):
         super().parse_from_record(record, font_manager=font_manager)
         self.is_cross_sheet_connector = True
         try:
-            self.style = OffSheetConnectorStyle(int(self.style))
+            self.style = cast(Any, OffSheetConnectorStyle(int(self.style)))
         except (TypeError, ValueError):
             pass

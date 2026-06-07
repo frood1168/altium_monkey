@@ -15,11 +15,11 @@ _PCB_SPECIAL_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])\.([A-Za-z_][A-Za-z0-9_]*)
 
 
 def normalize_project_parameters(
-    project_parameters: Mapping[object, object] | None,
+    project_parameters: Mapping[str, object] | None,
 ) -> dict[str, str]:
     """
     Normalize project parameters into a case-insensitive map.
-    
+
     Keys are lower-cased; values are stringified.
     """
     result: dict[str, str] = {}
@@ -48,7 +48,7 @@ def _resolve_token(token_name: str, params_ci: dict[str, str]) -> str | None:
 def _parse_plus_concat_terms(text: str) -> list[tuple[str, str]] | None:
     """
     Parse a simple PCB concatenation expression into ordered terms.
-    
+
     Supported terms:
     - dot token: `.PARAM`
     - quoted literal: `'text'` or `"text"` (doubled quote escapes supported)
@@ -134,7 +134,7 @@ def _substitute_tokens_only(text: str, params_ci: dict[str, str]) -> str:
 def substitute_pcb_special_strings(text: str, params_ci: dict[str, str]) -> str:
     """
     Substitute PCB special strings from a case-insensitive parameter map.
-    
+
     Behavior:
     - Dot tokens resolve from `params_ci` (for example `.PCB_MIXDOWN`)
     - `.VariantName` defaults to `[No Variations]` when not provided

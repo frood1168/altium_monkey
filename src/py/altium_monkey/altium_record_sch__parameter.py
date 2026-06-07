@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
-    from .altium_sch_geometry_oracle import SchGeometryRecord
+    from .altium_sch_geometry_oracle import SchGeometryOp, SchGeometryRecord
 
 from .altium_record_types import (
     CoordPoint,
@@ -398,7 +398,7 @@ class AltiumSchParameter(SingleFontBindableRecordMixin, SchPrimitive):
         document_id: str,
         units_per_px: int = 64,
         wrap_record: bool = True,
-    ) -> "SchGeometryRecord | None":
+    ) -> "SchGeometryRecord | list[SchGeometryOp] | None":
         """
         Build the geometry record emitted for this parameter.
         """

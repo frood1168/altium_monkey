@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import cast
 
 from .altium_record_types import SchRecordType
 
@@ -314,7 +315,9 @@ def sch_json_object_type_from_record(
             return sch_json_object_type_from_record_type(binary_data[0])
         return None
 
-    return sch_json_object_type_from_record_type(record.get("RECORD"))
+    return sch_json_object_type_from_record_type(
+        cast(SchRecordType | int | str, record.get("RECORD"))
+    )
 
 
 def normalize_sch_json_object_type(

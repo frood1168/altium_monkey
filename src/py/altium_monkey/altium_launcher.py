@@ -216,7 +216,7 @@ class AltiumLauncher:
         Returns:
             True if file was opened successfully
         """
-        return self._open_file_impl(file_path)
+        return self._open_file_impl(Path(file_path))
 
     def kill(self) -> bool:
         """

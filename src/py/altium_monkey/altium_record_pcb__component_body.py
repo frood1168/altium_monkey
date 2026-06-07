@@ -7,6 +7,7 @@ import struct
 
 from .altium_pcb_enums import PcbBodyProjection
 from .altium_pcb_enums import PcbRegionKind
+from .altium_pcb_enums import pcb_region_kind_to_native_kind
 from .altium_record_types import PcbGraphicalObject, PcbRecordType
 
 # Reuse vertex classes from shapebased_region
@@ -72,9 +73,9 @@ class AltiumPcbComponentBody(PcbGraphicalObject):
         self.layer: int = 13  # Default to MECHANICAL13
         self.is_locked: bool = False
         self.is_keepout: bool = False
-        self.net_index: int = 0xFFFF
+        self.net_index: int | None = 0xFFFF
         self.polygon_index: int = 0xFFFF
-        self.component_index: int = 0xFFFF
+        self.component_index: int | None = 0xFFFF
         self.hole_count: int = 0
 
         # Region properties
@@ -354,8 +355,8 @@ class AltiumPcbComponentBody(PcbGraphicalObject):
                     vertex.end_angle = _local_read_f64("outline.end_angle")
                 else:
                     vertex.is_round = False
-                    vertex.x = _local_read_f64("outline.x")
-                    vertex.y = _local_read_f64("outline.y")
+                    vertex.x = int(round(_local_read_f64("outline.x")))
+                    vertex.y = int(round(_local_read_f64("outline.y")))
                     vertex.center_x = vertex.x
                     vertex.center_y = vertex.y
                 local_outline.append(vertex)
@@ -783,7 +784,7 @@ class AltiumPcbComponentBody(PcbGraphicalObject):
         """
         props: dict[str, str] = {str(k): str(v) for k, v in self.properties.items()}
 
-        kind_value = int(self.kind)
+        kind_value = pcb_region_kind_to_native_kind(self.kind)
         is_board_cutout = False
         if self.kind == PcbRegionKind.BOARD_CUTOUT:
             kind_value = 0
@@ -932,14 +933,15 @@ class AltiumPcbComponentBody(PcbGraphicalObject):
         subrecord.extend(self._skip_bytes_16)
 
         # Use original properties bytes if available and property fields are unchanged
+        raw_properties = self._properties_raw
         props_unchanged = (
-            self._properties_raw is not None
+            raw_properties is not None
             and self._properties_raw_signature is not None
             and self._properties_field_signature() == self._properties_raw_signature
         )
-        if props_unchanged:
-            subrecord.extend(struct.pack("<I", len(self._properties_raw)))
-            subrecord.extend(self._properties_raw)
+        if props_unchanged and raw_properties is not None:
+            subrecord.extend(struct.pack("<I", len(raw_properties)))
+            subrecord.extend(raw_properties)
         else:
             props_bytes = self._properties_string().encode("utf-8", errors="replace")
             if not self._props_has_null_terminator and not props_bytes.endswith(

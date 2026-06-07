@@ -1099,7 +1099,7 @@ class SchRectMils:
 def _set_record_location_mils(record: object, value: SchPointMils) -> None:
     if not isinstance(value, SchPointMils):
         raise TypeError("location_mils must be a SchPointMils value")
-    record.location = value.to_coord_point()
+    setattr(record, "location", value.to_coord_point())
 
 
 class Primitive(ABC):
@@ -1125,7 +1125,7 @@ class Primitive(ABC):
 
     @property
     @abstractmethod
-    def record_type(self) -> SchRecordType:
+    def record_type(self) -> IntEnum:
         """
         Record type ID.
         """
@@ -1584,14 +1584,16 @@ class PcbPrimitive(Primitive):
         """
         pass
 
-    def parse_from_binary(self, data: bytes) -> None:
+    def parse_from_binary(self, data: bytes, offset: int = 0) -> int | None:
         """
         Parse primitive from binary data.
 
         Args:
             data: Binary data starting with type byte
         """
+        _ = offset
         self._raw_binary = data
+        return None
 
     def serialize_to_record(self) -> dict[str, Any]:
         """

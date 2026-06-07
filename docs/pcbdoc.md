@@ -162,6 +162,55 @@ For parsed PcbDoc files, prefer `ResolvedLayerStack` when actual board-specific
 layer names are required; SVG `data-layer-display-name` uses resolved names
 when available and falls back to `PcbLayer.to_display_name()`.
 
+## Layer Stack Inspection
+
+`AltiumLayerStackDocument` is the source-aware layer-stack model for PcbDoc
+inspection and canonical empty-board stack synthesis. It preserves native stack
+source evidence while exposing deterministic objects for physical stacks,
+registry entries, substacks, board regions, bend lines, and layer pairs.
+
+Use `AltiumLayerStackDocument.from_pcbdoc(...)` for read-only inspection and
+`AltiumLayerStackDocument.canonical_empty()` plus
+`to_canonical_empty_board_data()` when creating a canonical empty PcbDoc through
+`PcbDocBuilder`.
+
+For new rigid-board documents, `AltiumLayerStackDocument.from_rigid_stack(...)`
+accepts typed `AltiumRigidCopperLayerSpec` and
+`AltiumRigidDielectricLayerSpec` rows for copper names/thicknesses and
+dielectric names, thicknesses, material, dielectric constant, dielectric type,
+and loss tangent. Emit the stack into a new builder with
+`PcbDocBuilder.set_layer_stack_document(...)`.
+
+For new rigid-flex documents, construct a typed `AltiumLayerStackDocument` with
+physical stack rows, `AltiumStackSubstack` definitions, `AltiumStackRegion`
+geometry, optional `AltiumStackBendLine` entries, and optional
+`AltiumStackBranch` topology. Emit it with
+`PcbDocBuilder.set_layer_stack_document(...)`, save the PcbDoc, and re-open it
+with `AltiumPcbDoc` plus `AltiumLayerStackDocument` to verify the generated
+native topology.
+
+For rigid-flex and multi-stack inspection, use native ids for joins. A
+substack's `source_stackup_ref` is the stable id; board regions point back to
+it through `layerstack_id`. Altium stores the same GUIDs with mixed spelling
+across sources, so helpers such as `substack_by_source_ref(...)`,
+`board_regions_for_layerstack_id(...)`, `layers_for_substack(...)`,
+`layers_for_board_region(...)`, and `branches_for_stack_ref(...)` accept refs
+with or without braces. Treat substack and region names as display labels that
+may collide or be renamed.
+
+`ResolvedLayerStack` remains the read-only convenience view for consumer layer
+names, enabled-layer checks, and reports such as `pcbdoc_stats`. Do not use it
+as the source for new PcbDoc authoring. Use `AltiumLayerStackDocument` whenever
+you need to write stack data, export `.stackup`/`.stackupx`, or inspect
+source-aware topology, branch, or bend-line evidence. See
+[`pcbdoc_flex_topology_report`](../examples/pcbdoc_flex_topology_report/README.md)
+for a complete query report.
+
+Arbitrary layer-stack editing is not part of the public writer contract yet.
+Use `set_layer_stack_template(...)` for the current limited rigid-board
+template helper. That helper is routed through the source-aware layer-stack
+model and preserves the established two-layer/four-layer output semantics.
+
 ## Via Protection, Tenting, And Delay
 
 `AltiumPcbDoc.add_via(...)` can author ordinary through vias and promoted via
@@ -256,26 +305,42 @@ Start with:
 
 1. [`hello_pcbdoc`](../examples/hello_pcbdoc/README.md)
 2. [`pcbdoc_stats`](../examples/pcbdoc_stats/README.md)
-3. [`pcbdoc_bom`](../examples/pcbdoc_bom/README.md)
-4. [`pcbdoc_pick_n_place`](../examples/pcbdoc_pick_n_place/README.md)
-5. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
-6. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
-7. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
-8. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
-9. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
-10. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
-11. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
-12. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
-13. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
-14. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
-15. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
-16. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
-17. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
-18. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
-19. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
-20. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
-21. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
-22. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
+3. [`pcbdoc_inspect_layer_stack`](../examples/pcbdoc_inspect_layer_stack/README.md)
+4. [`pcbdoc_create_layer_stack`](../examples/pcbdoc_create_layer_stack/README.md)
+5. [`pcbdoc_create_custom_rigid_stack`](../examples/pcbdoc_create_custom_rigid_stack/README.md)
+6. [`pcbdoc_create_impedance_rigid_stack`](../examples/pcbdoc_create_impedance_rigid_stack/README.md)
+7. [`pcbdoc_create_flex_stiffener`](../examples/pcbdoc_create_flex_stiffener/README.md)
+8. [`pcbdoc_create_rigid_flex_split_lines`](../examples/pcbdoc_create_rigid_flex_split_lines/README.md)
+9. [`pcbdoc_create_flex_in_cutout`](../examples/pcbdoc_create_flex_in_cutout/README.md)
+10. [`pcbdoc_create_rigid_flex_branch`](../examples/pcbdoc_create_rigid_flex_branch/README.md)
+11. [`pcbdoc_create_rigid_flex_branch_intrusion`](../examples/pcbdoc_create_rigid_flex_branch_intrusion/README.md)
+12. [`pcbdoc_create_rigid_flex_two_branch`](../examples/pcbdoc_create_rigid_flex_two_branch/README.md)
+13. [`pcbdoc_create_rigid_flex_impedance_backdrill`](../examples/pcbdoc_create_rigid_flex_impedance_backdrill/README.md)
+14. [`pcbdoc_create_cavity_placements`](../examples/pcbdoc_create_cavity_placements/README.md)
+15. [`pcbdoc_create_rigid_flex_multibranch`](../examples/pcbdoc_create_rigid_flex_multibranch/README.md)
+16. [`pcbdoc_flex_topology_report`](../examples/pcbdoc_flex_topology_report/README.md)
+17. [`pcbdoc_bom`](../examples/pcbdoc_bom/README.md)
+18. [`pcbdoc_pick_n_place`](../examples/pcbdoc_pick_n_place/README.md)
+19. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
+20. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
+21. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
+22. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
+23. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
+24. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
+25. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
+26. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
+27. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
+28. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
+29. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
+30. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
+31. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
+32. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
+33. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
+34. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
+35. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
+36. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
+37. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
+38. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.

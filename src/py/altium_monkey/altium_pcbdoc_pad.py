@@ -246,10 +246,10 @@ def parse_pad_record(data: bytes, offset: int) -> PcbDocPad | None:
             pad.y = read_int32() / 10000.0
             x_size_top = read_int32() / 10000.0
             y_size_top = read_int32() / 10000.0
-            read_int32() / 10000.0
-            read_int32() / 10000.0
-            read_int32() / 10000.0
-            read_int32() / 10000.0
+            _ = read_int32() / 10000.0
+            _ = read_int32() / 10000.0
+            _ = read_int32() / 10000.0
+            _ = read_int32() / 10000.0
             pad.hole_size = read_int32() / 10000.0
 
             # Use top layer size as width/height
@@ -337,7 +337,7 @@ def parse_pads_from_pcbdoc(pcbdoc_path: Path, verbose: bool = False) -> list[Pcb
 
 
 def parse_pads_from_pcblib(
-    pcblib_path: Path, footprint_name: str = None, verbose: bool = False
+    pcblib_path: Path, footprint_name: str | None = None, verbose: bool = False
 ) -> list[PcbDocPad]:
     """
     Parse all pad records from a PcbLib file.

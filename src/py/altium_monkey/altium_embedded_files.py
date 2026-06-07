@@ -310,7 +310,7 @@ def extract_embedded_models(
             model = EmbeddedModel(
                 index=idx,
                 name=model_name,
-                id=props.get("ID", ""),
+                id=str(props.get("ID", "") or ""),
                 compressed_data=model_data,
                 is_embedded=_parse_altium_bool(props.get("EMBED", True), default=True),
                 model_format=model_format,

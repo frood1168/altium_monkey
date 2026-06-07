@@ -3,23 +3,33 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from .altium_pcb_drill_rendering import should_render_via_drill_hole
 from .altium_pcb_enums import PadShape, PcbNetClassKind
 from .altium_pcb_mask_paste_rules import should_force_pad_copper_render
+from .altium_record_pcb__pad import AltiumPcbPad
+from .altium_record_pcb__via import AltiumPcbVia
 from .altium_record_types import PcbLayer
 from .altium_resolved_layer_stack import resolved_layer_stack_from_pcbdoc
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from .altium_pcbdoc import AltiumPcbDoc
 
 
 PcbDrawingPrimitiveRole = Literal["copper", "boardhole", "coppercutout"]
 PcbDrawingClassKind = Literal["net_class", "differential_pair_class"]
+
+
+class _PcbPrimitiveMetadataKwargs(TypedDict, total=False):
+    net_name: str | None
+    net_index: int | None
+    net_classes: tuple[str, ...]
+    differential_pair_names: tuple[str, ...]
+    differential_pair_classes: tuple[str, ...]
+    component_designator: str | None
 
 
 @dataclass(frozen=True)
@@ -302,28 +312,28 @@ class _PcbSourceMetadata:
             component_designator_by_index=_component_designator_by_index(pcbdoc),
         )
 
-    def primitive_kwargs(self, primitive: object) -> dict[str, object]:
+    def primitive_kwargs(self, primitive: object) -> _PcbPrimitiveMetadataKwargs:
         """Return relationship metadata for one source primitive."""
 
         net_index = _normalized_net_index(getattr(primitive, "net_index", None))
         net_name = None if net_index is None else self.net_name_by_index.get(net_index)
         component_index = _normalized_int(getattr(primitive, "component_index", None))
-        return {
-            "net_index": net_index,
-            "net_name": net_name,
-            "net_classes": tuple(self.net_classes_by_net_name.get(net_name or "", ())),
-            "differential_pair_names": tuple(
+        return _PcbPrimitiveMetadataKwargs(
+            net_index=net_index,
+            net_name=net_name,
+            net_classes=tuple(self.net_classes_by_net_name.get(net_name or "", ())),
+            differential_pair_names=tuple(
                 self.differential_pair_names_by_net_name.get(net_name or "", ())
             ),
-            "differential_pair_classes": tuple(
+            differential_pair_classes=tuple(
                 self.differential_pair_classes_by_net_name.get(net_name or "", ())
             ),
-            "component_designator": (
+            component_designator=(
                 None
                 if component_index is None
                 else self.component_designator_by_index.get(component_index)
             ),
-        }
+        )
 
 
 def _track_primitives(
@@ -475,6 +485,8 @@ def _pad_primitives(
 ) -> list[PcbDrawingPrimitive]:
     result: list[PcbDrawingPrimitive] = []
     for pad in getattr(pcbdoc, "pads", []) or []:
+        if not isinstance(pad, AltiumPcbPad):
+            continue
         if _should_skip_drawing_primitive(pad):
             continue
         for layer in actual_copper_layers:
@@ -494,7 +506,7 @@ def _pad_primitives(
 
 
 def _pad_copper_primitive(
-    pad: object,
+    pad: AltiumPcbPad,
     layer: PcbLayer,
     metadata: _PcbSourceMetadata,
 ) -> PcbDrawingPrimitive | None:
@@ -559,7 +571,7 @@ def _pad_copper_primitive(
 
 
 def _pad_hole_primitive(
-    pad: object,
+    pad: AltiumPcbPad,
     layer: PcbLayer,
     metadata: _PcbSourceMetadata,
 ) -> PcbDrawingPrimitive | None:
@@ -607,6 +619,8 @@ def _via_primitives(
 ) -> list[PcbDrawingPrimitive]:
     result: list[PcbDrawingPrimitive] = []
     for via in getattr(pcbdoc, "vias", []) or []:
+        if not isinstance(via, AltiumPcbVia):
+            continue
         if _should_skip_drawing_primitive(via):
             continue
         for layer in actual_copper_layers:
@@ -716,19 +730,19 @@ def _region_contours(region: object) -> tuple[tuple[PcbDrawingPoint, ...], ...]:
         return ()
 
     contours: list[tuple[PcbDrawingPoint, ...]] = []
-    outline_points = _points_from_vertices(outline)
+    outline_points = _points_from_vertices(_iterable_or_empty(outline))
     if len(outline_points) >= 3:
         contours.append(outline_points)
-    for hole in holes or []:
-        hole_points = _points_from_vertices(hole)
+    for hole in _iterable_or_empty(holes):
+        hole_points = _points_from_vertices(_iterable_or_empty(hole))
         if len(hole_points) >= 3:
             contours.append(hole_points)
     return tuple(contours)
 
 
-def _points_from_vertices(vertices: object) -> tuple[PcbDrawingPoint, ...]:
+def _points_from_vertices(vertices: Iterable[object]) -> tuple[PcbDrawingPoint, ...]:
     points: list[PcbDrawingPoint] = []
-    for vertex in vertices or []:
+    for vertex in vertices:
         points.append(
             PcbDrawingPoint(
                 float(getattr(vertex, "x_mils", 0.0) or 0.0),
@@ -736,6 +750,14 @@ def _points_from_vertices(vertices: object) -> tuple[PcbDrawingPoint, ...]:
             )
         )
     return _dedupe_points(tuple(points))
+
+
+def _iterable_or_empty(value: object) -> Iterable[object]:
+    if value is None or isinstance(value, str | bytes):
+        return ()
+    if isinstance(value, Iterable):
+        return value
+    return ()
 
 
 def _uni_from_center_size_rotation(
@@ -756,21 +778,25 @@ def _uni_from_center_size_rotation(
     )
 
 
-def _pad_designator(pad: object) -> str | None:
+def _pad_designator(pad: AltiumPcbPad) -> str | None:
     designator = str(getattr(pad, "designator", "") or "").strip()
     return designator or None
 
 
-def _pad_is_plated(pad: object) -> bool:
+def _pad_is_plated(pad: AltiumPcbPad) -> bool:
     return bool(getattr(pad, "is_plated", False))
 
 
-def _pad_hole_center_mils(pad: object, layer: PcbLayer) -> tuple[float, float]:
+def _pad_hole_center_mils(
+    pad: AltiumPcbPad,
+    layer: PcbLayer,
+) -> tuple[float, float]:
     hole_center_mils = getattr(pad, "hole_center_mils", None)
     if callable(hole_center_mils):
         try:
-            x_mils, y_mils = hole_center_mils(layer)
-            return float(x_mils), float(y_mils)
+            result = hole_center_mils(layer)
+            if isinstance(result, tuple | list) and len(result) >= 2:
+                return float(result[0]), float(result[1])
         except (TypeError, ValueError):
             pass
     return (
@@ -779,7 +805,7 @@ def _pad_hole_center_mils(pad: object, layer: PcbLayer) -> tuple[float, float]:
     )
 
 
-def _slot_length_mils(pad: object, hole_size_mils: float) -> float:
+def _slot_length_mils(pad: AltiumPcbPad, hole_size_mils: float) -> float:
     slot_size = getattr(pad, "slot_size_mils", None)
     if slot_size is not None:
         try:
@@ -794,13 +820,16 @@ def _slot_length_mils(pad: object, hole_size_mils: float) -> float:
     if not callable(from_internal_units):
         return hole_size_mils
     try:
-        return max(float(from_internal_units(slot_size_iu)), hole_size_mils)
+        resolved_slot_size = from_internal_units(slot_size_iu)
+        if not isinstance(resolved_slot_size, int | float | str):
+            return hole_size_mils
+        return max(float(resolved_slot_size), hole_size_mils)
     except (TypeError, ValueError):
         return hole_size_mils
 
 
 def _is_slot_hole(
-    pad: object,
+    pad: AltiumPcbPad,
     hole_size_mils: float,
     slot_length_mils: float,
 ) -> bool:
@@ -971,6 +1000,8 @@ def _normalized_net_index(value: object) -> int | None:
 
 
 def _normalized_int(value: object) -> int | None:
+    if not isinstance(value, int | float | str):
+        return None
     try:
         return int(value)
     except (TypeError, ValueError):

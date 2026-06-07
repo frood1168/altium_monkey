@@ -454,8 +454,9 @@ def netlist_to_wirelist(
                 part_value = _normalize_text_for_netlist(part_value)
 
             # Pin type name (use enum name, with Altium-specific formatting)
-            pin_type_name = PIN_TYPE_WIRELIST_NAMES.get(
-                term.pin_type.name, term.pin_type.name
+            pin_type_name = str(
+                PIN_TYPE_WIRELIST_NAMES.get(term.pin_type.name, term.pin_type.name)
+                or ""
             )
 
             # Format pin row

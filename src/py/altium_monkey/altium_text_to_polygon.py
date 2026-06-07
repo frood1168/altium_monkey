@@ -26,7 +26,19 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
+
+from .altium_stroke_font_data import (
+    STROKE_ADVANCES_DEFAULT,
+    STROKE_ADVANCES_SANS_SERIF,
+    STROKE_ADVANCES_SERIF,
+    STROKE_FONT_DEFAULT,
+    STROKE_FONT_SANS_SERIF,
+    STROKE_FONT_SERIF,
+    STROKE_WIDTHS_DEFAULT,
+    STROKE_WIDTHS_SANS_SERIF,
+    STROKE_WIDTHS_SERIF,
+)
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +96,45 @@ class StrokeTextResult:
 
     lines: list[tuple[float, float, float, float]] = field(default_factory=list)
     stroke_width_mm: float = 0.254
+
+
+class PcbTextRenderRecord(Protocol):
+    """
+    Structural record surface consumed by ``render_pcb_text``.
+    """
+
+    text_content: str
+    x: int
+    y: int
+    height: int
+    stroke_width: int
+    rotation: float
+    is_mirrored: bool
+    is_frame: bool
+    textbox_rect_width: int
+    textbox_rect_height: int
+    is_inverted: bool
+    margin_border_width: int
+    font_type: int
+    use_inverted_rectangle: bool
+    barcode_kind: int
+    barcode_render_mode: int
+    barcode_full_width: int
+    barcode_full_height: int
+    barcode_x_margin: int
+    barcode_y_margin: int
+    barcode_min_width: int
+    barcode_inverted: bool
+    barcode_show_text: bool
+    barcode_font_name: str
+    stroke_font_type: int
+    font_name: str
+    is_bold: bool
+    is_italic: bool
+
+    @property
+    def effective_justification(self) -> int:
+        raise NotImplementedError("pcb text effective justification")
 
 
 # ================================================================== #
@@ -2215,18 +2266,6 @@ def _transform_points(
 # Altium Stroke Font
 # ================================================================== #
 
-from .altium_stroke_font_data import (
-    STROKE_ADVANCES_DEFAULT,
-    STROKE_ADVANCES_SANS_SERIF,
-    STROKE_ADVANCES_SERIF,
-    STROKE_FONT_DEFAULT,
-    STROKE_FONT_SANS_SERIF,
-    STROKE_FONT_SERIF,
-    STROKE_WIDTHS_DEFAULT,
-    STROKE_WIDTHS_SANS_SERIF,
-    STROKE_WIDTHS_SERIF,
-)
-
 # Lookup tables indexed by the PCB TEXT record's stroke_font_type field.
 # Native PCB files store FontID-style values:
 #   1 -> Default
@@ -2405,7 +2444,7 @@ class StrokeTextRenderer:
                         glyph_lines.append((x1, y1, x2, y2))
 
                 char_groups.append((cursor_x, glyph_lines))
-                if use_custom_advances:
+                if use_custom_advances and cursor_advances is not None:
                     cursor_x += max(0.0, float(cursor_advances[char_index])) * scale
                 else:
                     cursor_x += max(0.0, char_advance + char_advance_adjust) * scale
@@ -2962,7 +3001,7 @@ class BarcodeRenderer:
 
 
 def render_pcb_text(
-    text_record: object,
+    text_record: PcbTextRenderRecord,
     truetype_renderer: TrueTypeTextRenderer | None = None,
     stroke_renderer: StrokeTextRenderer | None = None,
     barcode_renderer: BarcodeRenderer | None = None,

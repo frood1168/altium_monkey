@@ -8,6 +8,11 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .altium_pcb_enums import (
+    PcbRegionKind,
+    pcb_region_kind_from_native_kind,
+    pcb_region_kind_to_native_kind,
+)
 from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 
 if TYPE_CHECKING:
@@ -57,6 +62,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
         hole_vertices: List of lists of RegionVertex for each hole
         properties: Dict of region properties (KIND, ISBOARDCUTOUT, etc.)
         kind: Region kind (0=copper, 1=cutout, 2=named, 3=board_cutout)
+        cavity_height: Cavity definition height in internal units.
     """
 
     def __init__(self) -> None:
@@ -73,6 +79,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
         self.is_shapebased: bool = False
         self.keepout_restrictions: int = 0
         self.subpoly_index: int = 0
+        self.cavity_height: int | str = 0
 
         # Raw byte preservation for byte-identical round-trip
         self._flags1_raw: int = 0x04  # Full flags1 byte (not just known bits)
@@ -84,6 +91,13 @@ class AltiumPcbRegion(PcbGraphicalObject):
         self._properties_raw_signature: tuple | None = (
             None  # Snapshot of property fields at parse time
         )
+        self._properties_emit_trailing_null: bool = False
+        self._properties_include_keepout_restrictions: bool = True
+        self._trailing_data: bytes = b""
+        self._trailing_data_outline_signature: tuple | None = None
+        self._emit_extended_outline_tail: bool = False
+        self._raw_binary: bytes | None = None
+        self._raw_binary_signature: tuple | None = None
 
     @property
     def record_type(self) -> PcbRecordType:
@@ -195,6 +209,9 @@ class AltiumPcbRegion(PcbGraphicalObject):
 
             if pos + prop_len <= len(content):
                 self._properties_raw = bytes(content[pos : pos + prop_len])
+                self._properties_emit_trailing_null = self._properties_raw.endswith(
+                    b"\x00"
+                )
                 props_str = self._properties_raw.decode("ascii", errors="replace")
                 pos += prop_len
                 self.properties = self._parse_properties(props_str)
@@ -211,6 +228,9 @@ class AltiumPcbRegion(PcbGraphicalObject):
                 self.subpoly_index = int(self.properties.get("SUBPOLYINDEX", "0"))
                 self.union_index = int(
                     self.properties.get("UNIONINDEX", "0").strip().strip("\x00") or "0"
+                )
+                self.cavity_height = self._parse_mil_value(
+                    self.properties.get("CAVITYHEIGHT", "0mil")
                 )
             else:
                 log.warning(
@@ -251,6 +271,11 @@ class AltiumPcbRegion(PcbGraphicalObject):
                 pos += 16
             self.hole_vertices.append(hole_verts)
 
+        self._trailing_data = bytes(content[pos:]) if pos < len(content) else b""
+        self._trailing_data_outline_signature = (
+            self._outline_signature_for_trailing_data()
+        )
+
         log.debug(
             f"REGION: layer={self.layer}, kind={self.kind}, "
             f"verts={self.outline_vertex_count}, holes={self.hole_count}, "
@@ -271,11 +296,64 @@ class AltiumPcbRegion(PcbGraphicalObject):
         """
         result = {}
         for part in props_str.split("|"):
-            part = part.strip()
+            part = part.strip().strip("\x00")
             if "=" in part:
                 key, _, value = part.partition("=")
-                result[key.strip()] = value.strip()
+                result[key.strip().strip("\x00")] = value.strip().strip("\x00")
         return result
+
+    @staticmethod
+    def _parse_mil_value(value_str: object) -> int:
+        """
+        Parse a native mil-unit text value to internal units.
+        """
+        text = str(value_str or "").strip().strip("\x00")
+        if text.lower().endswith("mil"):
+            try:
+                return int(round(float(text[:-3].strip()) * 10000.0))
+            except ValueError:
+                return 0
+        if text:
+            try:
+                return int(round(float(text)))
+            except ValueError:
+                return 0
+        return 0
+
+    def _cavity_height_internal_units(self) -> int:
+        """
+        Return cavity height as internal units for both primitive and board regions.
+        """
+        value = getattr(self, "cavity_height", 0)
+        if isinstance(value, int):
+            return int(value)
+        if isinstance(value, float):
+            return int(round(value))
+        return self._parse_mil_value(value)
+
+    @staticmethod
+    def _format_mil_value(internal_units: int) -> str:
+        """
+        Format an internal-unit value as '<mils>mil'.
+        """
+        return f"{format(float(internal_units) / 10000.0, '.12g')}mil"
+
+    @property
+    def region_kind(self) -> PcbRegionKind:
+        """
+        Return the semantic public region kind for the native record fields.
+        """
+        return pcb_region_kind_from_native_kind(
+            int(self.kind),
+            is_board_cutout=self.is_board_cutout,
+        )
+
+    @property
+    def cavity_height_mils(self) -> float:
+        """
+        Cavity definition height in mils.
+        """
+        return self._cavity_height_internal_units() / 10000.0
 
     def _properties_field_signature(self) -> tuple:
         """
@@ -288,6 +366,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
             int(self.keepout_restrictions),
             int(self.subpoly_index),
             int(self.union_index),
+            self._cavity_height_internal_units(),
             tuple(sorted((str(k), str(v)) for k, v in self.properties.items())),
         )
 
@@ -309,6 +388,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
             int(self.keepout_restrictions),
             int(self.subpoly_index),
             int(self.union_index),
+            self._cavity_height_internal_units(),
             tuple((v.x_raw, v.y_raw) for v in self.outline_vertices),
             tuple(
                 tuple((v.x_raw, v.y_raw) for v in hole) for hole in self.hole_vertices
@@ -324,12 +404,21 @@ class AltiumPcbRegion(PcbGraphicalObject):
         Build pipe-separated region properties from object state.
         """
         props: dict[str, str] = {str(k): str(v) for k, v in self.properties.items()}
-        props["KIND"] = str(int(self.kind))
+        props["KIND"] = str(pcb_region_kind_to_native_kind(self.kind))
         props["ISBOARDCUTOUT"] = "TRUE" if self.is_board_cutout else "FALSE"
         props["ISSHAPEBASED"] = "TRUE" if self.is_shapebased else "FALSE"
-        props["KEEPOUTRESTRIC"] = str(int(self.keepout_restrictions))
+        if self._properties_include_keepout_restrictions or "KEEPOUTRESTRIC" in props:
+            props["KEEPOUTRESTRIC"] = str(int(self.keepout_restrictions))
         props["SUBPOLYINDEX"] = str(int(self.subpoly_index))
         props["UNIONINDEX"] = str(int(self.union_index))
+        cavity_height = getattr(self, "cavity_height", 0)
+        if cavity_height or "CAVITYHEIGHT" in props or int(self.kind) == 4:
+            if isinstance(cavity_height, str):
+                props["CAVITYHEIGHT"] = cavity_height
+            else:
+                props["CAVITYHEIGHT"] = self._format_mil_value(
+                    self._cavity_height_internal_units()
+                )
         return "|".join(f"{k}={v}" for k, v in props.items())
 
     def serialize_to_binary(self) -> bytes:
@@ -392,10 +481,17 @@ class AltiumPcbRegion(PcbGraphicalObject):
             and self._properties_field_signature() == self._properties_raw_signature
         )
         if props_unchanged:
-            subrecord.extend(struct.pack("<I", len(self._properties_raw)))
-            subrecord.extend(self._properties_raw)
+            properties_raw = self._properties_raw
+            if properties_raw is None:
+                raise RuntimeError("Missing raw region properties")
+            subrecord.extend(struct.pack("<I", len(properties_raw)))
+            subrecord.extend(properties_raw)
         else:
             props_bytes = self._properties_string().encode("ascii", errors="replace")
+            if self._properties_emit_trailing_null and not props_bytes.endswith(
+                b"\x00"
+            ):
+                props_bytes += b"\x00"
             subrecord.extend(struct.pack("<I", len(props_bytes)))
             subrecord.extend(props_bytes)
 
@@ -409,6 +505,8 @@ class AltiumPcbRegion(PcbGraphicalObject):
             for vertex in hole:
                 subrecord.extend(struct.pack("<dd", vertex.x_raw, vertex.y_raw))
 
+        subrecord.extend(self._trailing_bytes_for_write())
+
         record = bytearray()
         record.append(0x0B)  # REGION type
         record.extend(struct.pack("<I", len(subrecord)))
@@ -418,6 +516,56 @@ class AltiumPcbRegion(PcbGraphicalObject):
         self._raw_binary = result
         self._raw_binary_signature = state_sig
         return result
+
+    def _trailing_bytes_for_write(self) -> bytes:
+        """
+        Return any native contour tail after the simple REGION hole list.
+
+        BoardRegions/Data stores an additional extended-vertex contour after
+        the simple double-coordinate outline. Ordinary Regions6 records do not
+        need this tail unless one was parsed from native source.
+        """
+        outline_signature = self._outline_signature_for_trailing_data()
+        if (
+            self._trailing_data
+            and self._trailing_data_outline_signature == outline_signature
+        ):
+            return self._trailing_data
+        if self._emit_extended_outline_tail:
+            return self._build_extended_outline_tail()
+        return b""
+
+    def _outline_signature_for_trailing_data(self) -> tuple:
+        return tuple(
+            (float(vertex.x_raw), float(vertex.y_raw))
+            for vertex in tuple(self.outline_vertices or ())
+        )
+
+    def _build_extended_outline_tail(self) -> bytes:
+        vertices = list(self.outline_vertices or [])
+        if not vertices:
+            return b""
+        output_vertices = list(vertices)
+        first = vertices[0]
+        last = vertices[-1]
+        if (float(first.x_raw), float(first.y_raw)) != (
+            float(last.x_raw),
+            float(last.y_raw),
+        ):
+            output_vertices.append(first)
+
+        result = bytearray()
+        result.extend(struct.pack("<I", max(0, len(output_vertices) - 1)))
+        for vertex in output_vertices:
+            result.append(0)
+            result.extend(struct.pack("<i", int(round(float(vertex.x_raw)))))
+            result.extend(struct.pack("<i", int(round(float(vertex.y_raw)))))
+            result.extend(struct.pack("<i", 0))
+            result.extend(struct.pack("<i", 0))
+            result.extend(struct.pack("<i", 0))
+            result.extend(struct.pack("<d", 0.0))
+            result.extend(struct.pack("<d", 0.0))
+        return bytes(result)
 
     def _path_from_vertices(
         self, ctx: "PcbSvgRenderContext", vertices: list[RegionVertex]

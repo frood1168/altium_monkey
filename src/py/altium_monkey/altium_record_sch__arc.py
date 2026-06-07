@@ -61,8 +61,8 @@ class AltiumSchArc(PrimaryRadiusMilsMixin, SchGraphicalObject):
     # Integer fields with type enforcement
     # New objects still follow Altium's default arc radius, but missing Radius
     # on import must remain 0 per the native SchDataArc importer.
-    radius = IntField(default=10)
-    radius_frac = IntField(default=0)
+    radius = cast(Any, IntField(default=10))
+    radius_frac = cast(Any, IntField(default=0))
 
     def __init__(self) -> None:
         super().__init__()

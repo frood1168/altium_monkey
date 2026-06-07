@@ -2,24 +2,34 @@
 Extract symbol definitions from placed SchDoc components into SchLib files.
 """
 
+from __future__ import annotations
+
 import logging
 import random
 import re
 import string
+from collections.abc import Iterable
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, TypeGuard
 
 from .altium_font_manager import FontIDManager
+from .altium_record_sch__component import AltiumSchComponent
 from .altium_record_sch__implementation import (
     AltiumSchImplementation,
     AltiumSchImplementationList,
 )
 from .altium_record_sch__designator import AltiumSchDesignator
+from .altium_record_sch__image import AltiumSchImage
 from .altium_record_sch__parameter import AltiumSchParameter
+from .altium_record_sch__pin import AltiumSchPin
 from .altium_record_types import SchRecordType
 from .altium_symbol_transform import normalize_rectangle_coords, to_symbol_space
+
+if TYPE_CHECKING:
+    from .altium_schdoc import AltiumSchDoc
+    from .altium_schlib import AltiumSchLib, AltiumSymbol
 
 log = logging.getLogger(__name__)
 
@@ -119,7 +129,9 @@ def extract_symbols_from_schdoc_file(
     return results
 
 
-def _group_components_by_symbol(components: list) -> dict[str, list]:
+def _group_components_by_symbol(
+    components: Iterable[AltiumSchComponent],
+) -> dict[str, list[AltiumSchComponent]]:
     """
     Group components by their symbol identifier.
 
@@ -137,7 +149,7 @@ def _group_components_by_symbol(components: list) -> dict[str, list]:
     Returns:
         Dict mapping symbol key -> list of component instances
     """
-    components_by_symbol = defaultdict(list)
+    components_by_symbol: defaultdict[str, list[AltiumSchComponent]] = defaultdict(list)
 
     for comp in components:
         # Prefer DesignItemId (database library component)
@@ -150,7 +162,7 @@ def _group_components_by_symbol(components: list) -> dict[str, list]:
     return dict(components_by_symbol)
 
 
-def _select_best_instance(instances: list) -> Any:
+def _select_best_instance(instances: list[AltiumSchComponent]) -> AltiumSchComponent:
     """
     Select the best component instance for symbol extraction.
 
@@ -163,7 +175,7 @@ def _select_best_instance(instances: list) -> Any:
         The best component instance to use as template
     """
 
-    def score(comp: object) -> int:
+    def score(comp: AltiumSchComponent) -> int:
         # Lower is better: no mirror (0) + no rotation (0)
         mirror_penalty = 10 if comp.is_mirrored else 0
         rotation = (
@@ -176,7 +188,10 @@ def _select_best_instance(instances: list) -> Any:
     return min(instances, key=score)
 
 
-def _copy_component_metadata(source: object, target_symbol: object) -> None:
+def _copy_component_metadata(
+    source: AltiumSchComponent,
+    target_symbol: AltiumSymbol,
+) -> None:
     """
     Copy metadata from a component to a symbol.
 
@@ -190,12 +205,12 @@ def _copy_component_metadata(source: object, target_symbol: object) -> None:
     if source.component_description:
         target_symbol.description = source.component_description
     if source.utf8_component_description:
-        target_symbol.utf8_description = source.utf8_component_description
+        setattr(target_symbol, "utf8_description", source.utf8_component_description)
 
     # Database library fields - only copy if they were present in original
     # (component parser tracks _has_* flags for fields that may default to '*')
     if source.database_table_name:
-        target_symbol.database_table_name = source.database_table_name
+        setattr(target_symbol, "database_table_name", source.database_table_name)
     # SourceLibraryName: copy if present and not '*'
     if (
         hasattr(source, "_has_source_library_name")
@@ -203,13 +218,13 @@ def _copy_component_metadata(source: object, target_symbol: object) -> None:
         or source.source_library_name
         and source.source_library_name != "*"
     ):
-        target_symbol.source_library_name = source.source_library_name
+        setattr(target_symbol, "source_library_name", source.source_library_name)
     # LibraryPath: copy if present in original (even if '*')
     if hasattr(source, "_has_library_path") and source._has_library_path:
-        target_symbol.library_path = source.library_path
+        setattr(target_symbol, "library_path", source.library_path)
     # TargetFileName: copy if present in original (even if '*')
     if hasattr(source, "_has_target_filename") and source._has_target_filename:
-        target_symbol.target_file_name = source.target_filename
+        setattr(target_symbol, "target_file_name", source.target_filename)
 
     # Component classification - only set if not default (0 = Standard)
     # Altium's Library Splitter doesn't output ComponentKind=0
@@ -220,29 +235,33 @@ def _copy_component_metadata(source: object, target_symbol: object) -> None:
             else int(source.component_kind)
         )
         if kind_val != 0:
-            target_symbol.component_kind = kind_val
+            setattr(target_symbol, "component_kind", kind_val)
 
     # ComponentKindVersion2 (5=Standard_NoBOM)
     if (
         hasattr(source, "component_kind_version2")
         and source.component_kind_version2 is not None
     ):
-        target_symbol.component_kind_version2 = source.component_kind_version2
+        setattr(
+            target_symbol,
+            "component_kind_version2",
+            source.component_kind_version2,
+        )
 
     # PartIDLocked (uses Export_Boolean_WithDefault in Altium)
     if hasattr(source, "part_id_locked"):
-        target_symbol.part_id_locked = source.part_id_locked
+        setattr(target_symbol, "part_id_locked", source.part_id_locked)
 
     # Component colors - copy if present in original
     # Note: AreaColor is copied if present (even if white)
     # Color is NOT copied if 0 (Altium's Library Splitter omits Color=0)
     if getattr(source, "_has_area_color", False):
-        target_symbol.area_color = source.area_color
+        setattr(target_symbol, "area_color", source.area_color)
     if getattr(source, "_has_color", False) and source.color != 0:
-        target_symbol.color = source.color
+        setattr(target_symbol, "color", source.color)
     # Only set override_colors if True - False is the default and shouldn't be written
     if getattr(source, "override_colors", False):
-        target_symbol.override_colors = source.override_colors
+        setattr(target_symbol, "override_colors", source.override_colors)
 
     # Display mode count for multi-display-mode symbols
     if hasattr(source, "display_mode_count") and source.display_mode_count > 1:
@@ -251,14 +270,14 @@ def _copy_component_metadata(source: object, target_symbol: object) -> None:
 
 def _create_schlib_symbol_from_template(
     symbol_key: str,
-    template: object,
-    schdoc: object,
+    template: AltiumSchComponent,
+    schdoc: AltiumSchDoc,
     *,
     current_part_id: int | None = None,
     strip_parameters: bool = True,
     strip_implementations: bool = True,
     debug: bool = False,
-) -> tuple[object, str, object]:
+) -> tuple[AltiumSchLib, str, AltiumSymbol]:
     from .altium_schlib import AltiumSchLib
 
     schlib = AltiumSchLib()
@@ -292,7 +311,7 @@ def _create_schlib_symbol_from_template(
     return schlib, safe_name, symbol
 
 
-def _ordered_component_children(template: object) -> list[object]:
+def _ordered_component_children(template: AltiumSchComponent) -> list[object]:
     """
     Return component children in source file order, with defensive fallbacks.
     """
@@ -322,22 +341,22 @@ def _clear_extracted_record_state(obj: object) -> None:
     symbol.
     """
     if hasattr(obj, "parent"):
-        obj.parent = None
+        setattr(obj, "parent", None)
     if hasattr(obj, "owner_index"):
-        obj.owner_index = 0
+        setattr(obj, "owner_index", 0)
     if hasattr(obj, "index_in_sheet"):
-        obj.index_in_sheet = None
+        setattr(obj, "index_in_sheet", None)
     if hasattr(obj, "_raw_record"):
-        obj._raw_record = None
+        setattr(obj, "_raw_record", None)
     if hasattr(obj, "_record_index"):
-        obj._record_index = None
+        setattr(obj, "_record_index", None)
 
 
 def _add_transformed_component_children(
-    template: object,
-    symbol: object,
-    schlib: object,
-    schdoc: object,
+    template: AltiumSchComponent,
+    symbol: AltiumSymbol,
+    schlib: AltiumSchLib,
+    schdoc: AltiumSchDoc,
     *,
     strip_parameters: bool,
     debug: bool = False,
@@ -360,7 +379,7 @@ def _add_transformed_component_children(
 
     for child in _ordered_component_children(template):
         child_id = id(child)
-        if child_id in pin_ids:
+        if child_id in pin_ids and isinstance(child, AltiumSchPin):
             symbol.add_pin(_transform_pin_for_symbol(child, template, schdoc))
             continue
 
@@ -378,7 +397,7 @@ def _add_transformed_component_children(
                 symbol.add_object(transformed)
             continue
 
-        if child_id in designator_ids:
+        if child_id in designator_ids and isinstance(child, AltiumSchDesignator):
             symbol.add_object(_transform_designator_for_symbol(child, template))
             continue
 
@@ -389,9 +408,7 @@ def _add_transformed_component_children(
         symbol.add_object(transformed)
 
 
-def _is_transformed_image(obj: object) -> bool:
-    from .altium_record_sch__image import AltiumSchImage
-
+def _is_transformed_image(obj: object) -> TypeGuard[AltiumSchImage]:
     return isinstance(obj, AltiumSchImage)
 
 
@@ -410,7 +427,10 @@ def _library_designator_text(text: object) -> str:
     return f"{without_number or value}?"
 
 
-def _transform_designator_for_symbol(designator: object, template: object) -> object:
+def _transform_designator_for_symbol(
+    designator: AltiumSchDesignator,
+    template: AltiumSchComponent,
+) -> AltiumSchDesignator:
     transformed = to_symbol_space(designator, template)
     _clear_extracted_record_state(transformed)
     if hasattr(transformed, "text"):
@@ -418,15 +438,19 @@ def _transform_designator_for_symbol(designator: object, template: object) -> ob
     return transformed
 
 
-def _transform_graphic_for_symbol(graphic: object, template: object) -> object:
+def _transform_graphic_for_symbol(
+    graphic: object,
+    template: AltiumSchComponent,
+) -> object:
     transformed = to_symbol_space(graphic, template)
-    if hasattr(transformed, "record_type") and transformed.record_type in (
+    record_type = getattr(transformed, "record_type", None)
+    if record_type in (
         SchRecordType.RECTANGLE,
         SchRecordType.ROUND_RECTANGLE,
     ):
         normalize_rectangle_coords(transformed)
     if hasattr(transformed, "owner_index"):
-        transformed.owner_index = 0
+        setattr(transformed, "owner_index", 0)
     for attr in (
         "_has_location_x",
         "_has_location_y",
@@ -437,15 +461,14 @@ def _transform_graphic_for_symbol(graphic: object, template: object) -> object:
             setattr(transformed, attr, False)
 
     if _is_transformed_image(transformed):
-        if hasattr(transformed, "_raw_record") and isinstance(
-            transformed._raw_record, dict
-        ):
-            transformed._raw_record.pop("OwnerIndex", None)
-            transformed._raw_record.pop("OWNERINDEX", None)
+        raw_record = getattr(transformed, "_raw_record", None)
+        if isinstance(raw_record, dict):
+            raw_record.pop("OwnerIndex", None)
+            raw_record.pop("OWNERINDEX", None)
         return transformed
 
     if hasattr(transformed, "_raw_record"):
-        transformed._raw_record = None
+        setattr(transformed, "_raw_record", None)
     if (
         getattr(transformed, "record_type", None) == SchRecordType.ARC
         and getattr(transformed, "radius", 0) == 0
@@ -460,7 +483,10 @@ def _clone_implementation_child(child: object) -> object:
     return cloned
 
 
-def _add_implementations(template: object, symbol: object) -> None:
+def _add_implementations(
+    template: AltiumSchComponent,
+    symbol: AltiumSymbol,
+) -> None:
     """
     Copy component implementation lists and model children into the symbol.
     """
@@ -484,7 +510,7 @@ def _build_symbol_component_record(
     *,
     symbol_key: str,
     safe_name: str,
-    template: object,
+    template: AltiumSchComponent,
     current_part_id: int | None = None,
 ) -> dict[str, str]:
     actual_part_count = _get_actual_part_count(template)
@@ -576,7 +602,7 @@ def _build_symbol_component_record(
     return record
 
 
-def _first_instance_current_part_id(instances: list[object]) -> int:
+def _first_instance_current_part_id(instances: list[AltiumSchComponent]) -> int:
     """
     Return the CurrentPartId Altium uses for extracted component metadata.
 
@@ -611,7 +637,7 @@ def _copy_matching_utf8_identity_fields(
                 record[utf8_key] = str(value)
 
 
-def _symbol_display_name(symbol_key: str, template: object) -> str:
+def _symbol_display_name(symbol_key: str, template: AltiumSchComponent) -> str:
     """
     Resolve the SchLib storage/header name for an extracted symbol.
 
@@ -636,18 +662,18 @@ def _symbol_display_name(symbol_key: str, template: object) -> str:
     return symbol_key
 
 
-def _get_actual_part_count(template: object) -> int:
+def _get_actual_part_count(template: AltiumSchComponent) -> int:
     part_count_stored = int(getattr(template, "part_count", 1) or 1)
     return part_count_stored - 1 if part_count_stored > 1 else 1
 
 
-def _resolve_component_area_color(template: object) -> int:
+def _resolve_component_area_color(template: AltiumSchComponent) -> int:
     if getattr(template, "_has_area_color", False):
         return int(getattr(template, "area_color", 11599871) or 11599871)
     return 11599871
 
 
-def _resolve_component_color(template: object) -> int | None:
+def _resolve_component_color(template: AltiumSchComponent) -> int | None:
     if getattr(template, "_has_color", False):
         color = int(getattr(template, "color", 0) or 0)
         if color != 0:
@@ -655,13 +681,16 @@ def _resolve_component_color(template: object) -> int | None:
     return None
 
 
-def _resolve_component_override_colors(template: object) -> bool | None:
+def _resolve_component_override_colors(template: AltiumSchComponent) -> bool | None:
     if bool(getattr(template, "override_colors", False)):
         return True
     return None
 
 
-def _copy_font_registry_from_schdoc(schlib: object, schdoc: object) -> None:
+def _copy_font_registry_from_schdoc(
+    schlib: AltiumSchLib,
+    schdoc: AltiumSchDoc,
+) -> None:
     if schdoc.font_manager is None:
         schlib.font_manager = FontIDManager.from_font_dict({})
         return
@@ -672,22 +701,29 @@ def _copy_font_registry_from_schdoc(schlib: object, schdoc: object) -> None:
     schlib.font_manager = FontIDManager.from_font_dict(fonts)
 
 
-def _set_symbol_part_count(template: object, symbol: object) -> None:
+def _set_symbol_part_count(
+    template: AltiumSchComponent,
+    symbol: AltiumSymbol,
+) -> None:
     actual_part_count = _get_actual_part_count(template)
     if actual_part_count > 1:
         symbol.set_part_count(actual_part_count)
 
 
-def _transform_pin_for_symbol(pin: object, template: object, schdoc: object) -> object:
+def _transform_pin_for_symbol(
+    pin: AltiumSchPin,
+    template: AltiumSchComponent,
+    schdoc: AltiumSchDoc,
+) -> AltiumSchPin:
     transformed_pin = to_symbol_space(pin, template)
     if hasattr(transformed_pin, "owner_index"):
-        transformed_pin.owner_index = 0
+        setattr(transformed_pin, "owner_index", 0)
     if hasattr(transformed_pin, "index_in_sheet"):
-        transformed_pin.index_in_sheet = None
+        setattr(transformed_pin, "index_in_sheet", None)
     if hasattr(transformed_pin, "_raw_record"):
-        transformed_pin._raw_record = None
+        setattr(transformed_pin, "_raw_record", None)
     if hasattr(transformed_pin, "_source_is_binary"):
-        transformed_pin._source_is_binary = True
+        setattr(transformed_pin, "_source_is_binary", True)
     for attr in ("_has_location_x", "_has_location_y"):
         if hasattr(transformed_pin, attr):
             setattr(transformed_pin, attr, False)
@@ -720,9 +756,9 @@ def _transform_pin_for_symbol(pin: object, template: object, schdoc: object) -> 
 
 
 def _add_embedded_image_transformed(
-    image: object,
-    symbol: object,
-    schlib: object,
+    image: AltiumSchImage,
+    symbol: AltiumSymbol,
+    schlib: AltiumSchLib,
     embedded_images: dict[str, bytes],
     debug: bool = False,
 ) -> None:

@@ -15,6 +15,25 @@ requires_extra = []
 tags = ["hello-world", "generation", "image", "schematic"]
 
 [[examples]]
+id = "schdoc_vertical_pin_svg"
+title = "Render vertical pin text in SchDoc SVG"
+summary = "Generate pins with default and custom pin-text orientation settings, render SchDoc SVG, and write a manifest proving vertical pin names/designators keep expected rotate transforms."
+areas = ["schdoc", "svg"]
+status = "ready"
+entrypoint = "schdoc_vertical_pin_svg/schdoc_vertical_pin_svg.py"
+doc = "schdoc_vertical_pin_svg/README.md"
+inputs = []
+assets = []
+outputs = [
+  "schdoc_vertical_pin_svg/output/schdoc_vertical_pin_svg.SchLib",
+  "schdoc_vertical_pin_svg/output/schdoc_vertical_pin_svg.SchDoc",
+  "schdoc_vertical_pin_svg/output/schdoc_vertical_pin_svg.svg",
+  "schdoc_vertical_pin_svg/output/vertical_pin_svg_manifest.json",
+]
+requires_extra = []
+tags = ["schdoc", "svg", "pins", "orientation", "rendering"]
+
+[[examples]]
 id = "schdoc_add_embedded_image"
 title = "Add an embedded image to an existing SchDoc"
 summary = "Load a blank schematic, create one detached embedded image, add it to the document, and save the modified SchDoc."
@@ -319,6 +338,303 @@ outputs = [
 ]
 requires_extra = []
 tags = ["pcbdoc", "project", "statistics", "board-outline", "drills", "slots", "layer-stack"]
+
+[[examples]]
+id = "pcbdoc_inspect_layer_stack"
+title = "Inspect a PcbDoc or stackup layer stack"
+summary = "Load a PcbDoc, .stackup, or .stackupx file, build the source-aware layer-stack model, and write normalized debug JSON for stack layers, substacks, layer pairs, impedance profiles, and source evidence."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_inspect_layer_stack/pcbdoc_inspect_layer_stack.py"
+doc = "pcbdoc_inspect_layer_stack/README.md"
+inputs = ["assets/pcbdoc/blank.PcbDoc"]
+assets = []
+outputs = ["pcbdoc_inspect_layer_stack/output/layer_stack.json"]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "inspection", "json", "stackup"]
+
+[[examples]]
+id = "pcbdoc_create_layer_stack"
+title = "Create a PcbDoc layer stack"
+summary = "Synthesize the canonical empty-board layer stack through AltiumLayerStackDocument, save a PcbDoc, reparse it, and write a semantic comparison manifest."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_layer_stack/pcbdoc_create_layer_stack.py"
+doc = "pcbdoc_create_layer_stack/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_create_layer_stack/output/pcbdoc_create_layer_stack.PcbDoc",
+  "pcbdoc_create_layer_stack/output/layer_stack_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "stackup", "canonical-empty"]
+
+[[examples]]
+id = "pcbdoc_create_custom_rigid_stack"
+title = "Create a custom rigid PcbDoc layer stack"
+summary = "Author a custom four-layer rigid stack through AltiumLayerStackDocument.from_rigid_stack, save a PcbDoc, reparse it, and write a semantic comparison manifest."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_custom_rigid_stack/pcbdoc_create_custom_rigid_stack.py"
+doc = "pcbdoc_create_custom_rigid_stack/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_create_custom_rigid_stack/output/pcbdoc_create_custom_rigid_stack.PcbDoc",
+  "pcbdoc_create_custom_rigid_stack/output/custom_rigid_stack_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-stack", "custom-stack"]
+
+[[examples]]
+id = "pcbdoc_create_impedance_rigid_stack"
+title = "Create an impedance-controlled rigid PcbDoc stack"
+summary = "Author a synthetic eight-layer rigid stack with controlled-impedance profiles, save a PcbDoc plus .stackup/.stackupx exports, and compare all readbacks."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_impedance_rigid_stack/pcbdoc_create_impedance_rigid_stack.py"
+doc = "pcbdoc_create_impedance_rigid_stack/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_create_impedance_rigid_stack/output/pcbdoc_create_impedance_rigid_stack.PcbDoc",
+  "pcbdoc_create_impedance_rigid_stack/output/pcbdoc_create_impedance_rigid_stack.stackup",
+  "pcbdoc_create_impedance_rigid_stack/output/pcbdoc_create_impedance_rigid_stack.stackupx",
+  "pcbdoc_create_impedance_rigid_stack/output/impedance_rigid_stack_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-stack", "impedance"]
+
+[[examples]]
+id = "pcbdoc_flex_topology_report"
+title = "Report rigid-flex PcbDoc topology"
+summary = "Read the packaged rigid-flex fixture through AltiumLayerStackDocument and write JSON/text reports showing substack ids, board-region joins, region layers, bend lines, and branch topology queries."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_flex_topology_report/pcbdoc_flex_topology_report.py"
+doc = "pcbdoc_flex_topology_report/README.md"
+inputs = []
+assets = [
+  "assets/pcbdoc/rigid_flex_topology_fixture.PcbDoc",
+]
+outputs = [
+  "pcbdoc_flex_topology_report/output/flex_topology_report.json",
+  "pcbdoc_flex_topology_report/output/flex_topology_report.txt",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "rigid-flex", "topology", "inspection"]
+
+[[examples]]
+id = "pcbdoc_create_flex_stiffener"
+title = "Create a flex PcbDoc with stiffeners"
+summary = "Author a flex-only PcbDoc with top and bottom stiffener substacks, board regions, coverlay/adhesive rows, a bend line, board cutout, mechanical region evidence, and PcbDoc readback verification."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_flex_stiffener/pcbdoc_create_flex_stiffener.py"
+doc = "pcbdoc_create_flex_stiffener/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_create_flex_stiffener/output/pcbdoc_create_flex_stiffener.PcbDoc",
+  "pcbdoc_create_flex_stiffener/output/pcbdoc_create_flex_stiffener.stackup",
+  "pcbdoc_create_flex_stiffener/output/pcbdoc_create_flex_stiffener.stackupx",
+  "pcbdoc_create_flex_stiffener/output/flex_stiffener_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "stiffener"]
+
+[[examples]]
+id = "pcbdoc_create_rigid_flex_split_lines"
+title = "Create a Rigid-Flex 1.0 split-line PcbDoc"
+summary = "Recreate a fixture-derived Rigid-Flex 1.0 PcbDoc with split-line board regions, write PcbDoc/.stackup/.stackupx outputs, and verify region/bend topology after PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_rigid_flex_split_lines/pcbdoc_create_rigid_flex_split_lines.py"
+doc = "pcbdoc_create_rigid_flex_split_lines/README.md"
+inputs = []
+assets = [
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_split_lines.json",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_split_lines.stackup",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_split_lines.stackupx",
+]
+outputs = [
+  "pcbdoc_create_rigid_flex_split_lines/output/pcbdoc_create_rigid_flex_split_lines.PcbDoc",
+  "pcbdoc_create_rigid_flex_split_lines/output/pcbdoc_create_rigid_flex_split_lines.stackup",
+  "pcbdoc_create_rigid_flex_split_lines/output/pcbdoc_create_rigid_flex_split_lines.stackupx",
+  "pcbdoc_create_rigid_flex_split_lines/output/rigid_flex_split_lines_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "split-lines"]
+
+[[examples]]
+id = "pcbdoc_create_flex_in_cutout"
+title = "Create a flex-in-cutout PcbDoc"
+summary = "Recreate a fixture-derived advanced rigid-flex PcbDoc with a flex region inside a rigid-board cutout, write PcbDoc/.stackup/.stackupx outputs, and verify region/bend topology after PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_flex_in_cutout/pcbdoc_create_flex_in_cutout.py"
+doc = "pcbdoc_create_flex_in_cutout/README.md"
+inputs = []
+assets = [
+  "assets/pcbdoc_layer_stack_specs/flex_in_cutout.json",
+  "assets/pcbdoc_layer_stack_specs/flex_in_cutout.stackup",
+  "assets/pcbdoc_layer_stack_specs/flex_in_cutout.stackupx",
+]
+outputs = [
+  "pcbdoc_create_flex_in_cutout/output/pcbdoc_create_flex_in_cutout.PcbDoc",
+  "pcbdoc_create_flex_in_cutout/output/pcbdoc_create_flex_in_cutout.stackup",
+  "pcbdoc_create_flex_in_cutout/output/pcbdoc_create_flex_in_cutout.stackupx",
+  "pcbdoc_create_flex_in_cutout/output/flex_in_cutout_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "cutout"]
+
+[[examples]]
+id = "pcbdoc_create_rigid_flex_branch"
+title = "Create a one-branch rigid-flex PcbDoc"
+summary = "Recreate a fixture-derived main-rigid to flex-extension to rigid-end PcbDoc, write PcbDoc/.stackup/.stackupx outputs, and verify branch topology after PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_rigid_flex_branch/pcbdoc_create_rigid_flex_branch.py"
+doc = "pcbdoc_create_rigid_flex_branch/README.md"
+inputs = []
+assets = ["assets/pcbdoc_layer_stack_specs/rigid_flex_branch_chain.json"]
+outputs = [
+  "pcbdoc_create_rigid_flex_branch/output/pcbdoc_create_rigid_flex_branch.PcbDoc",
+  "pcbdoc_create_rigid_flex_branch/output/pcbdoc_create_rigid_flex_branch.stackup",
+  "pcbdoc_create_rigid_flex_branch/output/pcbdoc_create_rigid_flex_branch.stackupx",
+  "pcbdoc_create_rigid_flex_branch/output/rigid_flex_branch_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "branch"]
+
+[[examples]]
+id = "pcbdoc_create_rigid_flex_branch_intrusion"
+title = "Create a rigid-flex branch-intrusion PcbDoc"
+summary = "Recreate a fixture-derived advanced rigid-flex PcbDoc with branch-section-stack intrusion settings, write PcbDoc/.stackup/.stackupx outputs, and verify branch topology after PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_rigid_flex_branch_intrusion/pcbdoc_create_rigid_flex_branch_intrusion.py"
+doc = "pcbdoc_create_rigid_flex_branch_intrusion/README.md"
+inputs = []
+assets = [
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_branch_intrusion.json",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_branch_intrusion.stackup",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_branch_intrusion.stackupx",
+]
+outputs = [
+  "pcbdoc_create_rigid_flex_branch_intrusion/output/pcbdoc_create_rigid_flex_branch_intrusion.PcbDoc",
+  "pcbdoc_create_rigid_flex_branch_intrusion/output/pcbdoc_create_rigid_flex_branch_intrusion.stackup",
+  "pcbdoc_create_rigid_flex_branch_intrusion/output/pcbdoc_create_rigid_flex_branch_intrusion.stackupx",
+  "pcbdoc_create_rigid_flex_branch_intrusion/output/rigid_flex_branch_intrusion_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "branch", "intrusion"]
+
+[[examples]]
+id = "pcbdoc_create_rigid_flex_two_branch"
+title = "Create a two-branch rigid-flex PcbDoc"
+summary = "Recreate a fixture-derived advanced rigid-flex PcbDoc with east and west branch roots, write PcbDoc/.stackup/.stackupx outputs, and verify branch topology after PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_rigid_flex_two_branch/pcbdoc_create_rigid_flex_two_branch.py"
+doc = "pcbdoc_create_rigid_flex_two_branch/README.md"
+inputs = []
+assets = [
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_two_branch_extensions.json",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_two_branch_extensions.stackup",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_two_branch_extensions.stackupx",
+]
+outputs = [
+  "pcbdoc_create_rigid_flex_two_branch/output/pcbdoc_create_rigid_flex_two_branch.PcbDoc",
+  "pcbdoc_create_rigid_flex_two_branch/output/pcbdoc_create_rigid_flex_two_branch.stackup",
+  "pcbdoc_create_rigid_flex_two_branch/output/pcbdoc_create_rigid_flex_two_branch.stackupx",
+  "pcbdoc_create_rigid_flex_two_branch/output/rigid_flex_two_branch_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "branch"]
+
+[[examples]]
+id = "pcbdoc_create_rigid_flex_impedance_backdrill"
+title = "Create a rigid-flex impedance/backdrill PcbDoc"
+summary = "Recreate a fixture-derived nested rigid-flex PcbDoc with impedance profiles, transmission lines, via spans, and backdrill layer pairs, then verify PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_rigid_flex_impedance_backdrill/pcbdoc_create_rigid_flex_impedance_backdrill.py"
+doc = "pcbdoc_create_rigid_flex_impedance_backdrill/README.md"
+inputs = []
+assets = [
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_impedance_backdrill.json",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_impedance_backdrill.stackup",
+  "assets/pcbdoc_layer_stack_specs/rigid_flex_impedance_backdrill.stackupx",
+]
+outputs = [
+  "pcbdoc_create_rigid_flex_impedance_backdrill/output/pcbdoc_create_rigid_flex_impedance_backdrill.PcbDoc",
+  "pcbdoc_create_rigid_flex_impedance_backdrill/output/pcbdoc_create_rigid_flex_impedance_backdrill.stackup",
+  "pcbdoc_create_rigid_flex_impedance_backdrill/output/pcbdoc_create_rigid_flex_impedance_backdrill.stackupx",
+  "pcbdoc_create_rigid_flex_impedance_backdrill/output/rigid_flex_impedance_backdrill_manifest.json",
+]
+requires_extra = []
+tags = [
+  "pcbdoc",
+  "layer-stack",
+  "generation",
+  "rigid-flex",
+  "impedance",
+  "backdrill",
+]
+
+[[examples]]
+id = "pcbdoc_create_cavity_placements"
+title = "Create PcbDoc cavity placements"
+summary = "Create a fixture-backed rigid PcbDoc, insert the R0402_0.40MM_HD cavity footprint on top, bottom, and internal copper layers, and verify board-side cavity regions, embedded model placement, and copper component-placement policy after readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_cavity_placements/pcbdoc_create_cavity_placements.py"
+doc = "pcbdoc_create_cavity_placements/README.md"
+inputs = []
+assets = [
+  "assets/pcblib/R0402_0.40MM_HD.PcbLib",
+  "assets/pcbdoc_layer_stack_specs/cavity_placements.json",
+  "assets/pcbdoc_layer_stack_specs/cavity_placements.stackup",
+  "assets/pcbdoc_layer_stack_specs/cavity_placements.stackupx",
+]
+outputs = [
+  "pcbdoc_create_cavity_placements/output/R0402_0.40MM_HD.PcbLib",
+  "pcbdoc_create_cavity_placements/output/pcbdoc_create_cavity_placements.PcbDoc",
+  "pcbdoc_create_cavity_placements/output/pcbdoc_create_cavity_placements.stackup",
+  "pcbdoc_create_cavity_placements/output/pcbdoc_create_cavity_placements.stackupx",
+  "pcbdoc_create_cavity_placements/output/cavity_placements_manifest.json",
+]
+requires_extra = []
+tags = [
+  "pcbdoc",
+  "layer-stack",
+  "generation",
+  "component-placement",
+  "cavity",
+  "3d",
+]
+
+[[examples]]
+id = "pcbdoc_create_rigid_flex_multibranch"
+title = "Create a multi-branch rigid-flex PcbDoc"
+summary = "Recreate a fixture-derived nested multi-branch rigid-flex PcbDoc, write PcbDoc/.stackup/.stackupx outputs, and verify branch parent linkage after PcbDoc readback."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_rigid_flex_multibranch/pcbdoc_create_rigid_flex_multibranch.py"
+doc = "pcbdoc_create_rigid_flex_multibranch/README.md"
+inputs = []
+assets = ["assets/pcbdoc_layer_stack_specs/rigid_flex_nested_multibranch.json"]
+outputs = [
+  "pcbdoc_create_rigid_flex_multibranch/output/pcbdoc_create_rigid_flex_multibranch.PcbDoc",
+  "pcbdoc_create_rigid_flex_multibranch/output/pcbdoc_create_rigid_flex_multibranch.stackup",
+  "pcbdoc_create_rigid_flex_multibranch/output/pcbdoc_create_rigid_flex_multibranch.stackupx",
+  "pcbdoc_create_rigid_flex_multibranch/output/rigid_flex_multibranch_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-flex", "branch"]
 
 [[examples]]
 id = "pcbdoc_bom"
@@ -751,6 +1067,23 @@ assets = []
 outputs = ["pcblib_add_free_3d_extruded/output/pcblib_add_free_3d_extruded.PcbLib"]
 requires_extra = []
 tags = ["pcblib", "3d", "component-body", "extruded", "generation", "footprint"]
+
+[[examples]]
+id = "pcblib_create_cavity_region"
+title = "Create a PcbLib cavity definition region"
+summary = "Create a PcbLib footprint with pads, an embedded STEP model, a Mechanical 1 cavity definition region, and a JSON manifest verifying the native cavity metadata after reparse."
+areas = ["pcblib"]
+status = "ready"
+entrypoint = "pcblib_create_cavity_region/pcblib_create_cavity_region.py"
+doc = "pcblib_create_cavity_region/README.md"
+inputs = []
+assets = ["pcblib_create_cavity_region/assets/RESC1005X04L.step"]
+outputs = [
+  "pcblib_create_cavity_region/output/pcblib_create_cavity_region.PcbLib",
+  "pcblib_create_cavity_region/output/pcblib_create_cavity_region.json",
+]
+requires_extra = []
+tags = ["pcblib", "generation", "footprint", "region", "cavity", "3d"]
 
 [[examples]]
 id = "pcblib_extract_3d_models"

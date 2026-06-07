@@ -14,7 +14,7 @@ import math
 import struct
 from typing import TYPE_CHECKING
 
-from .altium_pcb_enums import PcbRegionKind
+from .altium_pcb_enums import PcbRegionKind, pcb_region_kind_to_native_kind
 from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 from .altium_svg_arc_helpers import choose_svg_sweep_flag_for_center
 
@@ -175,13 +175,14 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
         self.layer: int = 1  # Default to TOP layer
         self.is_locked: bool = False
         self.is_keepout: bool = False
-        self.net_index: int = 0xFFFF
+        self.net_index: int | None = 0xFFFF
         self.polygon_index: int = 0xFFFF
-        self.component_index: int = 0xFFFF
+        self.component_index: int | None = 0xFFFF
         self.hole_count: int = 0
 
         # Properties
         self.kind: PcbRegionKind = PcbRegionKind.COPPER
+        self.is_board_cutout: bool = False
         self.is_shapebased: bool = False
         self.subpoly_index: int = 0
         self.keepout_restrictions: int = 0x1F
@@ -202,7 +203,24 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
         self._props_has_trailing_null: bool = (
             False  # Null terminator after props_len bytes
         )
+        self._properties_include_keepout_restrictions: bool = True
         self._sr1_length_bytes: bytes | None = None  # Original 4-byte SR1 length field
+
+    @property
+    def outline_vertices(self) -> list[PcbExtendedVertex]:
+        return self.outline
+
+    @outline_vertices.setter
+    def outline_vertices(self, vertices: list[PcbExtendedVertex]) -> None:
+        self.outline = vertices
+
+    @property
+    def hole_vertices(self) -> list[list[PcbSimpleVertex]]:
+        return self.holes
+
+    @hole_vertices.setter
+    def hole_vertices(self, vertices: list[list[PcbSimpleVertex]]) -> None:
+        self.holes = vertices
 
     def parse_from_binary(self, data: bytes, offset: int = 0) -> int:
         """
@@ -291,6 +309,9 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
             if "=" in pair:
                 key, value = pair.split("=", 1)
                 self.properties[key] = value
+        self._properties_include_keepout_restrictions = (
+            "KEEPOUTRESTRIC" in self.properties
+        )
 
         # Skip null terminator if present (some files have null AFTER props_len bytes)
         if offset < len(data) and data[offset] == 0:
@@ -401,6 +422,35 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
         )  # 0x1F
         self.union_index = int(self.properties.get("UNIONINDEX", "0"))
 
+    @staticmethod
+    def _parse_mil_value(value_str: object) -> int:
+        """
+        Parse an Altium '<number>mil' value to internal units.
+        """
+        text = str(value_str).replace("mil", "").replace("\x00", "").strip()
+        if text:
+            try:
+                return int(round(float(text) * 10000))
+            except ValueError:
+                return 0
+        return 0
+
+    @property
+    def region_kind(self) -> PcbRegionKind:
+        """
+        Return the semantic public region kind for this shape-based record.
+        """
+        return self.kind
+
+    @property
+    def cavity_height_mils(self) -> float:
+        """
+        Cavity definition height in mils.
+        """
+        return (
+            self._parse_mil_value(self.properties.get("CAVITYHEIGHT", "0mil")) / 10000.0
+        )
+
     def _state_signature(self) -> tuple:
         """
         Return a stable signature of semantically known shape-based fields.
@@ -418,6 +468,7 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
             self._raw_properties_bytes,
             bool(self._props_has_trailing_null),
             self._sr1_length_bytes,
+            bool(self._properties_include_keepout_restrictions),
             int(self.kind),
             bool(self.is_shapebased),
             int(self.subpoly_index),
@@ -446,7 +497,7 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
         """
         props: dict[str, str] = {str(k): str(v) for k, v in self.properties.items()}
 
-        kind_value = int(self.kind)
+        kind_value = pcb_region_kind_to_native_kind(self.kind)
         is_board_cutout = False
         if self.kind == PcbRegionKind.BOARD_CUTOUT:
             kind_value = 0
@@ -458,7 +509,8 @@ class AltiumPcbShapeBasedRegion(PcbGraphicalObject):
         props["ISBOARDCUTOUT"] = "TRUE" if is_board_cutout else "FALSE"
         props["ISSHAPEBASED"] = "TRUE" if self.is_shapebased else "FALSE"
         props["SUBPOLYINDEX"] = str(int(self.subpoly_index))
-        props["KEEPOUTRESTRIC"] = str(int(self.keepout_restrictions))
+        if self._properties_include_keepout_restrictions or "KEEPOUTRESTRIC" in props:
+            props["KEEPOUTRESTRIC"] = str(int(self.keepout_restrictions))
         props["UNIONINDEX"] = str(int(self.union_index))
         return "|".join(f"{k}={v}" for k, v in props.items())
 

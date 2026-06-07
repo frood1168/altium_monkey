@@ -25,15 +25,22 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import Iterable
 
 try:
+    from .altium_configparser_helpers import (
+        preserve_option_case as _preserve_option_case,
+    )
     from .altium_launcher import AltiumLauncher
     from .altium_prjscr import AltiumPrjScr
 except ImportError:  # pragma: no cover - supports direct script execution
-    from altium_launcher import AltiumLauncher
-    from altium_prjscr import AltiumPrjScr
+    _preserve_option_case = import_module(
+        "altium_configparser_helpers"
+    ).preserve_option_case
+    AltiumLauncher = import_module("altium_launcher").AltiumLauncher
+    AltiumPrjScr = import_module("altium_prjscr").AltiumPrjScr
 
 
 log = logging.getLogger(__name__)
@@ -242,7 +249,7 @@ def normalize_outjob_generated_paths(
     newline = _detect_newline(raw)
 
     cfg = configparser.ConfigParser(interpolation=None)
-    cfg.optionxform = str
+    cfg.optionxform = _preserve_option_case
     cfg.read_string(raw.decode("latin-1"))
 
     if not cfg.has_section(_SECTION_PUBLISH_SETTINGS):

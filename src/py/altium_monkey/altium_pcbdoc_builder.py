@@ -16,7 +16,7 @@ import zlib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
 from .altium_api_markers import public_api
 from .altium_pcbdoc_board_defaults import DEFAULT_PCBDOC_BOARD_SEGMENT_TEXTS
@@ -65,6 +65,7 @@ from .altium_pcb_mask_expansion import (
 from .altium_pcb_via_authoring import apply_authored_via_surface_policy
 from .altium_record_pcb__board_region import AltiumPcbBoardRegion
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
+from .altium_pcb_component import AltiumPcbComponent
 from .altium_record_pcb__model import AltiumPcbModel
 from .altium_record_pcb__net import AltiumPcbNet
 from .altium_record_pcb__polygon import AltiumPcbPolygon, PcbPolygonVertex
@@ -154,6 +155,7 @@ from .altium_pcbdoc_builder_regions import (
     parse_region_stream,
     parse_shapebased_region_stream,
 )
+from .altium_record_pcb__shapebased_region import PcbExtendedVertex
 from .altium_pcb_rule import AltiumPcbRule
 from .altium_utilities import (
     create_stream_from_records,
@@ -161,6 +163,10 @@ from .altium_utilities import (
     encode_altium_record,
     parse_byte_record,
 )
+
+if TYPE_CHECKING:
+    from .altium_layer_stack_document import AltiumLayerStackDocument
+    from .altium_pcblib import AltiumPcbFootprint, AltiumPcbLib
 
 _ZERO_HEADER = b"\x00\x00\x00\x00"
 _DEFAULT_LAYER_KIND_MAPPING_DATA = (
@@ -1382,7 +1388,12 @@ class PcbDocBoardData:
         y_mils = _parse_mil_text(self.top_level_segment.get_value("SHEETY"))
         width_mils = _parse_mil_text(self.top_level_segment.get_value("SHEETWIDTH"))
         height_mils = _parse_mil_text(self.top_level_segment.get_value("SHEETHEIGHT"))
-        if None in (x_mils, y_mils, width_mils, height_mils):
+        if (
+            x_mils is None
+            or y_mils is None
+            or width_mils is None
+            or height_mils is None
+        ):
             return None
         return PcbDocBoardSheetFrame(
             x_mils=x_mils,
@@ -1425,7 +1436,7 @@ class PcbDocBoardData:
             hx = segment.get_value("VP.HX")
             ly = segment.get_value("VP.LY")
             hy = segment.get_value("VP.HY")
-            if None in (lx, hx, ly, hy):
+            if lx is None or hx is None or ly is None or hy is None:
                 continue
             return int(lx), int(hx), int(ly), int(hy)
         return None
@@ -1756,6 +1767,18 @@ class PcbDocBoardData:
         raise KeyError("No default layer-stack substack GUID found in Board6/Data")
 
     def with_layer_stack_template(
+        self,
+        template: PcbDocLayerStackTemplate,
+    ) -> "PcbDocBoardData":
+        from .altium_layer_stack_document import AltiumLayerStackDocument
+
+        document = AltiumLayerStackDocument.from_pcbdoc_layer_stack_template(
+            template,
+            base_board_data=self,
+        )
+        return document.to_board_data_for_new_pcbdoc(base_board_data=self)
+
+    def _with_layer_stack_template_source(
         self,
         template: PcbDocLayerStackTemplate,
     ) -> "PcbDocBoardData":
@@ -2728,7 +2751,8 @@ class PcbDocBoardRegionsData:
 
         record = self.records[0]
         updated = AltiumPcbBoardRegion()
-        updated.__dict__.update(record.__dict__)
+        for key, value in vars(record).items():
+            setattr(updated, key, value)
         updated.outline_vertices = [
             RegionVertex(x_raw=float(x) * 10000.0, y_raw=float(y) * 10000.0)
             for x, y in vertices_mils
@@ -3186,8 +3210,10 @@ class PcbDocBuilder:
                 self.profile.raw_streams["SignalClasses/Data"]
             )
         )
-        self.board_data = self.profile.board_data or PcbDocBoardData.from_bytes(
+        self.board_data: PcbDocBoardData = (
+            self.profile.board_data or PcbDocBoardData.from_bytes(
             self.profile.raw_streams["Board6/Data"]
+            )
         )
         self.rules_data = self.profile.rules_data or PcbDocRulesData.from_bytes(
             self.profile.raw_streams["Rules6/Data"]
@@ -3201,7 +3227,7 @@ class PcbDocBuilder:
         self.classes_data = self.profile.classes_data or PcbDocClassesData.from_bytes(
             self.profile.raw_streams["Classes6/Data"]
         )
-        self.board_regions_data = (
+        self.board_regions_data: PcbDocBoardRegionsData = (
             self.profile.board_regions_data
             or PcbDocBoardRegionsData.from_bytes(
                 self.profile.raw_streams["BoardRegions/Data"]
@@ -3213,7 +3239,7 @@ class PcbDocBuilder:
                 self.profile.raw_streams["PrimitiveGuids/Data"]
             )
         )
-        self.nets = list(
+        self.nets: list[AltiumPcbNet] = list(
             self.profile.nets_data
             if self.profile.nets_data is not None
             else parse_net_stream(self.profile.raw_streams["Nets6/Data"])
@@ -3223,7 +3249,7 @@ class PcbDocBuilder:
                 self.profile.raw_streams.get("DifferentialPairs6/Data", b"")
             )
         )
-        self.components = list(
+        self.components: list[AltiumPcbComponent] = list(
             parse_component_stream(
                 self.profile.raw_streams.get("Components6/Data", b"")
             )
@@ -3650,6 +3676,25 @@ class PcbDocBuilder:
         self.board_data = self.board_data.with_layer_stack_template(template)
         return self
 
+    def set_layer_stack_document(
+        self,
+        document: "AltiumLayerStackDocument",
+    ) -> "PcbDocBuilder":
+        """
+        Apply a typed layer-stack document to a newly authored board.
+
+        This is the public builder entry point for custom rigid and rigid-flex
+        stack authoring. It updates the native board stack payload and matching
+        board-region stack assignments together.
+        """
+        self.board_data = document.to_board_data_for_new_pcbdoc(
+            base_board_data=self.board_data,
+        )
+        self.board_regions_data = document.to_board_regions_data_for_new_pcbdoc(
+            base_board_regions_data=self.board_regions_data,
+        )
+        return self
+
     def _find_net_index(self, name: str) -> int | None:
         normalized = name.strip().upper()
         for index, net in enumerate(self.nets):
@@ -3819,8 +3864,12 @@ class PcbDocBuilder:
         self, component_index: int, description: str
     ) -> "PcbDocBuilder":
         normalized_index = self._normalize_component_index(component_index)
+        if normalized_index is None:
+            raise IndexError("Component index is required")
         component = self.components[normalized_index]
         component.description = str(description)
+        if component.raw_record is None:
+            component.raw_record = {}
         component.raw_record["SOURCEDESCRIPTION"] = str(description)
         self._components_dirty = True
         return self
@@ -3832,7 +3881,11 @@ class PcbDocBuilder:
         value: str,
     ) -> "PcbDocBuilder":
         normalized_index = self._normalize_component_index(component_index)
+        if normalized_index is None:
+            raise IndexError("Component index is required")
         component = self.components[normalized_index]
+        if component.parameters is None:
+            component.parameters = {}
         component.parameters[str(name)] = str(value)
         self._component_parameters_dirty = True
         return self
@@ -3841,7 +3894,11 @@ class PcbDocBuilder:
         self, component_index: int, name: str
     ) -> "PcbDocBuilder":
         normalized_index = self._normalize_component_index(component_index)
+        if normalized_index is None:
+            raise IndexError("Component index is required")
         component = self.components[normalized_index]
+        if component.parameters is None:
+            component.parameters = {}
         if name in component.parameters:
             del component.parameters[name]
             self._component_parameters_dirty = True
@@ -3849,7 +3906,7 @@ class PcbDocBuilder:
 
     def place_footprint(
         self,
-        footprint: object,
+        footprint: "AltiumPcbFootprint",
         *,
         designator: str,
         position_mils: tuple[float, float],
@@ -3860,7 +3917,7 @@ class PcbDocBuilder:
         comment_visible: bool = False,
         component_parameters: dict[str, str] | None = None,
         pad_nets: dict[str, str] | None = None,
-        source_pcblib: object | None = None,
+        source_pcblib: "AltiumPcbLib | None" = None,
     ) -> int:
         return place_footprint_into_builder(
             self,
@@ -4245,7 +4302,7 @@ class PcbDocBuilder:
         outline_points_mils: list[tuple[float, float]],
         layer: int | PcbLayer = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
-        outline_vertices: Sequence[object] | None = None,
+        outline_vertices: Sequence[PcbExtendedVertex] | None = None,
         is_keepout: bool = False,
         keepout_restrictions: int = 0,
         net: str | None = None,
@@ -4256,6 +4313,8 @@ class PcbDocBuilder:
         region_kind: int | PcbRegionKind = PcbRegionKind.COPPER,
         is_board_cutout: bool = False,
         is_shapebased: bool = False,
+        cavity_height_mils: float = 0.0,
+        v7_layer: str | None = None,
     ) -> "PcbDocBuilder":
         net_index: int | None = None
         if net:
@@ -4275,10 +4334,14 @@ class PcbDocBuilder:
             is_shapebased=is_shapebased,
             is_keepout=is_keepout,
             keepout_restrictions=keepout_restrictions,
+            cavity_height_mils=cavity_height_mils,
+            v7_layer=v7_layer,
         )
         normalized_component_index = self._normalize_component_index(component_index)
         region.component_index = normalized_component_index
-        shapebased_region.component_index = normalized_component_index
+        shapebased_region.component_index = (
+            0xFFFF if normalized_component_index is None else normalized_component_index
+        )
         self.regions.append(region)
         self.shapebased_regions.append(shapebased_region)
         self._regions_dirty = True
@@ -4356,7 +4419,7 @@ class PcbDocBuilder:
         polygon.union_index = int(union_index)
         if net:
             self.add_net(net, preferred_width_mils=track_width_mils)
-            polygon.net = self._find_net_index(net)
+            polygon.net = self._find_net_index(net) or 0
         self.polygons.append(polygon)
         self._polygons_dirty = True
         return self

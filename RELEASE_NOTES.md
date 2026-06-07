@@ -1,3 +1,100 @@
+# altium-monkey 2026.06.07 Release Notes
+
+Package version: `2026.6.7`
+
+`2026.06.07` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.7`.
+
+This release is the first public Altium Monkey release with comprehensive
+Layer Stack Manager reading, writing, interchange, and new-board authoring
+support. The stackup work is additive and keeps existing documented APIs
+compatible.
+
+## Layer Stack Document
+
+`AltiumLayerStackDocument` is now the source-aware layer-stack model for PcbDoc
+workflows. Use it to read native PcbDoc stack data, import or export
+`.stackup` and `.stackupx`, inspect rigid-flex topology, query native substack
+and board-region joins, and author new rigid or fixture-backed rigid-flex
+boards through `PcbDocBuilder.set_layer_stack_document(...)`.
+
+`ResolvedLayerStack` remains the read-only convenience view for consumer
+reports, layer display names, enabled-layer checks, and existing examples such
+as `pcbdoc_stats`. It is intentionally derived data and is not the source model
+for writing stack data.
+
+## PcbDoc Stack Authoring
+
+The new writer surface covers canonical empty-board synthesis, two-layer and
+four-layer template compatibility, custom rigid stacks, controlled-impedance
+rigid stacks, flex/stiffener stacks, Rigid-Flex 1.0 split-line stacks,
+flex-in-cutout stacks, branch-based rigid-flex topologies, nested branch
+topologies, and impedance/backdrill evidence for the promoted fixture-backed
+rigid-flex shapes.
+
+Stackup export/import now preserves the promoted Layer Stack Manager semantics
+across native PcbDoc, `.stackup`, and `.stackupx` readbacks, including
+substack-local layer enablement, bend-line radii, branch topology, selected
+surface-finish rows, adhesive/stiffener rows, realistic-ratio display metadata,
+impedance profiles, transmission lines, via spans, and backdrill spans.
+
+## Public Examples
+
+New and updated examples show the supported authoring and inspection workflow:
+
+1. `pcbdoc_create_custom_rigid_stack`
+2. `pcbdoc_create_impedance_rigid_stack`
+3. `pcbdoc_inspect_layer_stack`
+4. `pcbdoc_flex_topology_report`
+5. `pcbdoc_create_flex_stiffener`
+6. `pcbdoc_create_rigid_flex_split_lines`
+7. `pcbdoc_create_flex_in_cutout`
+8. `pcbdoc_create_rigid_flex_branch`
+9. `pcbdoc_create_rigid_flex_branch_intrusion`
+10. `pcbdoc_create_rigid_flex_two_branch`
+11. `pcbdoc_create_rigid_flex_multibranch`
+12. `pcbdoc_create_rigid_flex_impedance_backdrill`
+13. `pcbdoc_create_cavity_placements`
+
+The rigid-board `pcbdoc_stats` example still uses `ResolvedLayerStack` and
+continues to report the packaged `loz-old-man` board statistics.
+
+## PcbDoc And PcbLib Cavity Regions
+
+PcbLib and PcbDoc region authoring now support cavity-definition regions
+through `PcbRegionKind.CAVITY_DEFINITION` and `cavity_height_mils`, mapping the
+public enum to the native cavity region kind. The public cavity examples create
+a footprint cavity and board-side cavity placements, insert the packaged
+footprint and embedded STEP payload, and verify save/reparse semantics.
+
+## Schematic SVG Fix
+
+SchDoc SVG rendering keeps pin names and designators rotated for vertical pins.
+The public proof sample creates a SchLib symbol, inserts it into a SchDoc, and
+renders SVG to verify the saved library-backed path.
+
+## Validation
+
+The release was tested through:
+
+1. public example tests that execute the stackup examples and verify native
+   PcbDoc readback with `AltiumPcbDoc` and `AltiumLayerStackDocument`
+2. `.stackup` and `.stackupx` interchange round-trip checks for the promoted
+   stack shapes
+3. a supported local corpus regeneration gate covering synthesized,
+   real-world, and canonical empty PcbDoc files
+4. focused private release signoff checks for public packaging hygiene and
+   format-contract synchronization
+5. a strict package Pyright gate with zero diagnostics for
+   `src/py/altium_monkey`
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new layer-stack, cavity, and
+SVG behaviors are additive.
+
+---
+
 # altium-monkey 2026.06.01-2 Release Notes
 
 Package version: `2026.6.1.post1`

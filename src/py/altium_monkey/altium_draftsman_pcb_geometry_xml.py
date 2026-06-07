@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable, cast
 
-from lxml import etree
+import lxml.etree as etree
 
 from .altium_draftsman import DraftsmanColor
 from .altium_draftsman_xml import (
@@ -26,6 +26,9 @@ from .altium_pcb_drawing_geometry import (
     PcbDrawingUni,
 )
 from .altium_record_types import PcbLayer
+
+if TYPE_CHECKING:
+    from .altium_board import AltiumBoardOutline
 
 
 DRAFTSMAN_PCB_CACHE_POINTS_PER_MIL = 0.096
@@ -965,12 +968,12 @@ def _ensure_line_styles_element(root: etree._Element) -> etree._Element:
     return line_styles
 
 
-def _pcbdoc_board_outline(pcbdoc: object) -> object:
+def _pcbdoc_board_outline(pcbdoc: object) -> "AltiumBoardOutline":
     board = getattr(pcbdoc, "board", None)
     outline = getattr(board, "outline", None)
     if outline is None or not getattr(outline, "vertices", None):
         raise ValueError("PcbDoc does not contain a board outline")
-    return outline
+    return cast("AltiumBoardOutline", outline)
 
 
 def _primitive_type_name(primitive_kind: str) -> str:

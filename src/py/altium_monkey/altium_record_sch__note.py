@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from .altium_record_sch__text_frame import AltiumSchTextFrame
 from .altium_record_types import SchRecordType
-from .altium_serializer import AltiumSerializer, CaseMode, Fields
+from .altium_serializer import AltiumSerializer, Fields
 
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager

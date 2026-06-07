@@ -12,19 +12,21 @@ from .altium_netlist_model import HierarchyPath, NetGraphical, UnionFind
 from .altium_prjpcb import NetIdentifierScope
 
 if TYPE_CHECKING:
-    from .altium_netlist_model import Net
+    from .altium_netlist_model import Net, Terminal
     from .altium_schdoc import AltiumSchDoc
+    from .altium_schdoc_info import SchSheetSymbolInfo
 
 log = logging.getLogger(__name__)
 
 
 SheetNetEntries: TypeAlias = list[tuple[int, "Net"]]
+SheetSymbolRef: TypeAlias = tuple[int, "SchSheetSymbolInfo"]
 
 
 class _HarnessPortNameResolver(Protocol):
     def _find_harness_port_name(
         self,
-        harness_connector: object,
+        connector: object,
         signal_harnesses: object,
         port_location_map: dict[tuple[int, int], str],
     ) -> str | None: ...
@@ -66,7 +68,7 @@ class ChannelInstance:
     child_idx: int
     instance_index: int
     sheet_sym_unique_id: str
-    room: RoomDetails = None
+    room: RoomDetails = field(default_factory=RoomDetails)
     repeat_value: int | None = None
     repeat_entry_ports: frozenset[str] = frozenset()
 
@@ -272,8 +274,8 @@ def _case_insensitive_consolidate(net_map: dict) -> None:
 def _resolve_hierarchy_fallback_name(
     sheet_nets: SheetNetEntries,
     allow_sheet_entries: bool,
-    auto_name_fn: Callable[[list[object]], str],
-    merged_terminals: list[object],
+    auto_name_fn: Callable[[list["Terminal"]], str],
+    merged_terminals: list["Terminal"],
 ) -> tuple[str, bool]:
     """Fallback name for hierarchy-bridged nets without labels."""
     child_names = [
@@ -347,7 +349,7 @@ def _merge_single_power_net(
 
 
 def _detect_repeat_channel(
-    ref: tuple[int, object],
+    ref: SheetSymbolRef,
     child_idx: int,
     channels: list[ChannelInstance],
 ) -> None:
@@ -403,7 +405,7 @@ def _detect_repeat_channel(
 
 
 def _detect_multi_ref_channels(
-    refs: list[tuple[int, object]],
+    refs: list[SheetSymbolRef],
     child_idx: int,
     child_filename_lower: str,
     channels: list[ChannelInstance],
@@ -518,7 +520,7 @@ def _build_child_harness_entry_map(
 
 def _merge_groups_by_shared_key(
     groups: dict[str, SheetNetEntries],
-    key_fn: Callable[[int, "Net"], str | None],
+    key_fn: Callable[[int, "Net"], object | None],
 ) -> int:
     """Merge groups that share a common key."""
     key_to_groups = defaultdict(list)

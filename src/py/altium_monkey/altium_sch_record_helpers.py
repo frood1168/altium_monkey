@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
-from .altium_record_types import SchPointMils, SchRectMils, color_to_hex
+from .altium_record_types import CoordPoint, SchPointMils, SchRectMils, color_to_hex
 from .altium_serializer import CaseMode
 from .altium_sch_geometry_oracle import svg_coord_to_geometry
 
@@ -54,7 +54,13 @@ def bound_schematic_owner(record: object) -> object | None:
     return context.owner
 
 
-def remove_named_entry(container: object, name: str) -> bool:
+class _NamedEntryContainer(Protocol):
+    def get_entry(self, name: str) -> object | None: ...
+
+    def remove_entry(self, entry: object) -> bool: ...
+
+
+def remove_named_entry(container: _NamedEntryContainer, name: str) -> bool:
     """Remove the first named child entry from a connector-like container."""
     entry = container.get_entry(name)
     if entry is None:
@@ -63,7 +69,7 @@ def remove_named_entry(container: object, name: str) -> bool:
 
 
 class CornerMilsMixin:
-    corner: object
+    corner: CoordPoint
 
     @property
     def corner_mils(self) -> SchPointMils:
@@ -80,7 +86,20 @@ class CornerMilsMixin:
 
 
 class RectangularBoundsMilsMixin(CornerMilsMixin):
-    location: object
+    location: CoordPoint
+
+    @property
+    def location_mils(self) -> SchPointMils:
+        """
+        Public location helper expressed in mils.
+        """
+        return SchPointMils.from_mils(self.location.x_mils, self.location.y_mils)
+
+    @location_mils.setter
+    def location_mils(self, value: SchPointMils) -> None:
+        if not isinstance(value, SchPointMils):
+            raise TypeError("location_mils must be a SchPointMils value")
+        self.location = value.to_coord_point()
 
     @property
     def bounds_mils(self) -> SchRectMils:
@@ -100,8 +119,8 @@ class RectangularBoundsMilsMixin(CornerMilsMixin):
 
 
 class PrimaryRadiusMilsMixin:
-    radius: object
-    radius_frac: object
+    radius: int
+    radius_frac: int
 
     @property
     def radius_mils(self) -> float:
@@ -129,8 +148,8 @@ class PrimaryRadiusMilsMixin:
 
 
 class SecondaryRadiusMilsMixin:
-    secondary_radius: object
-    secondary_radius_frac: object
+    secondary_radius: int
+    secondary_radius_frac: int
 
     @property
     def secondary_radius_mils(self) -> float:
@@ -160,14 +179,18 @@ class SecondaryRadiusMilsMixin:
         setattr(self, "_secondary_radius_mils_explicit", True)
 
 
-def _coord_scalar_to_public_mils(value: object, frac: object) -> float:
+def _coord_scalar_to_public_mils(
+    value: int | float | str, frac: int | float | str
+) -> float:
     """
     Convert Altium coord-style whole/fraction scalar storage to public mils.
     """
     return int(value) * 10.0 + int(frac) / 10000.0
 
 
-def _coord_scalar_to_native_units(value: object, frac: object) -> float:
+def _coord_scalar_to_native_units(
+    value: int | float | str, frac: int | float | str
+) -> float:
     """
     Convert coord-style whole/fraction storage to native schematic units.
 
@@ -187,7 +210,10 @@ def _public_mils_to_coord_scalar(value: float) -> tuple[int, int]:
     return whole, frac
 
 
-def _basic_entry_distance_to_public_mils(value: object, frac1: object = 0) -> float:
+def _basic_entry_distance_to_public_mils(
+    value: int | float | str,
+    frac1: int | float | str = 0,
+) -> float:
     """
     Convert basic-entry DistanceFromTop storage to public mils.
 
@@ -198,7 +224,10 @@ def _basic_entry_distance_to_public_mils(value: object, frac1: object = 0) -> fl
     return int(value) * 100.0 + int(frac1) / 10000.0
 
 
-def _basic_entry_distance_to_native_units(value: object, frac1: object = 0) -> float:
+def _basic_entry_distance_to_native_units(
+    value: int | float | str,
+    frac1: int | float | str = 0,
+) -> float:
     """
     Convert basic-entry DistanceFromTop storage to native SVG units.
 
@@ -221,8 +250,8 @@ def _public_mils_to_basic_entry_distance(value: float) -> tuple[int, int]:
 
 
 class CornerXRadiusMilsMixin:
-    corner_x_radius: object
-    corner_x_radius_frac: object
+    corner_x_radius: int
+    corner_x_radius_frac: int
 
     @property
     def corner_x_radius_mils(self) -> float:
@@ -249,8 +278,8 @@ class CornerXRadiusMilsMixin:
 
 
 class CornerYRadiusMilsMixin:
-    corner_y_radius: object
-    corner_y_radius_frac: object
+    corner_y_radius: int
+    corner_y_radius_frac: int
 
     @property
     def corner_y_radius_mils(self) -> float:

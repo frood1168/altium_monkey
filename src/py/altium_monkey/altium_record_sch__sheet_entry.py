@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import IntEnum
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -995,19 +996,19 @@ class AltiumSchSheetEntry(SingleFontBindableRecordMixin, SchPrimitive):
 
     @staticmethod
     def _move_points(
-        points: list[tuple[float, float]], dx: float, dy: float
+        points: Sequence[tuple[float, float]], dx: float, dy: float
     ) -> list[tuple[float, float]]:
         return [(x + dx, y + dy) for x, y in points]
 
     @staticmethod
     def _rotate_points_90(
-        points: list[tuple[float, float]],
+        points: Sequence[tuple[float, float]],
     ) -> list[tuple[float, float]]:
         return [(-y, x) for x, y in points]
 
     @staticmethod
     def _native_local_to_svg_points(
-        points: list[tuple[float, float]],
+        points: Sequence[tuple[float, float]],
     ) -> list[tuple[float, float]]:
         return [(x, -y) for x, y in points]
 
@@ -1037,6 +1038,7 @@ class AltiumSchSheetEntry(SingleFontBindableRecordMixin, SchPrimitive):
         arrow_height = 4.0
         half_width = symbol_width / 2.0
         converted = self._convert_style_to_left_right(style)
+        points: list[tuple[float, float]]
         if converted in (2, 3):
             points = [
                 (0, -arrow_height),

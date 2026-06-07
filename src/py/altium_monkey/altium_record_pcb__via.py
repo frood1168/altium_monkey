@@ -6,6 +6,7 @@ import html
 import logging
 import math
 import struct
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .altium_pcb_enums import (
@@ -48,7 +49,13 @@ _AD25_PROPAGATION_DELAY_TAIL_DEFAULTS = {
 log = logging.getLogger(__name__)
 
 
-def _write_u8(content: bytearray, offset: int, value: int, *, u8: callable) -> None:
+def _write_u8(
+    content: bytearray,
+    offset: int,
+    value: int,
+    *,
+    u8: Callable[[int], int],
+) -> None:
     if 0 <= offset < len(content):
         content[offset] = u8(value)
 
@@ -803,7 +810,7 @@ class AltiumPcbVia(PcbGraphicalObject):
 
         payload = data[subrecord_start:subrecord_end]
         self._subrecord_length = int(subrecord_length)
-        self._raw_subrecord1_content: bytes = bytes(payload)
+        self._raw_subrecord1_content = bytes(payload)
 
         self.layer = int(payload[0])  # Always 74 (MULTI_LAYER) for VIAs
         self._raw_flags1 = int(payload[1])

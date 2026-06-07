@@ -67,6 +67,43 @@ fallback is not a replacement for STEP-derived model geometry.
 Stable layer keys use token names such as `TOP`, `BOTTOM`, and `TOPOVERLAY`.
 Use the resolved layer stack when board-specific user-facing names are needed.
 Default display labels are fallback labels, not stable identifiers.
+`ResolvedLayerStack` is a derived read-only consumer view; new PcbDoc authoring
+uses `AltiumLayerStackDocument`.
+
+## Layer Stack And Interchange
+
+`AltiumLayerStackDocument` is the source-aware model for PcbDoc layer stacks.
+The stable contract is PcbDoc inspection, preservation during normal
+read/write flows, canonical empty-board synthesis, and controlled new
+rigid-board stack construction. New-document rigid-flex authoring is limited
+to typed `AltiumLayerStackDocument` models that explicitly provide physical
+layers, substacks, board regions, and optional branch topology through the
+public `AltiumStackLayer`, `AltiumStackSubstack`, `AltiumStackRegion`,
+`AltiumStackBendLine`, and `AltiumStackBranch*` dataclasses. The writer emits
+native `Board6/Data`, `BoardRegions/Data`, and embedded StackupX branch data,
+then callers should re-open the generated PcbDoc to verify the intended
+topology.
+
+The source-aware topology query contract uses native ids, not display names,
+for joins. `AltiumStackSubstack.source_stackup_ref` and
+`AltiumStackRegion.layerstack_id` are the stable substack/region join. Branch
+section stacks, impedance transmission lines, and via/backdrill spans can
+reference the same ids with bare GUID spelling; public lookup helpers normalize
+refs with or without braces. Use `substack_by_source_ref(...)`,
+`board_regions_for_layerstack_id(...)`, `layers_for_substack(...)`,
+`layers_for_board_region(...)`, and `branches_for_stack_ref(...)` for read-only
+topology queries. Display names remain labels and are not unique ids.
+
+External `.stackup`, `.stackupx`, `.csv`, and `.esx` files are currently
+interchange artifacts, not the native writer contract. `.stackup` and
+`.stackupx` exports are useful for Layer Stack Manager inspection and branch
+interchange, but rigid-flex samples gate correctness on generated PcbDoc
+readback because the interchange views normalize rows differently from native
+PcbDoc `Board6/Data` plus `BoardRegions/Data`.
+
+`ResolvedLayerStack` remains the public convenience view for read-only
+consumer reports, layer display names, and enabled-layer checks. It must not be
+used as the source model for writing stack data.
 
 ## SVG
 
@@ -79,5 +116,8 @@ See [SVG](svg.md) for the shared rendering and enrichment contract.
 ## Test Gates
 
 The PcbDoc contract is covered by foundation parsing, authoring, round-trip,
-SVG, public examples, and release signoff.
+SVG, public examples, and release signoff. Promoted layer-stack writer
+features require generated native PcbDoc readback through `AltiumPcbDoc` and
+`AltiumLayerStackDocument`; `.stackup` and `.stackupx` comparisons are
+supporting evidence, not substitutes for native PcbDoc verification.
 

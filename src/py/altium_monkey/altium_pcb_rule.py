@@ -1,8 +1,9 @@
-from __future__ import annotations
-
 """Typed PCB design-rule models parsed from Altium Rules6/Data."""
 
+from __future__ import annotations
+
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, ClassVar
 
@@ -447,7 +448,7 @@ class AltiumPcbRule:
     @classmethod
     def from_record(
         cls,
-        record: dict[str, object],
+        record: Mapping[str, object],
         *,
         index: int = 0,
         record_leader: bytes | None = None,
@@ -813,8 +814,8 @@ class AltiumClearanceRule(AltiumPcbRule):
                         clearance=value,
                     )
                 )
-            rule.object_clearances = entries
-            rule.object_clearance_pairs = pairs
+            setattr(rule, "object_clearances", entries)
+            setattr(rule, "object_clearance_pairs", pairs)
         return rule
 
     def _serialize_specific_fields(self) -> dict[str, str]:
