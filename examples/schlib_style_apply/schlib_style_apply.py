@@ -124,6 +124,31 @@ def _apply_line_style(symbol: object, style: dict, counts: Counter) -> None:
         counts["line"] += 1
 
 
+def _passes_filter(symbol: object, filter_cfg: dict) -> bool:
+    """Return True if symbol should be processed based on [filter] criteria."""
+    if not filter_cfg:
+        return True
+
+    skip = filter_cfg.get("skip", [])
+    if getattr(symbol, "name", "") in skip:
+        return False
+
+    pins = list(getattr(symbol, "pins", []))
+    min_pins = filter_cfg.get("min_pins")
+    if min_pins is not None and len(pins) < min_pins:
+        return False
+
+    rects = list(getattr(symbol, "rectangles", []))
+    if filter_cfg.get("require_rect", False) and not rects:
+        return False
+
+    max_rects = filter_cfg.get("max_rects")
+    if max_rects is not None and len(rects) > max_rects:
+        return False
+
+    return True
+
+
 def _resolve_style(layout: dict, sym_name: str, section: str) -> dict | None:
     """Return per-symbol style for section, falling back to [default]."""
     sym_override = layout.get(sym_name, {}).get(section)
@@ -138,10 +163,21 @@ def apply_style_to_schlib(
     layout: dict,
 ) -> dict:
     schlib = AltiumSchLib(input_path)
+    filter_cfg = layout.get("filter", {})
     counts: Counter[str] = Counter()
     sym_results = []
 
     for symbol in schlib.symbols:
+        if not _passes_filter(symbol, filter_cfg):
+            sym_results.append({
+                "name": symbol.name,
+                "skipped": True,
+                "pins_updated": 0,
+                "rects_updated": 0,
+                "lines_updated": 0,
+            })
+            continue
+
         sym_counts: Counter[str] = Counter()
 
         pin_style = _resolve_style(layout, symbol.name, "pin")
@@ -159,6 +195,7 @@ def apply_style_to_schlib(
         counts.update(sym_counts)
         sym_results.append({
             "name": symbol.name,
+            "skipped": False,
             "pins_updated": sym_counts["pin"],
             "rects_updated": sym_counts["rect"],
             "lines_updated": sym_counts["line"],
@@ -255,11 +292,21 @@ def main() -> None:
         for p in schlib_files
     ]
 
+    total_styled = sum(
+        sum(1 for s in r["symbol_results"] if not s.get("skipped"))
+        for r in results
+    )
+    total_skipped = sum(
+        sum(1 for s in r["symbol_results"] if s.get("skipped"))
+        for r in results
+    )
     manifest = {
         "style_config": str(toml_path),
         "target": str(target_path),
         "output_dir": str(output_dir),
         "schlib_count": len(results),
+        "total_symbols_styled": total_styled,
+        "total_symbols_skipped": total_skipped,
         "total_pins_updated": sum(r["pins_updated"] for r in results),
         "total_rects_updated": sum(r["rects_updated"] for r in results),
         "total_lines_updated": sum(r["lines_updated"] for r in results),
@@ -273,11 +320,12 @@ def main() -> None:
     print(f"Style config: {toml_path}")
     print(f"Target: {target_path}")
     print(f"Processed: {len(results)} SchLib file(s)")
-    print(f"Pins updated:  {manifest['total_pins_updated']}")
-    print(f"Rects updated: {manifest['total_rects_updated']}")
-    print(f"Lines updated: {manifest['total_lines_updated']}")
-    print(f"Wrote files:   {output_dir}")
-    print(f"Wrote manifest: {manifest_path}")
+    print(f"Symbols styled:  {total_styled}  skipped: {total_skipped}")
+    print(f"Pins updated:    {manifest['total_pins_updated']}")
+    print(f"Rects updated:   {manifest['total_rects_updated']}")
+    print(f"Lines updated:   {manifest['total_lines_updated']}")
+    print(f"Wrote files:     {output_dir}")
+    print(f"Wrote manifest:  {manifest_path}")
 
 
 if __name__ == "__main__":

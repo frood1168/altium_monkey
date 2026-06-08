@@ -31,6 +31,10 @@ font_name = "Arial"
 font_size = 10
 bold = false
 color = "#0000FF"
+
+[port]
+width_mils = 100
+height_mils = 20
 ```
 
 Removing a section entirely means no style is applied to that element type.
@@ -42,13 +46,13 @@ Removing a section entirely means no style is applied to that element type.
 | `[document]` | Sheet background and system font |
 | `[wire]` | Wires |
 | `[net_label]` | Net labels |
-| `[port]` | Hierarchical ports |
+| `[port]` | Hierarchical ports (`width_mils`, `height_mils` also supported) |
 | `[power_port]` | Power ports |
 | `[note]` | Notes |
 | `[text_string]` | Free-floating text labels |
 | `[no_erc]` | No-ERC markers |
 | `[signal_harness]` | Signal harnesses |
-| `[harness_connector]` | Harness connectors |
+| `[harness_connector]` | Harness connectors (`width_mils`, `height_mils` also supported) |
 | `[harness_entry]` | Harness entries |
 | `[harness_type]` | Harness type labels |
 | `[sheet_symbol]` | Sheet symbols |

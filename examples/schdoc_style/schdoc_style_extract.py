@@ -172,6 +172,8 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
         c.record_color("port", port, "color", "color")
         c.record_color("port", port, "area_color", "area_color")
         c.record_color("port", port, "text_color", "text_color")
+        c.record("port", "width_mils", port.width_mils)
+        c.record("port", "height_mils", port.height_mils)
 
     for power_port in schdoc.power_ports:
         c.record_font("power_port", power_port)
@@ -199,6 +201,8 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
     for connector in schdoc.harness_connectors:
         c.record_color("harness_connector", connector, "color", "color")
         c.record_color("harness_connector", connector, "area_color", "area_color")
+        c.record("harness_connector", "width_mils", connector.xsize)
+        c.record("harness_connector", "height_mils", connector.ysize)
 
     for entry in schdoc.harness_entries:
         c.record_font("harness_entry", entry)

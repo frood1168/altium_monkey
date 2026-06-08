@@ -1,0 +1,856 @@
+{
+  "style_config": "C:\\Workspace\\gito\\altium_monkey\\examples\\schlib_style_apply\\clean\\schlib_style.toml",
+  "target": "C:\\Workspace\\gito\\altium_monkey\\examples\\schlib_style_apply\\praline.SCHLIB",
+  "output_dir": "C:\\Workspace\\gito\\altium_monkey\\examples\\schlib_style_apply\\clean",
+  "schlib_count": 1,
+  "total_symbols_styled": 20,
+  "total_symbols_skipped": 99,
+  "total_pins_updated": 515,
+  "total_rects_updated": 25,
+  "total_lines_updated": 55,
+  "libraries": [
+    {
+      "source": "C:\\Workspace\\gito\\altium_monkey\\examples\\schlib_style_apply\\praline.SCHLIB",
+      "output": "C:\\Workspace\\gito\\altium_monkey\\examples\\schlib_style_apply\\clean\\praline.SCHLIB",
+      "symbols": 119,
+      "pins_updated": 515,
+      "rects_updated": 25,
+      "lines_updated": 55,
+      "symbol_results": [
+        {
+          "name": "TG2520SMN-xx.xxxxxxMhz-xxxxNM",
+          "skipped": false,
+          "pins_updated": 4,
+          "rects_updated": 1,
+          "lines_updated": 1
+        },
+        {
+          "name": "Q_Dual_NMOS_PMOS_S1G1D2S2G2D1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "USB_C_Receptacle_USB2.0_16P",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "Q_Dual_PNP_PNP_E1B1C2E2B2C1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "SolderJumper_2_Bridged",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "Filter_EMI_CommonMode",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "TFSZ06052460-3310A2X",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "BALUN-B0310J50100AHF",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "Conn_02x13_Odd_Even",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "Conn_02x11_Odd_Even",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "Conn_02x05_Odd_Even",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "RFShield_TwoPieces",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "ICE40UP5K-SG48ITR",
+          "skipped": false,
+          "pins_updated": 49,
+          "rects_updated": 4,
+          "lines_updated": 0
+        },
+        {
+          "name": "SW_Push_Shielded",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "MountingHole_Pad",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "LPC43xxFET180",
+          "skipped": false,
+          "pins_updated": 180,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "LED_Dual_AKAK",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "XC6206PxxxMR",
+          "skipped": false,
+          "pins_updated": 3,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "Si5351C-B-GM",
+          "skipped": false,
+          "pins_updated": 21,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "NC7SB3157P6X",
+          "skipped": false,
+          "pins_updated": 6,
+          "rects_updated": 2,
+          "lines_updated": 16
+        },
+        {
+          "name": "GSG-XTAL4PIN",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D3V3XA4B10LP",
+          "skipped": false,
+          "pins_updated": 10,
+          "rects_updated": 2,
+          "lines_updated": 28
+        },
+        {
+          "name": "GSG-RF-CONN",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "FerriteBead",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "BGB741L7ESD",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "W25Q32JVSS",
+          "skipped": false,
+          "pins_updated": 8,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "Q_PMOS_GSD",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D_Schottky",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "TestPoint",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D_Zener_2",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D_Zener_1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "BGS12P2L6",
+          "skipped": false,
+          "pins_updated": 6,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "BFCN-1445",
+          "skipped": false,
+          "pins_updated": 4,
+          "rects_updated": 1,
+          "lines_updated": 2
+        },
+        {
+          "name": "74LVC1G86",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "74LVC1G32",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "74LVC1G08",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "TRF37A73",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "TPS62410",
+          "skipped": false,
+          "pins_updated": 11,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_Pack04",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "RFFC5072",
+          "skipped": false,
+          "pins_updated": 33,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "PWR_FLAG",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "MXD8546F",
+          "skipped": false,
+          "pins_updated": 13,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "GT4227QA",
+          "skipped": false,
+          "pins_updated": 10,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "74HC4051",
+          "skipped": false,
+          "pins_updated": 16,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "MXD8638",
+          "skipped": false,
+          "pins_updated": 9,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "MAX5864",
+          "skipped": false,
+          "pins_updated": 49,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "MAX2831",
+          "skipped": false,
+          "pins_updated": 49,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "D_Zener",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "Crystal",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "BD2243G",
+          "skipped": false,
+          "pins_updated": 6,
+          "rects_updated": 1,
+          "lines_updated": 0
+        },
+        {
+          "name": "BC847BS",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "74HC00",
+          "skipped": false,
+          "pins_updated": 28,
+          "rects_updated": 1,
+          "lines_updated": 8
+        },
+        {
+          "name": "D_TVS",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_28",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_27",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_26",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_25",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_24",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_23",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_22",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_21",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_20",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_19",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_18",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_17",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_16",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_15",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_14",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_13",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_12",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_11",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_10",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_12",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_11",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_10",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_19",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_18",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_17",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_16",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_15",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_14",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_13",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_12",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_11",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_10",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_9",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_8",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_7",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_6",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_5",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_4",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_3",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_2",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R_1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_9",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_8",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_7",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_6",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_5",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_4",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_3",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_2",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L_1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "LED",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D_2",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D_1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_9",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_8",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_7",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_6",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_5",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_4",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_3",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_2",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C_1",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "R",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "L",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "D",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        },
+        {
+          "name": "C",
+          "skipped": true,
+          "pins_updated": 0,
+          "rects_updated": 0,
+          "lines_updated": 0
+        }
+      ]
+    }
+  ]
+}

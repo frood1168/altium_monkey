@@ -194,6 +194,12 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             port.area_color = _color(port_cfg["area_color"])
         if "text_color" in port_cfg:
             port.text_color = _color(port_cfg["text_color"])
+        if "width_mils" in port_cfg or "height_mils" in port_cfg:
+            port.auto_size = False
+        if "width_mils" in port_cfg:
+            port.width_mils = port_cfg["width_mils"]
+        if "height_mils" in port_cfg:
+            port.height_mils = port_cfg["height_mils"]
         counts["ports"] += 1
 
     power_port_cfg = style.get("power_port", {})
@@ -245,6 +251,10 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             connector.color = _color(harness_connector_cfg["color"])
         if "area_color" in harness_connector_cfg:
             connector.area_color = _color(harness_connector_cfg["area_color"])
+        if "width_mils" in harness_connector_cfg:
+            connector.xsize = harness_connector_cfg["width_mils"]
+        if "height_mils" in harness_connector_cfg:
+            connector.ysize = harness_connector_cfg["height_mils"]
         counts["harness_connectors"] += 1
 
     harness_entry_cfg = style.get("harness_entry", {})
@@ -343,9 +353,10 @@ def main() -> None:
     if not schdoc_paths:
         raise RuntimeError(f"No SchDoc files found in project: {prjpcb_path}")
 
+    project_dir = prjpcb_path.parent
     output_prjpcb = output_dir / prjpcb_path.name
     documents = [
-        style_schdoc(p, output_dir / p.name, style)
+        style_schdoc(p, output_dir / p.relative_to(project_dir), style)
         for p in schdoc_paths
     ]
 
