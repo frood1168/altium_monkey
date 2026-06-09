@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$refPrjPcb = "C:\Workspace\!__GeoFab\600-\600-Power\600-Power, System\600-Power, System.PrjPcb"
+$refPrjPcb = "Z:\Workspace\!___MicroNova\600-\600-Power, System\600-Power, System.PrjPcb"
 
 $prjFile = Get-Item "$ProjectDir\*.PrjPcb" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $prjFile) {
