@@ -4,7 +4,7 @@
 
 Public examples are indexed from `examples/manifest.toml`.
 
-Total examples: `100`
+Total examples: `101`
 
 ## Generate
 
@@ -51,6 +51,7 @@ uv run python tools\generate_docs.py
 | --- | --- | --- | --- |
 | [`hello_pcbdoc`](../../examples/hello_pcbdoc/README.md)<br>Create a PcbDoc hello example | pcbdoc | Generate a PcbDoc programmatically, create a rectangular board outline from explicit polygon vertices, place top silkscreen text, and save the board. | hello-world, generation, board-outline, polygon, silkscreen, pcb |
 | [`pcbdoc_add_arc`](../../examples/pcbdoc_add_arc/README.md)<br>Add PCB arcs | pcbdoc, mutation | Load a blank PcbDoc, add full-circle and partial arc primitives on multiple layers, and save the board. | pcbdoc, mutation, arc, full-circle, routing |
+| [`pcbdoc_add_custom_pad_region_outline`](../../examples/pcbdoc_add_custom_pad_region_outline/README.md)<br>Add custom-pad region outlines | pcbdoc, mutation | Load a blank PcbDoc, add an arc-bearing shape-based region plus a custom pad with primary and bottom-layer arc-bearing bodies, save the board, and write a JSON verification manifest. | pcbdoc, mutation, custom-pad, region, outline-vertices, arc |
 | [`pcbdoc_add_differential_pairs`](../../examples/pcbdoc_add_differential_pairs/README.md)<br>Add PCB differential pairs | pcbdoc, mutation | Create a PcbDoc from scratch, add differential-pair objects with routed member nets, and save the generated board plus a JSON summary. | pcbdoc, mutation, differential-pair, nets, routing |
 | [`pcbdoc_add_filled_region`](../../examples/pcbdoc_add_filled_region/README.md)<br>Add filled PCB regions | pcbdoc, mutation | Load a blank PcbDoc, add copper regions, a region with a hole, and a keepout region, and save the board. | pcbdoc, mutation, region, filled-region, keepout |
 | [`pcbdoc_add_free_3d_extruded`](../../examples/pcbdoc_add_free_3d_extruded/README.md)<br>Add a free extruded 3D body to a PcbDoc | pcbdoc, 3d | Create a PcbDoc and add a board-level generic extruded 3D body from a polygon projection. | pcbdoc, 3d, component-body, extruded, generation |
@@ -219,6 +220,7 @@ uv run python tools\generate_docs.py
 | [`pcbdoc_diff_pair_report`](../../examples/pcbdoc_diff_pair_report/README.md)<br>Report PCB differential pairs | pcbdoc, design | Load the RT Super C1 project, read PcbDoc differential-pair objects and classes, print a table, and write JSON plus text reports. | pcbdoc, project, differential-pair, classes, report |
 | [`pcbdoc_mutate_via_ipc4761`](../../examples/pcbdoc_mutate_via_ipc4761/README.md)<br>Mutate PCB vias to IPC-4761 Type7 | pcbdoc, mutation, project | Copy the RT Super C1 project, find all 12 mil diameter / 6 mil hole vias, set them to IPC-4761 Type7 filling and capping, and save the mutated project. | pcbdoc, mutation, via, ipc4761, project |
 | [`pcbdoc_add_filled_region`](../../examples/pcbdoc_add_filled_region/README.md)<br>Add filled PCB regions | pcbdoc, mutation | Load a blank PcbDoc, add copper regions, a region with a hole, and a keepout region, and save the board. | pcbdoc, mutation, region, filled-region, keepout |
+| [`pcbdoc_add_custom_pad_region_outline`](../../examples/pcbdoc_add_custom_pad_region_outline/README.md)<br>Add custom-pad region outlines | pcbdoc, mutation | Load a blank PcbDoc, add an arc-bearing shape-based region plus a custom pad with primary and bottom-layer arc-bearing bodies, save the board, and write a JSON verification manifest. | pcbdoc, mutation, custom-pad, region, outline-vertices, arc |
 | [`pcbdoc_insert_footprint_from_pcblib`](../../examples/pcbdoc_insert_footprint_from_pcblib/README.md)<br>Insert PcbLib footprints into a PcbDoc | pcbdoc, pcblib | Create a PcbDoc, place resistor footprints from an existing PcbLib, assign component parameters and pad nets, and save the board. | pcbdoc, pcblib, footprint, component, placement, parameters |
 | [`pcbdoc_insert_nets_route`](../../examples/pcbdoc_insert_nets_route/README.md)<br>Insert footprints and route PCB nets | pcbdoc, pcblib | Create a PcbDoc, insert connector and resistor footprints from PcbLib assets, assign pad nets, and add routed tracks plus a via. | pcbdoc, pcblib, footprint, routing, nets, tracks |
 | [`pcbdoc_add_free_3d_extruded`](../../examples/pcbdoc_add_free_3d_extruded/README.md)<br>Add a free extruded 3D body to a PcbDoc | pcbdoc, 3d | Create a PcbDoc and add a board-level generic extruded 3D body from a polygon projection. | pcbdoc, 3d, component-body, extruded, generation |

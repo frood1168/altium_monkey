@@ -130,9 +130,26 @@ Slotted holes require `slot_length_mils`.
 
 `AltiumPcbDoc.add_custom_pad(...)` authors a board custom pad as an anchor pad
 plus native custom-shape region records. `outline_points_mils` and
-`hole_points_mils` describe the primary layer body and holes. Use
+`hole_points_mils` describe the primary layer body and holes. Pass
+`outline_vertices` for line/arc segment semantics, and use
 `PcbCustomPadLayerShapeSpec` entries in `layer_shapes` for additional
-layer-specific bodies and holes that share the same anchor pad.
+layer-specific bodies and holes that share the same anchor pad. Custom-pad
+anchors can also carry ordinary pad drill fields such as `hole_size_mils`,
+`plated`, `hole_shape`, and slot/tolerance parameters.
+
+`AltiumPcbDoc.add_region(...)` also accepts `outline_vertices` for
+line/arc-preserving shape-based-region authoring. Region and PcbDoc custom-pad
+body helpers share the same outline normalization path; custom pads add the
+anchor pad and native `CustomShapes/*` attachment records around that region
+body.
+
+## Dimensions
+
+`AltiumPcbDoc.add_dimension_record(...)` and
+`PcbDocBuilder.add_dimension_record(...)` append raw native `Dimensions6/Data`
+records from `record_type`, `record_leader`, and payload bytes. This is a
+preservation/transcode API for imported dimensions, not a high-level dimension
+construction API or full object-oriented dimension model.
 
 ## Text
 
@@ -344,13 +361,14 @@ Start with:
 29. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
 30. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
 31. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
-32. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
-33. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
-34. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
-35. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
-36. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
-37. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
-38. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
+32. [`pcbdoc_add_custom_pad_region_outline`](../examples/pcbdoc_add_custom_pad_region_outline/README.md)
+33. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
+34. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
+35. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
+36. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
+37. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
+38. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
+39. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.

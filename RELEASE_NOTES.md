@@ -1,3 +1,63 @@
+# altium-monkey 2026.06.09 Release Notes
+
+Package version: `2026.6.9`
+
+`2026.06.09` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.9`.
+
+This release closes a focused PcbDoc authoring gap for downstream transcode and
+visualization workflows. The changes are additive and preserve existing
+documented APIs.
+
+## PcbDoc Region And Custom-Pad Authoring
+
+`AltiumPcbDoc.add_region(...)` now accepts `outline_vertices` for
+line/arc-preserving shape-based-region authoring. This allows callers to write
+native `PcbExtendedVertex` outlines when point-only polygons would lose segment
+semantics.
+
+PcbDoc custom-pad authoring now supports arc-capable extended outline vertices
+on the primary custom body and on additional per-layer bodies through
+`PcbCustomPadLayerShapeSpec(..., outline_vertices=...)`. Custom-pad anchors can
+also carry ordinary pad drill fields such as `hole_size_mils`, `plated`,
+`hole_shape`, slot fields, and drill tolerances.
+
+Ordinary region authoring and PcbDoc custom-pad body authoring now share the
+same outline normalization path for point lists, holes, and optional extended
+line/arc outlines. Custom pads remain a composed workflow around that shared
+geometry path: the API writes the anchor pad plus native `CustomShapes/*`,
+`Regions6`, and `ShapeBasedRegions6` records required for PcbDoc custom-pad
+semantics.
+
+## Dimension Preservation
+
+`AltiumPcbDoc.add_dimension_record(...)` and
+`PcbDocBuilder.add_dimension_record(...)` can append raw native
+`Dimensions6/Data` records from `record_type`, `record_leader`, and payload
+bytes. This is a preservation/transcode API for imported dimensions, not a
+high-level construction API or full object-oriented dimension model.
+
+## Public Examples
+
+The new `pcbdoc_add_custom_pad_region_outline` public example demonstrates
+`add_region(..., outline_vertices=...)`, `add_custom_pad(...,
+outline_vertices=...)`, and `PcbCustomPadLayerShapeSpec(...,
+outline_vertices=...)`. The example reparses its generated board and writes a
+JSON manifest proving arc vertices and `CustomShapes/Data` are present.
+
+## Validation
+
+This release was tested with focused PcbDoc/PcbLib authoring tests, the new
+public example, public manifest/docs checks, downstream Data Models writer
+tests, and the public release validation wrapper.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new region/custom-pad outline
+controls and raw dimension replay support are additive.
+
+---
+
 # altium-monkey 2026.06.08 Release Notes
 
 Package version: `2026.6.8`
@@ -87,10 +147,10 @@ interchange docs, PcbDoc/PcbLib writer parity, PcbLib via feature and
 serialization, generated public example docs, and native C++ parity for the
 promoted writer controls.
 
-The release candidate was tested with focused package authoring tests, public
-example tests, private PcbDoc/PcbLib fixture lanes, native C++
-parity lanes for the promoted writer surfaces, AD26 interop open/save smoke for
-the generated PcbLib samples, and strict package Pyright with zero diagnostics.
+This release was tested with focused package authoring tests, public example
+tests, private PcbDoc/PcbLib fixture lanes, native C++ parity lanes for the
+promoted writer surfaces, AD26 interop open/save smoke for the generated PcbLib
+samples, and strict package Pyright with zero diagnostics.
 
 ## Public API Compatibility
 

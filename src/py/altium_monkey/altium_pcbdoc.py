@@ -1117,6 +1117,7 @@ class AltiumPcbDoc:
         self.extended_primitive_information = list(
             getattr(builder, "extended_primitive_information", [])
         )
+        self.dimensions = builder.dimensions
         self.models = builder.models
         self.component_bodies = builder.component_bodies
         self.shapebased_component_bodies = builder.shapebased_component_bodies
@@ -2371,6 +2372,28 @@ class AltiumPcbDoc:
         self._mirror_authoring_builder_state()
         return self.pads[-1]
 
+    def add_dimension_record(
+        self,
+        *,
+        record_type: int,
+        record_payload: bytes | bytearray | memoryview,
+        record_leader: int = 0,
+    ) -> AltiumPcbDimension:
+        """
+        Add a raw Dimensions6 record to the authored PcbDoc.
+
+        This preserves existing native dimension payloads while keeping room for
+        a later semantic dimension-authoring API.
+        """
+        builder = self._ensure_authoring_builder()
+        dimension = builder.add_dimension_record(
+            record_type=record_type,
+            record_payload=record_payload,
+            record_leader=record_leader,
+        )
+        self._mirror_authoring_builder_state()
+        return dimension
+
     def add_custom_pad(
         self,
         *,
@@ -2386,9 +2409,17 @@ class AltiumPcbDoc:
         anchor_shape: int | str | PadShape = PadShape.CIRCLE,
         pad_index: int | None = None,
         hole_points_mils: Sequence[Sequence[PcbDocPointMils]] | None = None,
+        outline_vertices: Sequence[PcbExtendedVertex] | None = None,
         outline_points_are_local: bool = True,
         layer_shapes: Sequence["PcbCustomPadLayerShapeSpec"] | None = None,
         net: str | None = None,
+        hole_size_mils: float = 0.0,
+        plated: bool | None = None,
+        slot_length_mils: float = 0.0,
+        slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
+        hole_positive_tolerance_mils: float | None = None,
+        hole_negative_tolerance_mils: float | None = None,
         solder_mask_expansion: PcbMaskExpansionInput = None,
         solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -2402,10 +2433,11 @@ class AltiumPcbDoc:
         Point arguments are in mils. With the default
         `outline_points_are_local=True`, outline and hole points are relative
         to `position_mils + offset_mils`. Pass `False` for absolute board
-        coordinates. `layer_shapes` can add more layer-specific custom bodies
-        and holes that share the same anchor pad. The authored PcbDoc also
-        emits `CustomShapes/Data` so the shape reattaches to the pad on
-        readback.
+        coordinates. `outline_vertices` can preserve arc-bearing outlines when
+        paired with matching outline points. `layer_shapes` can add more
+        layer-specific custom bodies and holes that share the same anchor pad.
+        Drill fields apply to the anchor pad. The authored PcbDoc also emits
+        `CustomShapes/Data` so the shape reattaches to the pad on readback.
         """
         builder = self._ensure_authoring_builder()
         builder.add_custom_pad(
@@ -2430,9 +2462,17 @@ class AltiumPcbDoc:
                 ]
                 for hole in (hole_points_mils or [])
             ],
+            outline_vertices=outline_vertices,
             outline_points_are_local=outline_points_are_local,
             layer_shapes=layer_shapes,
             net=net,
+            hole_size_mils=hole_size_mils,
+            plated=plated,
+            slot_length_mils=slot_length_mils,
+            slot_rotation_degrees=slot_rotation_degrees,
+            hole_shape=hole_shape,
+            hole_positive_tolerance_mils=hole_positive_tolerance_mils,
+            hole_negative_tolerance_mils=hole_negative_tolerance_mils,
             solder_mask_expansion=solder_mask_expansion,
             solder_mask_expansion_mode=solder_mask_expansion_mode,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
@@ -2534,6 +2574,7 @@ class AltiumPcbDoc:
         outline_points_mils: list[tuple[float, float]],
         layer: int | PcbLayer = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
+        outline_vertices: Sequence[PcbExtendedVertex] | None = None,
         kind: int | PcbRegionKind = PcbRegionKind.COPPER,
         is_board_cutout: bool = False,
         is_shapebased: bool = False,
@@ -2551,6 +2592,9 @@ class AltiumPcbDoc:
             outline_points_mils: Outer polygon vertices in mils.
             layer: `PcbLayer` or native layer id.
             hole_points_mils: Optional list of hole polygons in mils.
+            outline_vertices: Optional native shape-based-region outline
+                vertices. Use this when line/arc segment semantics should be
+                preserved.
             kind: Native region kind. Prefer `PcbRegionKind` values when
                 authoring new public examples.
             is_board_cutout: Mark the region as a board cutout.
@@ -2572,6 +2616,7 @@ class AltiumPcbDoc:
             outline_points_mils=outline_points_mils,
             layer=layer,
             hole_points_mils=hole_points_mils,
+            outline_vertices=outline_vertices,
             region_kind=kind,
             is_board_cutout=is_board_cutout,
             is_shapebased=is_shapebased,
@@ -4022,6 +4067,10 @@ class AltiumPcbDoc:
                 log.info(
                     f"  Writing Dimensions6/Data ({len(self.dimensions)} dimensions)..."
                 )
+            writer.add_stream(
+                "Dimensions6/Header",
+                len(self.dimensions).to_bytes(4, byteorder="little"),
+            )
             writer.add_stream("Dimensions6/Data", self._serialize_dimensions())
 
         if self.extended_primitive_information:

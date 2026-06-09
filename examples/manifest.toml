@@ -943,6 +943,23 @@ requires_extra = []
 tags = ["pcbdoc", "mutation", "region", "filled-region", "keepout"]
 
 [[examples]]
+id = "pcbdoc_add_custom_pad_region_outline"
+title = "Add custom-pad region outlines"
+summary = "Load a blank PcbDoc, add an arc-bearing shape-based region plus a custom pad with primary and bottom-layer arc-bearing bodies, save the board, and write a JSON verification manifest."
+areas = ["pcbdoc", "mutation"]
+status = "ready"
+entrypoint = "pcbdoc_add_custom_pad_region_outline/pcbdoc_add_custom_pad_region_outline.py"
+doc = "pcbdoc_add_custom_pad_region_outline/README.md"
+inputs = ["assets/pcbdoc/blank.PcbDoc"]
+assets = []
+outputs = [
+  "pcbdoc_add_custom_pad_region_outline/output/pcbdoc_add_custom_pad_region_outline.PcbDoc",
+  "pcbdoc_add_custom_pad_region_outline/output/pcbdoc_add_custom_pad_region_outline.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "mutation", "custom-pad", "region", "outline-vertices", "arc"]
+
+[[examples]]
 id = "pcbdoc_insert_footprint_from_pcblib"
 title = "Insert PcbLib footprints into a PcbDoc"
 summary = "Create a PcbDoc, place resistor footprints from an existing PcbLib, assign component parameters and pad nets, and save the board."

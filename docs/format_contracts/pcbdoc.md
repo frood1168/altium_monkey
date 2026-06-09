@@ -17,9 +17,14 @@
 - Read and write promoted via metadata such as IPC-4761 type, via feature
   rows, solder-mask tenting, hole tolerance, fabrication/assembly testpoint
   flags, and propagation delay.
+- Author shape-based region outlines with line/arc extended vertices through
+  `add_region(..., outline_vertices=...)`.
 - Author custom pads through the native board custom-shape contract, including
   primary and additional per-layer custom bodies, holes, net assignment,
   component ownership, and pad-center offsets.
+- Preserve imported PCB dimension records and re-author raw `Dimensions6/Data`
+  records through `add_dimension_record(...)`; this is not a full
+  object-oriented dimension model.
 - Author round, square, and slotted pad drill-hole shapes. Slotted holes
   require a positive slot length; square holes require a positive drill size.
 - Inspect user-defined PCB unions through union-name records, typed smart-union
@@ -43,17 +48,38 @@ region shapes. The board writer emits `CustomShapes/Header` and
 `PRIMITIVEINDEX` to reference the pad record. The paired `Regions6` and
 `ShapeBasedRegions6` records carry native one-based `PADINDEX` metadata.
 
+Ordinary region authoring and PcbDoc custom-pad body authoring share the same
+outline normalization path for point lists, holes, and optional
+`PcbExtendedVertex` line/arc outlines. Custom pads remain a composed workflow:
+they add the anchor pad and native `CustomShapes/*` attachment records around
+the shared region body.
+
 `add_custom_pad(...)` takes the primary layer body through
 `outline_points_mils` and optional primary holes through `hole_points_mils`.
-Use `PcbCustomPadLayerShapeSpec` entries in `layer_shapes` when a board pad
-needs additional layer-specific custom bodies and holes that share the same
-anchor pad.
+Pass `outline_vertices` when the primary body needs native line/arc segment
+semantics rather than a point-only polygon. Use `PcbCustomPadLayerShapeSpec`
+entries in `layer_shapes` when a board pad needs additional layer-specific
+custom bodies and holes that share the same anchor pad; layer-shape entries can
+also carry `outline_vertices`.
+
+Custom-pad anchors may carry ordinary pad drill data through `hole_size_mils`,
+`plated`, `hole_shape`, `slot_length_mils`, `slot_rotation_degrees`, and drill
+tolerance parameters. This is for source documents where the custom copper body
+and the drill are both owned by one Altium pad record.
 
 This differs from PcbLib, where footprint custom pads use
 `ExtendedPrimitiveInformation` rather than board `CustomShapes/*`. Public
 PcbDoc and PcbLib APIs intentionally expose the same semantic
 `add_custom_pad(...)` shape while preserving the container-specific native
 storage contracts.
+
+## Dimensions
+
+Parsed PcbDoc dimensions are exposed as typed `AltiumPcbDimension` records with
+raw-payload-preserving serialization. `add_dimension_record(...)` appends one
+native Dimensions6 record from `record_type`, `record_leader`, and the raw
+payload bytes. This API is for preservation and transcode workflows; it does
+not yet define a full object-oriented semantic dimension-construction model.
 
 ## User Unions
 

@@ -55,6 +55,7 @@ from .altium_pcb_custom_shapes import (
     parse_custom_shapes_stream,
     serialize_custom_shapes_stream,
 )
+from .altium_pcb_dimension import AltiumPcbDimension, parse_dimensions6_stream
 from .altium_pcb_via_structure import (
     AltiumPcbViaStructure,
     AltiumPcbViaStructureFeature,
@@ -1121,6 +1122,112 @@ class PcbCustomPadLayerShapeSpec:
     outline_points_mils: Sequence[tuple[float, float]]
     hole_points_mils: Sequence[Sequence[tuple[float, float]]] = ()
     outline_points_are_local: bool = True
+    outline_vertices: Sequence[PcbExtendedVertex] | None = None
+
+
+@dataclass(frozen=True)
+class _PcbDocRegionShape:
+    """Normalized region geometry ready for native PcbDoc region authoring."""
+
+    outline_points_mils: list[tuple[float, float]]
+    hole_points_mils: list[list[tuple[float, float]]]
+    outline_vertices: list[PcbExtendedVertex] | None
+
+
+def _clone_extended_vertex_with_offset(
+    vertex: PcbExtendedVertex,
+    *,
+    dx_iu: int,
+    dy_iu: int,
+) -> PcbExtendedVertex:
+    clone = PcbExtendedVertex()
+    clone.is_round = bool(vertex.is_round)
+    clone.x = int(vertex.x) + int(dx_iu)
+    clone.y = int(vertex.y) + int(dy_iu)
+    clone.center_x = int(vertex.center_x) + int(dx_iu)
+    clone.center_y = int(vertex.center_y) + int(dy_iu)
+    clone.radius = int(vertex.radius)
+    clone.start_angle = float(vertex.start_angle)
+    clone.end_angle = float(vertex.end_angle)
+    return clone
+
+
+def _points_from_extended_vertices(
+    vertices: Sequence[PcbExtendedVertex],
+) -> list[tuple[float, float]]:
+    return [
+        (float(vertex.x) / 10000.0, float(vertex.y) / 10000.0) for vertex in vertices
+    ]
+
+
+def _normalize_region_shape(
+    *,
+    outline_points_mils: Sequence[tuple[float, float]],
+    hole_points_mils: Sequence[Sequence[tuple[float, float]]] | None = None,
+    outline_vertices: Sequence[PcbExtendedVertex] | None = None,
+    points_are_local: bool = False,
+    origin_mils: tuple[float, float] = (0.0, 0.0),
+    error_subject: str = "Region outline",
+) -> _PcbDocRegionShape:
+    outline_points = _normalize_region_point_list(
+        outline_points_mils,
+        points_are_local=points_are_local,
+        origin_mils=origin_mils,
+    )
+    normalized_vertices = _normalize_region_outline_vertices(
+        outline_vertices,
+        points_are_local=points_are_local,
+        origin_mils=origin_mils,
+    )
+    if len(outline_points) < 3 and normalized_vertices is not None:
+        outline_points = _points_from_extended_vertices(normalized_vertices)
+    if len(outline_points) < 3:
+        raise ValueError(f"{error_subject} requires at least 3 points")
+    return _PcbDocRegionShape(
+        outline_points_mils=outline_points,
+        hole_points_mils=[
+            _normalize_region_point_list(
+                hole,
+                points_are_local=points_are_local,
+                origin_mils=origin_mils,
+            )
+            for hole in (hole_points_mils or [])
+        ],
+        outline_vertices=normalized_vertices,
+    )
+
+
+def _normalize_region_point_list(
+    points: Sequence[tuple[float, float]],
+    *,
+    points_are_local: bool,
+    origin_mils: tuple[float, float],
+) -> list[tuple[float, float]]:
+    origin_x, origin_y = origin_mils
+    if not points_are_local:
+        return [(float(px), float(py)) for px, py in points]
+    return [(float(origin_x) + float(px), float(origin_y) + float(py)) for px, py in points]
+
+
+def _normalize_region_outline_vertices(
+    vertices: Sequence[PcbExtendedVertex] | None,
+    *,
+    points_are_local: bool,
+    origin_mils: tuple[float, float],
+) -> list[PcbExtendedVertex] | None:
+    if not vertices:
+        return None
+    if not points_are_local:
+        return [
+            _clone_extended_vertex_with_offset(vertex, dx_iu=0, dy_iu=0)
+            for vertex in vertices
+        ]
+    dx_iu = int(round(float(origin_mils[0]) * 10000.0))
+    dy_iu = int(round(float(origin_mils[1]) * 10000.0))
+    return [
+        _clone_extended_vertex_with_offset(vertex, dx_iu=dx_iu, dy_iu=dy_iu)
+        for vertex in vertices
+    ]
 
 
 class PcbDocViewState(StrEnum):
@@ -3594,6 +3701,11 @@ class PcbDocBuilder:
                 self.profile.raw_streams.get("CustomShapes/Data", b"")
             )
         )
+        self.dimensions = list(
+            parse_dimensions6_stream(
+                self.profile.raw_streams.get("Dimensions6/Data", b"")
+            )
+        )
         self.via_structures: list[AltiumPcbViaStructure] = []
         self.via_structure_links: list[AltiumPcbViaStructureLink] = []
         self._via_structure_parse_failed = False
@@ -3644,6 +3756,7 @@ class PcbDocBuilder:
         self._component_parameters_dirty = False
         self._fills_dirty = False
         self._differential_pairs_dirty = False
+        self._dimensions_dirty = False
         self._models_dirty = False
         self._pads_dirty = False
         self._component_bodies_dirty = False
@@ -3715,6 +3828,36 @@ class PcbDocBuilder:
         self.extended_primitive_information.append(item)
         self._extended_primitive_information_dirty = True
         return self
+
+    def add_dimension_record(
+        self,
+        *,
+        record_type: int,
+        record_payload: bytes | bytearray | memoryview,
+        record_leader: int = 0,
+    ) -> AltiumPcbDimension:
+        """
+        Add a raw Dimensions6 record while preserving typed parse/readback.
+
+        This is intentionally a raw-record API: semantic dimension authoring is
+        still evolving, but imported dimensions can round-trip without losing
+        their native Altium payload.
+        """
+        record_type_int = int(record_type)
+        record_leader_int = int(record_leader)
+        if not 0 <= record_type_int <= 0xFF:
+            raise ValueError("Dimensions6 record_type must be in range 0..255")
+        if not 0 <= record_leader_int <= 0xFF:
+            raise ValueError("Dimensions6 record_leader must be in range 0..255")
+        payload = bytes(record_payload)
+        dimension = AltiumPcbDimension.from_stream_record(
+            record_type=record_type_int,
+            record_leader=record_leader_int,
+            record_payload=payload,
+        )
+        self.dimensions.append(dimension)
+        self._dimensions_dirty = True
+        return dimension
 
     def set_stream_same_size(
         self,
@@ -4564,6 +4707,7 @@ class PcbDocBuilder:
         outline_points_mils: list[tuple[float, float]],
         layer: int | PcbLayer,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
+        outline_vertices: Sequence[PcbExtendedVertex] | None = None,
         component_index: int | None = None,
         record: AltiumPcbCustomShapeRecord | None = None,
     ) -> None:
@@ -4571,6 +4715,7 @@ class PcbDocBuilder:
             outline_points_mils=outline_points_mils,
             layer=int(layer),
             hole_points_mils=list(hole_points_mils or []),
+            outline_vertices=outline_vertices,
             is_shapebased=True,
             component_index=component_index,
         )
@@ -4611,9 +4756,17 @@ class PcbDocBuilder:
         anchor_shape: int | str | PadShape = PadShape.CIRCLE,
         pad_index: int | None = None,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
+        outline_vertices: Sequence[PcbExtendedVertex] | None = None,
         outline_points_are_local: bool = True,
         layer_shapes: Sequence[PcbCustomPadLayerShapeSpec] | None = None,
         net: str | None = None,
+        hole_size_mils: float = 0.0,
+        plated: bool | None = None,
+        slot_length_mils: float = 0.0,
+        slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str = "round",
+        hole_positive_tolerance_mils: float | None = None,
+        hole_negative_tolerance_mils: float | None = None,
         solder_mask_expansion: PcbMaskExpansionInput = None,
         solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -4626,11 +4779,10 @@ class PcbDocBuilder:
         Add a custom pad using the native PcbDoc anchor-pad plus region shape.
 
         `outline_points_mils` describes the primary custom body on `layer`.
+        Pass `outline_vertices` for arc-capable shape-based-region outlines.
         Use `layer_shapes` for additional layer-specific bodies and holes that
-        share the same anchor pad.
+        share the same anchor pad. Drill fields apply to the anchor pad.
         """
-        if len(outline_points_mils) < 3:
-            raise ValueError("Custom pad outline requires at least 3 points")
         anchor_width = (
             float(anchor_diameter_mils)
             if anchor_width_mils is None
@@ -4653,8 +4805,11 @@ class PcbDocBuilder:
             layer=layer_id,
             shape=anchor_shape,
             rotation_degrees=anchor_rotation_degrees,
-            hole_size_mils=0.0,
-            plated=False,
+            hole_size_mils=hole_size_mils,
+            plated=plated,
+            slot_length_mils=slot_length_mils,
+            slot_rotation_degrees=slot_rotation_degrees,
+            hole_shape=hole_shape,
             net=net,
             solder_mask_expansion=solder_mask_expansion,
             solder_mask_expansion_mode=solder_mask_expansion_mode,
@@ -4662,6 +4817,8 @@ class PcbDocBuilder:
             paste_mask_expansion=paste_mask_expansion,
             paste_mask_expansion_mode=paste_mask_expansion_mode,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
+            hole_positive_tolerance_mils=hole_positive_tolerance_mils,
+            hole_negative_tolerance_mils=hole_negative_tolerance_mils,
             component_index=component_index,
         )
         pad = self.pads[-1]
@@ -4680,16 +4837,14 @@ class PcbDocBuilder:
 
         center_x_mils = float(position_mils[0]) + float(offset_x_mils)
         center_y_mils = float(position_mils[1]) + float(offset_y_mils)
-
-        def _to_absolute(
-            points: list[tuple[float, float]],
-        ) -> list[tuple[float, float]]:
-            if not outline_points_are_local:
-                return [(float(px), float(py)) for px, py in points]
-            return [
-                (center_x_mils + float(px), center_y_mils + float(py))
-                for px, py in points
-            ]
+        primary_shape = _normalize_region_shape(
+            outline_points_mils=outline_points_mils,
+            hole_points_mils=hole_points_mils,
+            outline_vertices=outline_vertices,
+            points_are_local=outline_points_are_local,
+            origin_mils=(center_x_mils, center_y_mils),
+            error_subject="Custom pad outline",
+        )
 
         custom_record = AltiumPcbCustomShapeRecord()
         custom_record.primitive_index = native_pad_index - 1
@@ -4700,9 +4855,10 @@ class PcbDocBuilder:
         self._add_custom_pad_layer_shape(
             pad=pad,
             zero_based_pad_index=native_pad_index - 1,
-            outline_points_mils=_to_absolute(outline_points_mils),
+            outline_points_mils=primary_shape.outline_points_mils,
             layer=layer_id,
-            hole_points_mils=[_to_absolute(hole) for hole in (hole_points_mils or [])],
+            hole_points_mils=primary_shape.hole_points_mils,
+            outline_vertices=primary_shape.outline_vertices,
             component_index=component_index,
             record=custom_record,
         )
@@ -4713,30 +4869,23 @@ class PcbDocBuilder:
                 raise ValueError(
                     "Custom pad layer_shapes must not repeat the primary layer"
                 )
-            if len(layer_shape.outline_points_mils) < 3:
-                raise ValueError(
-                    "Custom pad layer_shapes outline requires at least 3 points"
-                )
             seen_layers.add(extra_layer_id)
-
-            def _extra_to_absolute(
-                points: Sequence[tuple[float, float]],
-            ) -> list[tuple[float, float]]:
-                if not bool(layer_shape.outline_points_are_local):
-                    return [(float(px), float(py)) for px, py in points]
-                return [
-                    (center_x_mils + float(px), center_y_mils + float(py))
-                    for px, py in points
-                ]
+            extra_shape = _normalize_region_shape(
+                outline_points_mils=layer_shape.outline_points_mils,
+                hole_points_mils=layer_shape.hole_points_mils,
+                outline_vertices=layer_shape.outline_vertices,
+                points_are_local=bool(layer_shape.outline_points_are_local),
+                origin_mils=(center_x_mils, center_y_mils),
+                error_subject="Custom pad layer_shapes outline",
+            )
 
             self._add_custom_pad_layer_shape(
                 pad=pad,
                 zero_based_pad_index=native_pad_index - 1,
-                outline_points_mils=_extra_to_absolute(layer_shape.outline_points_mils),
+                outline_points_mils=extra_shape.outline_points_mils,
                 layer=extra_layer_id,
-                hole_points_mils=[
-                    _extra_to_absolute(hole) for hole in layer_shape.hole_points_mils
-                ],
+                hole_points_mils=extra_shape.hole_points_mils,
+                outline_vertices=extra_shape.outline_vertices,
                 component_index=component_index,
                 record=custom_record,
             )
@@ -4836,11 +4985,16 @@ class PcbDocBuilder:
         if net:
             self.add_net(net)
             net_index = self._find_net_index(net)
-        region, shapebased_region = build_authored_region_pair(
+        shape = _normalize_region_shape(
             outline_points_mils=outline_points_mils,
-            layer=layer,
             hole_points_mils=hole_points_mils,
             outline_vertices=outline_vertices,
+        )
+        region, shapebased_region = build_authored_region_pair(
+            outline_points_mils=shape.outline_points_mils,
+            layer=layer,
+            hole_points_mils=shape.hole_points_mils,
+            outline_vertices=shape.outline_vertices,
             net_index=net_index,
             polygon_index=0xFFFF if polygon_index is None else int(polygon_index),
             subpoly_index=int(subpoly_index),
@@ -5217,6 +5371,16 @@ class PcbDocBuilder:
             ):
                 streams[key] = value
 
+    def _serialize_dimensions(self) -> bytes:
+        data = bytearray()
+        for dimension in self.dimensions:
+            payload = dimension.serialize_record_payload()
+            data.append(int(getattr(dimension, "record_type", 0)) & 0xFF)
+            data.append(int(getattr(dimension, "record_leader", 0)) & 0xFF)
+            data.extend(len(payload).to_bytes(4, "little"))
+            data.extend(payload)
+        return bytes(data)
+
     def build_streams(self) -> dict[str, bytes]:
         streams = dict(self._streams)
 
@@ -5379,6 +5543,18 @@ class PcbDocBuilder:
             streams["DifferentialPairs6/Data"] = self._streams.get(
                 "DifferentialPairs6/Data",
                 build_differential_pair_stream(self.differential_pairs),
+            )
+        if self._dimensions_dirty:
+            streams["Dimensions6/Header"] = struct.pack("<I", len(self.dimensions))
+            streams["Dimensions6/Data"] = self._serialize_dimensions()
+        else:
+            streams["Dimensions6/Header"] = self._streams.get(
+                "Dimensions6/Header",
+                struct.pack("<I", len(self.dimensions)),
+            )
+            streams["Dimensions6/Data"] = self._streams.get(
+                "Dimensions6/Data",
+                self._serialize_dimensions(),
             )
         if self._component_parameters_dirty:
             params_header, params_data = build_component_parameter_stream(
