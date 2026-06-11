@@ -9,7 +9,7 @@ description = "A toolkit for manipulating Altium files"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.12,<3.13"
 authors = [
     { name = "Eli Hughes", email = "ehughes@wavenumber.net" },
 ]
@@ -17,7 +17,7 @@ dependencies = [
     "pillow==11.2.1",
     "freetype-py",
     "uharfbuzz",
-    "wn-geometer==2026.5.25",
+    "wn-geometer==2026.6.10",
     "lxml==6.0.2",
     "lz4>=4.4.5",
 ]

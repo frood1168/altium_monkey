@@ -1,3 +1,26 @@
+# altium-monkey 2026.06.11 Release Notes
+
+Package version: `2026.6.11`
+
+`2026.06.11` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.11`.
+
+This release refreshes the controlled `wn-geometer` runtime dependency used for
+STEP-derived component bounds.
+
+## Geometer Dependency Refresh
+
+`altium-monkey` now depends on `wn-geometer==2026.6.10`, moving STEP geometry
+workflows onto the OCCT V8-backed Geometer package while preserving the
+existing Altium Monkey API surface.
+
+## Validation
+
+This release was prepared through the validation wrapper, including public
+tests, package build, artifact checks, and clean wheel install validation.
+
+---
+
 # altium-monkey 2026.06.09 Release Notes
 
 Package version: `2026.6.9`
@@ -49,7 +72,7 @@ JSON manifest proving arc vertices and `CustomShapes/Data` are present.
 
 This release was tested with focused PcbDoc/PcbLib authoring tests, the new
 public example, public manifest/docs checks, downstream Data Models writer
-tests, and the public release validation wrapper.
+tests, and the validation wrapper.
 
 ## Public API Compatibility
 
