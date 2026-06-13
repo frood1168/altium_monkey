@@ -250,8 +250,6 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
         c.record_color("sheet_symbol", sheet_symbol, "color", "color")
         c.record_color("sheet_symbol", sheet_symbol, "area_color", "area_color")
         c.record_line_width("sheet_symbol", sheet_symbol)
-        c.record("sheet_symbol", "width_mils", getattr(sheet_symbol, "x_size", None))
-        c.record("sheet_symbol", "height_mils", getattr(sheet_symbol, "y_size", None))
 
         for entry in getattr(sheet_symbol, "entries", []):
             c.record_font("sheet_entry", entry)

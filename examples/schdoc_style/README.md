@@ -56,7 +56,7 @@ Removing a section entirely means no style is applied to that element type.
 | `[harness_connector]` | Harness connectors (`width_mils`, `height_mils` also supported) |
 | `[harness_entry]` | Harness entries |
 | `[harness_type]` | Harness type labels |
-| `[sheet_symbol]` | Sheet symbols (`width_mils`, `height_mils` also supported) |
+| `[sheet_symbol]` | Sheet symbols |
 | `[sheet_entry]` | Sheet entries (children of sheet symbols) |
 | `[component.designator]` | Component designator text |
 | `[component.parameter]` | Visible component parameter text |

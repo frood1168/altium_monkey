@@ -323,10 +323,6 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             lw = _LINE_WIDTH_MAP.get(sheet_symbol_cfg["line_width"].upper())
             if lw is not None:
                 sheet_symbol.line_width = lw
-        if "width_mils" in sheet_symbol_cfg:
-            sheet_symbol.x_size = sheet_symbol_cfg["width_mils"]
-        if "height_mils" in sheet_symbol_cfg:
-            sheet_symbol.y_size = sheet_symbol_cfg["height_mils"]
         counts["sheet_symbols"] += 1
 
         for entry in getattr(sheet_symbol, "entries", []):
