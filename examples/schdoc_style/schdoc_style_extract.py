@@ -289,7 +289,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "project",
         metavar="PROJECT.PrjPcb",
-        help="Path to the .PrjPcb file. Writes extracted styles to <project_dir>/clean/style.toml.",
+        help="Path to the .PrjPcb file. Writes extracted styles to examples/assets/style.toml.",
     )
     return parser.parse_args()
 
@@ -298,7 +298,7 @@ def main() -> None:
     args = _parse_args()
 
     prjpcb_path = Path(args.project).resolve()
-    output_style = prjpcb_path.parent / "clean" / "style.toml"
+    output_style = Path(__file__).parent.parent / "assets" / "style.toml"
 
     project = AltiumPrjPcb(prjpcb_path)
     schdoc_paths = project.get_reachable_schdoc_paths()
@@ -320,7 +320,6 @@ def main() -> None:
         "# Edit as needed, then run schdoc_style.py with the same project path.",
     ]
 
-    output_style.parent.mkdir(parents=True, exist_ok=True)
     output_style.write_text(collector.to_toml(header), encoding="utf-8")
 
     print(f"Loaded project: {prjpcb_path}")

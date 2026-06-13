@@ -5,15 +5,15 @@ single TOML configuration file.
 
 ## What It Does
 
-Reads `style.toml` from the example directory, loads every `.SchDoc` referenced
+Reads `examples/assets/style.toml`, loads every `.SchDoc` referenced
 by the project, applies the configured fonts, colors, and line widths to each
-schematic element type, and writes the styled copies to `output/hydroscope_styled/`.
+schematic element type, and writes the styled copies to `<project_dir>/clean/`.
 
 ## Running
 
 ```powershell
 uv run python examples/schdoc_style/schdoc_style_extract.py path\to\project.PrjPcb
-# edit path\to\clean\style.toml
+# edit examples\assets\style.toml
 uv run python examples/schdoc_style/schdoc_style.py path\to\project.PrjPcb
 ```
 

@@ -367,7 +367,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "project",
         metavar="PROJECT.PrjPcb",
-        help="Path to the .PrjPcb file. Reads <project_dir>/clean/style.toml and writes styled SchDocs to <project_dir>/clean/.",
+        help="Path to the .PrjPcb file. Reads examples/assets/style.toml and writes styled SchDocs to <project_dir>/clean/.",
     )
     return parser.parse_args()
 
@@ -376,9 +376,8 @@ def main() -> None:
     args = _parse_args()
 
     prjpcb_path = Path(args.project).resolve()
-    clean_dir = prjpcb_path.parent / "clean"
-    style_path = clean_dir / "style.toml"
-    output_dir = clean_dir
+    style_path = Path(__file__).parent.parent / "assets" / "style.toml"
+    output_dir = prjpcb_path.parent / "clean"
 
     if not style_path.exists():
         print(
