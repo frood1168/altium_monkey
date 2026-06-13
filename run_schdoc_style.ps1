@@ -21,12 +21,6 @@ if (-not (Test-Path $cleanDir)) {
 Write-Host "Extracting style from reference project..."
 uv run python examples/schdoc_style/schdoc_style_extract.py $refPrjPcb
 
-$refCleanDir = Split-Path $refPrjPcb -Parent | Join-Path -ChildPath "clean"
-$srcToml = Join-Path $refCleanDir "style.toml"
-
-Write-Host "Copying style.toml to $cleanDir ..."
-Copy-Item $srcToml $cleanDir -Force
-
 Write-Host "Applying style to $($prjFile.Name) ..."
 uv run python examples/schdoc_style/schdoc_style.py $prjFile.FullName
 
