@@ -225,6 +225,8 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             al = _ALIGNMENT_MAP.get(port_cfg["alignment"].upper())
             if al is not None:
                 port.alignment = al
+        if "cross_reference" in port_cfg:
+            port.cross_reference = bool(port_cfg["cross_reference"])
         counts["ports"] += 1
 
     power_port_cfg = style.get("power_port", {})

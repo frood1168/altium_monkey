@@ -199,6 +199,7 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
         al_name = _ALIGNMENT_NAME.get(int(port.alignment))
         if al_name is not None:
             c.record("port", "alignment", al_name)
+        c.record("port", "cross_reference", port.cross_reference)
 
     for power_port in schdoc.power_ports:
         c.record_font("power_port", power_port)
