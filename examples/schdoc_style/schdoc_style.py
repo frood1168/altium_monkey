@@ -315,6 +315,8 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
     sheet_symbol_cfg = style.get("sheet_symbol", {})
     sheet_entry_cfg = style.get("sheet_entry", {})
     for sheet_symbol in schdoc.sheet_symbols:
+        if "color" in sheet_symbol_cfg:
+            sheet_symbol.color = _color(sheet_symbol_cfg["color"])
         if "area_color" in sheet_symbol_cfg:
             sheet_symbol.area_color = _color(sheet_symbol_cfg["area_color"])
         if "line_width" in sheet_symbol_cfg:
