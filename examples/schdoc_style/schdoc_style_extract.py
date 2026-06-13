@@ -5,6 +5,7 @@ from pathlib import Path
 
 from altium_monkey import (
     AltiumSchArc,
+    AltiumSchCrossSheetConnector,
     AltiumSchDesignator,
     AltiumSchDoc,
     AltiumSchHarnessType,
@@ -18,7 +19,9 @@ from altium_monkey import (
     AltiumSchSignalHarness,
     ColorValue,
     NoErcSymbol,
+    SchHorizontalAlign,
     SchSheetEntryArrowKind,
+    TextJustification,
 )
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 
@@ -40,6 +43,24 @@ _NO_ERC_SYMBOL_NAME: dict[int, str] = {
     int(NoErcSymbol.TRIANGLE): "TRIANGLE",
 }
 
+_ALIGNMENT_NAME: dict[int, str] = {
+    SchHorizontalAlign.CENTER.value: "CENTER",
+    SchHorizontalAlign.LEFT.value: "LEFT",
+    SchHorizontalAlign.RIGHT.value: "RIGHT",
+}
+
+_JUSTIFICATION_NAME: dict[int, str] = {
+    TextJustification.BOTTOM_LEFT.value: "BOTTOM_LEFT",
+    TextJustification.BOTTOM_CENTER.value: "BOTTOM_CENTER",
+    TextJustification.BOTTOM_RIGHT.value: "BOTTOM_RIGHT",
+    TextJustification.CENTER_LEFT.value: "CENTER_LEFT",
+    TextJustification.CENTER_CENTER.value: "CENTER_CENTER",
+    TextJustification.CENTER_RIGHT.value: "CENTER_RIGHT",
+    TextJustification.TOP_LEFT.value: "TOP_LEFT",
+    TextJustification.TOP_CENTER.value: "TOP_CENTER",
+    TextJustification.TOP_RIGHT.value: "TOP_RIGHT",
+}
+
 # Section order matches style.toml
 _SECTION_ORDER = [
     "document",
@@ -47,6 +68,7 @@ _SECTION_ORDER = [
     "net_label",
     "port",
     "power_port",
+    "cross_sheet_connector",
     "note",
     "text_string",
     "no_erc",
@@ -174,10 +196,22 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
         c.record_color("port", port, "text_color", "text_color")
         c.record("port", "width_mils", port.width_mils)
         c.record("port", "height_mils", port.height_mils)
+        al_name = _ALIGNMENT_NAME.get(int(port.alignment))
+        if al_name is not None:
+            c.record("port", "alignment", al_name)
 
     for power_port in schdoc.power_ports:
         c.record_font("power_port", power_port)
         c.record_color("power_port", power_port, "color", "color")
+
+    for connector in schdoc.cross_sheet_connectors:
+        if not isinstance(connector, AltiumSchCrossSheetConnector):
+            continue
+        c.record_font("cross_sheet_connector", connector)
+        c.record_color("cross_sheet_connector", connector, "color", "color")
+        jv_name = _JUSTIFICATION_NAME.get(int(getattr(connector, "justification", 0)))
+        if jv_name is not None:
+            c.record("cross_sheet_connector", "justification", jv_name)
 
     for note in schdoc.objects.of_type(AltiumSchNote):
         c.record_font("note", note)
@@ -215,6 +249,8 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
     for sheet_symbol in schdoc.sheet_symbols:
         c.record_color("sheet_symbol", sheet_symbol, "area_color", "area_color")
         c.record_line_width("sheet_symbol", sheet_symbol)
+        c.record("sheet_symbol", "width_mils", getattr(sheet_symbol, "x_size", None))
+        c.record("sheet_symbol", "height_mils", getattr(sheet_symbol, "y_size", None))
 
         for entry in getattr(sheet_symbol, "entries", []):
             c.record_font("sheet_entry", entry)

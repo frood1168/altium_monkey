@@ -12,6 +12,7 @@ from typing import TypeVar
 
 from altium_monkey import (
     AltiumSchArc,
+    AltiumSchCrossSheetConnector,
     AltiumSchDesignator,
     AltiumSchDoc,
     AltiumSchEllipse,
@@ -30,7 +31,9 @@ from altium_monkey import (
     LineWidth,
     NoErcSymbol,
     SchFontSpec,
+    SchHorizontalAlign,
     SchSheetEntryArrowKind,
+    TextJustification,
 )
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 
@@ -65,6 +68,24 @@ _NO_ERC_SYMBOL_MAP: dict[str, NoErcSymbol] = {
     "CROSS_SMALL": NoErcSymbol.CROSS_SMALL,
     "CHECKBOX": NoErcSymbol.CHECKBOX,
     "TRIANGLE": NoErcSymbol.TRIANGLE,
+}
+
+_ALIGNMENT_MAP: dict[str, SchHorizontalAlign] = {
+    "CENTER": SchHorizontalAlign.CENTER,
+    "LEFT": SchHorizontalAlign.LEFT,
+    "RIGHT": SchHorizontalAlign.RIGHT,
+}
+
+_JUSTIFICATION_MAP: dict[str, int] = {
+    "BOTTOM_LEFT": TextJustification.BOTTOM_LEFT.value,
+    "BOTTOM_CENTER": TextJustification.BOTTOM_CENTER.value,
+    "BOTTOM_RIGHT": TextJustification.BOTTOM_RIGHT.value,
+    "CENTER_LEFT": TextJustification.CENTER_LEFT.value,
+    "CENTER_CENTER": TextJustification.CENTER_CENTER.value,
+    "CENTER_RIGHT": TextJustification.CENTER_RIGHT.value,
+    "TOP_LEFT": TextJustification.TOP_LEFT.value,
+    "TOP_CENTER": TextJustification.TOP_CENTER.value,
+    "TOP_RIGHT": TextJustification.TOP_RIGHT.value,
 }
 
 
@@ -200,6 +221,10 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             port.width_mils = port_cfg["width_mils"]
         if "height_mils" in port_cfg:
             port.height_mils = port_cfg["height_mils"]
+        if "alignment" in port_cfg:
+            al = _ALIGNMENT_MAP.get(port_cfg["alignment"].upper())
+            if al is not None:
+                port.alignment = al
         counts["ports"] += 1
 
     power_port_cfg = style.get("power_port", {})
@@ -209,6 +234,20 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
         if "color" in power_port_cfg:
             power_port.color = _color(power_port_cfg["color"])
         counts["power_ports"] += 1
+
+    cross_sheet_cfg = style.get("cross_sheet_connector", {})
+    for connector in schdoc.cross_sheet_connectors:
+        if not isinstance(connector, AltiumSchCrossSheetConnector):
+            continue
+        if _has_font_keys(cross_sheet_cfg):
+            connector.font = _resolve_font(connector, cross_sheet_cfg)
+        if "color" in cross_sheet_cfg:
+            connector.color = _color(cross_sheet_cfg["color"])
+        if "justification" in cross_sheet_cfg:
+            jv = _JUSTIFICATION_MAP.get(cross_sheet_cfg["justification"].upper())
+            if jv is not None:
+                connector.justification = jv
+        counts["cross_sheet_connectors"] += 1
 
     note_cfg = style.get("note", {})
     for note in schdoc.objects.of_type(AltiumSchNote):
@@ -282,6 +321,10 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             lw = _LINE_WIDTH_MAP.get(sheet_symbol_cfg["line_width"].upper())
             if lw is not None:
                 sheet_symbol.line_width = lw
+        if "width_mils" in sheet_symbol_cfg:
+            sheet_symbol.x_size = sheet_symbol_cfg["width_mils"]
+        if "height_mils" in sheet_symbol_cfg:
+            sheet_symbol.y_size = sheet_symbol_cfg["height_mils"]
         counts["sheet_symbols"] += 1
 
         for entry in getattr(sheet_symbol, "entries", []):

@@ -46,8 +46,9 @@ Removing a section entirely means no style is applied to that element type.
 | `[document]` | Sheet background and system font |
 | `[wire]` | Wires |
 | `[net_label]` | Net labels |
-| `[port]` | Hierarchical ports (`width_mils`, `height_mils` also supported) |
+| `[port]` | Hierarchical ports (`width_mils`, `height_mils`, `alignment` also supported) |
 | `[power_port]` | Power ports |
+| `[cross_sheet_connector]` | Cross-sheet (off-sheet) connectors — font, `color`, and `justification` |
 | `[note]` | Notes |
 | `[text_string]` | Free-floating text labels |
 | `[no_erc]` | No-ERC markers |
@@ -55,7 +56,7 @@ Removing a section entirely means no style is applied to that element type.
 | `[harness_connector]` | Harness connectors (`width_mils`, `height_mils` also supported) |
 | `[harness_entry]` | Harness entries |
 | `[harness_type]` | Harness type labels |
-| `[sheet_symbol]` | Sheet symbols |
+| `[sheet_symbol]` | Sheet symbols (`width_mils`, `height_mils` also supported) |
 | `[sheet_entry]` | Sheet entries (children of sheet symbols) |
 | `[component.designator]` | Component designator text |
 | `[component.parameter]` | Visible component parameter text |
@@ -71,6 +72,8 @@ Use `"#RRGGBB"` hex strings for all color properties.
 - `line_style`: `"SOLID"`, `"DASHED"`, `"DOTTED"`, `"DASH_DOT"`
 - `arrow_kind` (sheet entries): `"BLOCK_TRIANGLE"`, `"TRIANGLE"`, `"ARROW"`, `"ARROW_TAIL"`
 - `symbol` (no_erc): `"CROSS_THIN"`, `"CROSS"`, `"CROSS_SMALL"`, `"CHECKBOX"`, `"TRIANGLE"`
+- `alignment` (port): `"LEFT"`, `"CENTER"`, `"RIGHT"`
+- `justification` (cross_sheet_connector): `"BOTTOM_LEFT"`, `"BOTTOM_CENTER"`, `"BOTTOM_RIGHT"`, `"CENTER_LEFT"`, `"CENTER_CENTER"`, `"CENTER_RIGHT"`, `"TOP_LEFT"`, `"TOP_CENTER"`, `"TOP_RIGHT"`
 
 ## Extracting Styles From an Existing Project
 
