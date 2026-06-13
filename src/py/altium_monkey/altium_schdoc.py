@@ -3282,9 +3282,10 @@ class AltiumSchDoc(JsonApplyMixin):
 
         Args:
             format: Output format. Currently only `"wirelist"` is supported.
-            tolerance: Connection tolerance in internal units (default: 0 = exact match).
-                      Use 400000 for imperial 4-mil tolerance,
-                      or 787402 for metric ~0.2mm tolerance.
+            tolerance: Optional connection tolerance in parsed coordinate units.
+                      The default is exact connectivity, matching Altium
+                      wire-list output for off-grid crossings without explicit
+                      junctions.
             options: Netlist generation options from project settings.
                     If None, uses free document defaults (no project).
                     Use NetlistOptions.from_prjpcb() to load from a PrjPcb file.

@@ -12,6 +12,18 @@ def clean_pcb_property_text(value: object) -> str:
     return str(value or "").replace("\x00", "").strip()
 
 
+def decode_dxp_parameter_value(value: object) -> str:
+    """Decode DXP parameter-list separators used inside parameter values."""
+    text = "" if value is None else str(value)
+    return text.replace("{}", "=").replace("[]", "|")
+
+
+def encode_dxp_parameter_value(value: object) -> str:
+    """Encode DXP parameter-list separators used inside parameter values."""
+    text = "" if value is None else str(value)
+    return text.replace("=", "{}").replace("|", "[]")
+
+
 def parse_pcb_int_token(value: object) -> int | None:
     """Parse an integer token that may be stored as text or a float-like string."""
     text = clean_pcb_property_text(value)

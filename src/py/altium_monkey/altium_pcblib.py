@@ -52,6 +52,8 @@ from .altium_pcb_mask_expansion import (
     PcbMaskExpansionModeInput,
 )
 from .altium_pcb_property_helpers import (
+    decode_dxp_parameter_value,
+    encode_dxp_parameter_value,
     parse_pcb_count_prefixed_property_records,
     parse_pcb_int_token,
     serialize_pcb_count_prefixed_property_records,
@@ -125,7 +127,11 @@ class AltiumPcbLibPrimitiveParameterGroup:
         props["COUNT"] = str(len(self.parameters))
         payloads = [encode_altium_record(props)[4:]]
         for name, value in self.parameters.items():
-            payloads.append(encode_altium_record({"NAME": name, "VALUE": value})[4:])
+            payloads.append(
+                encode_altium_record(
+                    {"NAME": name, "VALUE": encode_dxp_parameter_value(value)}
+                )[4:]
+            )
         return tuple(payloads)
 
 
@@ -1731,7 +1737,9 @@ def _parse_pcblib_primitive_parameter_groups(
             parameter_payloads.append(param_payload)
             name = param_props.get("NAME")
             if name:
-                parameters[name] = param_props.get("VALUE", "")
+                parameters[name] = decode_dxp_parameter_value(
+                    param_props.get("VALUE", "")
+                )
 
         groups.append(
             AltiumPcbLibPrimitiveParameterGroup(

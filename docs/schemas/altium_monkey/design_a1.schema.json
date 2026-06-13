@@ -38,7 +38,7 @@
     "sheets": {
       "type": "array",
       "items": {
-        "$ref": "design_a0.schema.json#/$defs/sheet"
+        "$ref": "#/$defs/sheet"
       }
     },
     "components": {
@@ -68,6 +68,26 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "sheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "sheet_number"
+      ],
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "sheet_number": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Canonical decimal sheet numbers are emitted as integers for compatibility; non-canonical Altium SheetNumber parameter values are emitted as exact strings."
+        }
       }
     },
     "parameter_map": {

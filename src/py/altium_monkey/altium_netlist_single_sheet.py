@@ -87,7 +87,9 @@ class AltiumNetlistSingleSheetCompiler:
 
         Args:
             schdoc: Parsed AltiumSchDoc object
-            tolerance: Connection tolerance in internal units (default: 0 = exact)
+            tolerance: Optional connection tolerance in parsed coordinate units.
+                The default is exact connectivity, matching Altium wire-list
+                output for off-grid wire crossings without explicit junctions.
             strict: If True, normalize special chars to ASCII (default: True)
             options: Netlist generation options (default: free document defaults)
         """
@@ -95,12 +97,7 @@ class AltiumNetlistSingleSheetCompiler:
         self.strict = strict
         self.options = options or NetlistOptions()
 
-        # Get tolerance from sheet's hotspot grid if not explicitly provided
-        if tolerance == 0 and schdoc.sheet:
-            sheet_tolerance = getattr(schdoc.sheet, "hot_spot_grid_size", 0)
-            self.tolerance = sheet_tolerance if sheet_tolerance else 0
-        else:
-            self.tolerance = tolerance
+        self.tolerance = tolerance
 
         # Internal storage
         self._components: dict[str, SchComponentInfo] = {}

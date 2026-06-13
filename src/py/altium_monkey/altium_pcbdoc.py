@@ -44,6 +44,7 @@ from .altium_pcb_custom_shapes import (
     resolve_pcbdoc_custom_pad_shapes,
     serialize_custom_shapes_stream,
 )
+from .altium_pcb_property_helpers import decode_dxp_parameter_value
 from .altium_pcb_rule import AltiumPcbRule
 from .altium_pcb_via_structure import (
     AltiumPcbViaStructure,
@@ -2808,7 +2809,9 @@ class AltiumPcbDoc:
                     value = record["VALUE"]
                     if name is None or value is None:
                         continue
-                    parameter_map.setdefault(current_uid, {})[str(name)] = str(value)
+                    parameter_map.setdefault(current_uid, {})[str(name)] = (
+                        decode_dxp_parameter_value(value)
+                    )
             if verbose:
                 log.info(f"    Found parameters for {len(parameter_map)} components")
         except Exception as exc:

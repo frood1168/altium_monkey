@@ -86,6 +86,15 @@ Each variant contains:
 appear in `variations`, but alternate fitted component replacement is not
 applied semantically by the design contract yet.
 
+### Sheets
+
+Each sheet contains:
+
+- `filename`: schematic document filename
+- `sheet_number`: canonical decimal `SheetNumber` values are emitted as JSON
+  numbers for compatibility; non-canonical Altium values such as leading-zero
+  or part-number strings are emitted exactly as JSON strings
+
 ### Components
 
 Each component contains:

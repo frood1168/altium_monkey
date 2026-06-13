@@ -1,3 +1,46 @@
+# altium-monkey 2026.06.13 Release Notes
+
+Package version: `2026.6.13`
+
+`2026.06.13` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.13`.
+
+This release tightens schematic netlist behavior and PcbDoc/PcbLib parameter
+round-tripping for downstream automation.
+
+## SchDoc Netlist Near-Crossing Behavior
+
+SchDoc WireList generation now matches Altium for off-grid and metric
+near-crossing wires: wire endpoints must exactly meet wires or explicit
+junctions for connectivity, rather than using editor grid/tolerance settings to
+merge nearby geometry.
+
+The release was checked against the full private L5 netlist corpus lane. The
+three near-crossing corpus references were regenerated to match the corrected
+Altium-style connectivity.
+
+## Design JSON Sheet Numbers
+
+`AltiumDesign.to_json()` now tolerates Altium `SheetNumber` document parameters
+that are not canonical decimal numbers, such as part-number strings. Canonical
+numeric sheet numbers remain JSON numbers for compatibility; non-canonical
+values are preserved exactly as JSON strings.
+
+## DXP Parameter-List Escaping
+
+PcbLib footprint `PrimitiveParameters` and PcbDoc component
+`PrimitiveParameters/Data` values now decode Altium's DXP parameter-list
+escapes (`{}` for `=` and `[]` for `|`) on read and apply the same encoding
+when authoring values.
+
+## Validation
+
+This release was prepared through the validation wrapper, including public
+tests, package build, artifact checks, and clean wheel install validation. The
+release also passed the full private SchDoc netlist corpus lane.
+
+---
+
 # altium-monkey 2026.06.11 Release Notes
 
 Package version: `2026.6.11`
