@@ -292,10 +292,6 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             connector.color = _color(harness_connector_cfg["color"])
         if "area_color" in harness_connector_cfg:
             connector.area_color = _color(harness_connector_cfg["area_color"])
-        if "width_mils" in harness_connector_cfg:
-            connector.xsize = harness_connector_cfg["width_mils"]
-        if "height_mils" in harness_connector_cfg:
-            connector.ysize = harness_connector_cfg["height_mils"]
         counts["harness_connectors"] += 1
 
     harness_entry_cfg = style.get("harness_entry", {})
@@ -415,9 +411,16 @@ def main() -> None:
     manifest_path = output_dir / "schdoc_style_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    totals: Counter[str] = Counter()
+    for doc in documents:
+        totals.update(doc.get("mutations", {}))
+
     print(f"Loaded project: {prjpcb_path}")
     print(f"Style config: {style_path}")
     print(f"Styled SchDocs: {len(documents)}")
+    if totals:
+        summary = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in sorted(totals.items()) if v)
+        print(f"Mutations: {summary}")
     print(f"Wrote SchDocs: {output_dir}")
     print(f"Wrote manifest: {manifest_path}")
 

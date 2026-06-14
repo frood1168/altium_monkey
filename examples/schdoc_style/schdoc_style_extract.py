@@ -236,8 +236,6 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
     for connector in schdoc.harness_connectors:
         c.record_color("harness_connector", connector, "color", "color")
         c.record_color("harness_connector", connector, "area_color", "area_color")
-        c.record("harness_connector", "width_mils", connector.xsize)
-        c.record("harness_connector", "height_mils", connector.ysize)
 
     for entry in schdoc.harness_entries:
         c.record_font("harness_entry", entry)
