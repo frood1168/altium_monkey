@@ -14,7 +14,7 @@ import struct
 import uuid
 import zlib
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
@@ -86,7 +86,11 @@ from .altium_pcbdoc_builder_text import (
 )
 from .altium_resolved_layer_stack import legacy_layer_to_v7_save_id
 from .altium_record_pcb__arc import AltiumPcbArc
-from .altium_pcb_enums import PcbBarcodeKind
+from .altium_pcb_enums import (
+    MechanicalLayerKind,
+    pcb_mechanical_layer_number_to_v7_saved_layer_id,
+    PcbBarcodeKind,
+)
 from .altium_pcb_enums import PcbBarcodeRenderMode
 from .altium_pcb_enums import PcbBodyProjection
 from .altium_pcb_enums import PcbIpc4761ViaType
@@ -98,6 +102,11 @@ from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
 from .altium_pcb_enums import PadHoleShape
 from .altium_pcb_enums import PadShape
+from .altium_pcb_layer_kind_mapping import coerce_mechanical_layer_kind
+from .altium_pcb_layer_kind_mapping import mechanical_layer_kind_to_data_token
+from .altium_pcb_layer_kind_mapping import mechanical_layer_number_to_legacy_layer_id
+from .altium_pcb_layer_kind_mapping import mechanical_layer_set_token
+from .altium_pcb_layer_kind_mapping import split_layer_set_nonmechanical_parts
 from .altium_record_pcb__pad import AltiumPcbPad
 from .altium_record_pcb__region import AltiumPcbRegion, RegionVertex
 from .altium_record_pcb__shapebased_region import (
@@ -559,10 +568,58 @@ _LEGACY_LAYER_KEY_RE = re.compile(
 _V7_LAYER_KEY_RE = re.compile(
     r"^LAYERV7_(\d+)(LAYERID|NAME|PREV|NEXT|MECHENABLED|COPTHICK|DIELTYPE|DIELCONST|DIELHEIGHT|DIELMATERIAL)$"
 )
+_LAYER_V8_KEY_RE = re.compile(r"^LAYER_V8_(\d+)(.+)$", re.IGNORECASE)
+_V9_CACHE_LAYER_KEY_RE = re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE)
 _LAYER_OPACITY_KEY_RE = re.compile(r"^CFG2D\.LAYEROPACITY\.(.+)$")
 _LAYER_SET_KEY_RE = re.compile(
     r"^LAYERSET(\d+)(NAME|LAYERS|ACTIVELAYER\.7|ISCURRENT|ISLOCKED|FLIPBOARD)$"
 )
+
+
+def mechanical_layer_kind_to_pcblib_token(
+    kind: int | str | MechanicalLayerKind,
+) -> str:
+    """Return the `Library/Data` MECHKIND token used by Altium PcbLib files."""
+
+    return mechanical_layer_kind_to_data_token(kind)
+
+
+def _coerce_mechanical_layer_number(layer: int | str | PcbLayer) -> int:
+    if isinstance(layer, PcbLayer):
+        layer_id = int(layer)
+        if PcbLayer.MECHANICAL_1.value <= layer_id <= PcbLayer.MECHANICAL_16.value:
+            return layer_id - PcbLayer.MECHANICAL_1.value + 1
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+    if isinstance(layer, int):
+        value = int(layer)
+        if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
+            return value - PcbLayer.MECHANICAL_1.value + 1
+        if 1 <= value <= 32:
+            return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+
+    token = "".join(ch for ch in str(layer or "").upper() if ch.isalnum())
+    if token.isdigit():
+        value = int(token)
+        if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
+            return value - PcbLayer.MECHANICAL_1.value + 1
+        if 1 <= value <= 32:
+            return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+    if token.startswith("MECHANICAL"):
+        suffix = token.removeprefix("MECHANICAL")
+        if suffix.isdigit():
+            value = int(suffix)
+            if 1 <= value <= 32:
+                return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+    try:
+        parsed = int(PcbLayer.from_json_name(token))
+    except ValueError as exc:
+        raise ValueError(f"Unsupported mechanical layer: {layer!r}") from exc
+    if PcbLayer.MECHANICAL_1.value <= parsed <= PcbLayer.MECHANICAL_16.value:
+        return parsed - PcbLayer.MECHANICAL_1.value + 1
+    raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
 
 
 @dataclass(frozen=True)
@@ -611,6 +668,12 @@ class PcbLibLayerTable:
 
     def v7_layer(self, index: int) -> PcbLibV7LayerEntry | None:
         return next((entry for entry in self.v7_layers if entry.index == index), None)
+
+    def v7_layer_by_layer_id(self, layer_id: int) -> PcbLibV7LayerEntry | None:
+        return next(
+            (entry for entry in self.v7_layers if entry.layer_id == int(layer_id)),
+            None,
+        )
 
 
 @dataclass(frozen=True)
@@ -883,6 +946,211 @@ class PcbLibLibraryData:
             segments=new_segments,
             leading_pipe=self.leading_pipe,
             trailing_nul=self.trailing_nul,
+        )
+
+    def _with_segment_value(
+        self,
+        key: str,
+        value: str,
+        *,
+        preferred_segment_key: str | None = None,
+    ) -> "PcbLibLibraryData":
+        new_segments: list[PcbLibLibraryDataSegment] = []
+        updated = False
+        insert_after_index: int | None = None
+        for segment in self.segments:
+            if segment.key == key and not updated:
+                new_segments.append(PcbLibLibraryDataSegment(raw=f"{key}={value}"))
+                updated = True
+            else:
+                new_segments.append(segment)
+            if (
+                preferred_segment_key is not None
+                and segment.key == preferred_segment_key
+            ):
+                insert_after_index = len(new_segments)
+
+        if not updated:
+            new_segment = PcbLibLibraryDataSegment(raw=f"{key}={value}")
+            if insert_after_index is None:
+                new_segments.append(new_segment)
+            else:
+                new_segments.insert(insert_after_index, new_segment)
+
+        return PcbLibLibraryData(
+            segments=tuple(new_segments),
+            leading_pipe=self.leading_pipe,
+            trailing_nul=self.trailing_nul,
+        )
+
+    def _segment_value(self, key: str) -> str | None:
+        for segment in self.segments:
+            if segment.key == key:
+                return segment.value
+        return None
+
+    def _indexed_layer_group(
+        self,
+        key_re: re.Pattern[str],
+        layer_id: int,
+    ) -> tuple[int, dict[str, int]] | None:
+        groups: dict[int, dict[str, int]] = {}
+        for index, segment in enumerate(self.segments):
+            key = segment.key or ""
+            match = key_re.match(key)
+            if match is None:
+                continue
+            group_index = int(match.group(1))
+            suffix = match.group(2).upper()
+            groups.setdefault(group_index, {})[suffix] = index
+
+        for group_index, positions in groups.items():
+            layer_id_index = positions.get("LAYERID")
+            if layer_id_index is None:
+                continue
+            if self.segments[layer_id_index].value == str(int(layer_id)):
+                return group_index, positions
+        return None
+
+    def _indexed_layer_field_value(
+        self,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        field_name: str,
+    ) -> str | None:
+        group = self._indexed_layer_group(key_re, layer_id)
+        if group is None:
+            return None
+        _group_index, positions = group
+        field_index = positions.get(field_name.upper())
+        if field_index is None:
+            return None
+        return self.segments[field_index].value
+
+    def _with_indexed_layer_field(
+        self,
+        *,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        field_name: str,
+        value: str,
+        key_prefix: str,
+        separator: str,
+    ) -> "PcbLibLibraryData":
+        group = self._indexed_layer_group(key_re, layer_id)
+        if group is None:
+            raise KeyError(f"Library/Data indexed layer not found: {layer_id}")
+        group_index, positions = group
+
+        field_key = f"{key_prefix}{group_index}{separator}{field_name.upper()}"
+        field_index = positions.get(field_name.upper())
+        new_segments = list(self.segments)
+        if field_index is not None:
+            new_segments[field_index] = PcbLibLibraryDataSegment(
+                raw=f"{field_key}={value}"
+            )
+        else:
+            preferred_suffixes = ("MECHENABLED", "USEDBYPRIMS", "LAYERID", "NAME")
+            insert_after = next(
+                (
+                    positions[suffix]
+                    for suffix in preferred_suffixes
+                    if suffix in positions
+                ),
+                max(positions.values()),
+            )
+            new_segments.insert(
+                insert_after + 1,
+                PcbLibLibraryDataSegment(raw=f"{field_key}={value}"),
+            )
+        return PcbLibLibraryData(
+            segments=tuple(new_segments),
+            leading_pipe=self.leading_pipe,
+            trailing_nul=self.trailing_nul,
+        )
+
+    def mechanical_layer_kind_field_values(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> dict[str, str | None]:
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        fields: dict[str, str | None] = {}
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        if legacy_id is not None:
+            fields["legacy"] = self._segment_value(f"LAYER{legacy_id}MECHKIND")
+        else:
+            v7_entry = self.layer_table.v7_layer_by_layer_id(v7_layer_id)
+            fields["v7"] = (
+                None
+                if v7_entry is None
+                else self._segment_value(f"LAYERV7_{v7_entry.index}MECHKIND")
+            )
+        fields["layer_v8"] = self._indexed_layer_field_value(
+            _LAYER_V8_KEY_RE,
+            v7_layer_id,
+            "MECHKIND",
+        )
+        fields["v9_cache"] = self._indexed_layer_field_value(
+            _V9_CACHE_LAYER_KEY_RE,
+            v7_layer_id,
+            "MECHKIND",
+        )
+        return fields
+
+    def with_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> "PcbLibLibraryData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        token = mechanical_layer_kind_to_pcblib_token(kind)
+        updated = self
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        if legacy_id is not None:
+            updated = updated._with_segment_value(
+                f"LAYER{legacy_id}MECHKIND",
+                token,
+                preferred_segment_key=f"LAYER{legacy_id}MECHENABLED",
+            )
+        else:
+            v7_entry = updated.layer_table.v7_layer_by_layer_id(v7_layer_id)
+            if v7_entry is None:
+                raise KeyError(
+                    f"Mechanical layer not found in PcbLib V7 layer table: {layer!r}"
+                )
+            updated = updated._with_segment_value(
+                f"LAYERV7_{v7_entry.index}MECHKIND",
+                token,
+                preferred_segment_key=f"LAYERV7_{v7_entry.index}MECHENABLED",
+            )
+
+        updated = updated._with_indexed_layer_field(
+            key_re=_LAYER_V8_KEY_RE,
+            layer_id=v7_layer_id,
+            field_name="MECHKIND",
+            value=token,
+            key_prefix="LAYER_V8_",
+            separator="",
+        )
+        return updated._with_indexed_layer_field(
+            key_re=_V9_CACHE_LAYER_KEY_RE,
+            layer_id=v7_layer_id,
+            field_name="MECHKIND",
+            value=token,
+            key_prefix="V9_CACHE_LAYER",
+            separator="_",
         )
 
     def with_view_config_paths(
@@ -1688,6 +1956,61 @@ class PcbLibLibraryData:
             )
         return updated
 
+    def _enabled_mechanical_layer_numbers(self) -> tuple[int, ...]:
+        layer_table = self.layer_table
+        enabled_numbers: set[int] = set()
+        for entry in layer_table.legacy_layers:
+            if not entry.mechanical_enabled:
+                continue
+            number = entry.layer_number - PcbLayer.MECHANICAL_1.value + 1
+            if 1 <= number <= 16:
+                enabled_numbers.add(number)
+        for entry in layer_table.v7_layers:
+            if not entry.mechanical_enabled:
+                continue
+            first_v7_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(1)
+            if first_v7_id is None:
+                continue
+            number = entry.layer_id - first_v7_id + 1
+            if 17 <= number <= 32:
+                enabled_numbers.add(number)
+        return tuple(sorted(enabled_numbers))
+
+    def _with_enabled_mechanical_layers_in_layer_sets(self) -> "PcbLibLibraryData":
+        layer_sets = self.layer_sets
+        enabled_numbers = self._enabled_mechanical_layer_numbers()
+        enabled_legacy_tokens = tuple(
+            mechanical_layer_set_token(number)
+            for number in enabled_numbers
+            if number <= 16
+        )
+        enabled_extended_tokens = tuple(
+            mechanical_layer_set_token(number)
+            for number in enabled_numbers
+            if number > 16
+        )
+        enabled_tokens = enabled_legacy_tokens + enabled_extended_tokens
+
+        updated_sets: list[PcbLibLayerSet] = []
+        for layer_set in layer_sets.sets:
+            if layer_set.index == 1:
+                prefix, has_drill_drawing, suffix = split_layer_set_nonmechanical_parts(
+                    layer_set.layers
+                )
+                layers = (
+                    prefix
+                    + enabled_legacy_tokens
+                    + (("DrillDrawing",) if has_drill_drawing else ())
+                    + enabled_extended_tokens
+                    + suffix
+                )
+                updated_sets.append(replace(layer_set, layers=layers))
+            elif layer_set.index == 5:
+                updated_sets.append(replace(layer_set, layers=enabled_tokens))
+            else:
+                updated_sets.append(layer_set)
+        return self.with_layer_sets(PcbLibLayerSets(sets=tuple(updated_sets)))
+
     @staticmethod
     def _is_layer_table_record(record: PcbLibLibraryDataRecord) -> bool:
         return any(
@@ -1816,6 +2139,145 @@ class PcbLibLibraryData:
                 )
         return updated
 
+    def with_mechanical_layer(
+        self,
+        layer: int | str | PcbLayer,
+        *,
+        name: str | None = None,
+        enabled: bool = True,
+    ) -> "PcbLibLibraryData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        layer_table = self.layer_table
+        existing_name = None
+        if legacy_id is not None:
+            legacy_entry = layer_table.legacy_layer(legacy_id)
+            if legacy_entry is not None and legacy_entry.name.strip():
+                existing_name = legacy_entry.name.strip()
+        if existing_name is None:
+            v7_entry = layer_table.v7_layer_by_layer_id(v7_layer_id)
+            if v7_entry is not None and v7_entry.name.strip():
+                existing_name = v7_entry.name.strip()
+
+        layer_name = (
+            (name or "").strip() or existing_name or f"Mechanical {mechanical_number}"
+        )
+
+        updated_legacy_layers = []
+        legacy_updated = False
+        for entry in layer_table.legacy_layers:
+            if entry.layer_number == legacy_id:
+                updated_legacy_layers.append(
+                    replace(entry, name=layer_name, mechanical_enabled=bool(enabled))
+                )
+                legacy_updated = True
+            else:
+                updated_legacy_layers.append(entry)
+
+        updated_v7_layers = []
+        v7_updated = False
+        for entry in layer_table.v7_layers:
+            if entry.layer_id == v7_layer_id:
+                updated_v7_layers.append(
+                    replace(entry, name=layer_name, mechanical_enabled=bool(enabled))
+                )
+                v7_updated = True
+            else:
+                updated_v7_layers.append(entry)
+
+        if not legacy_updated and not v7_updated:
+            raise KeyError(
+                f"Mechanical layer not found in PcbLib layer table: {layer!r}"
+            )
+
+        updated = self.with_layer_table(
+            PcbLibLayerTable(
+                legacy_layers=tuple(updated_legacy_layers),
+                v7_layers=tuple(updated_v7_layers),
+            )
+        )
+        return updated._with_enabled_mechanical_layers_in_layer_sets()
+
+    def _next_mechanical_pair_index(self) -> int:
+        pair_indices: set[int] = set()
+        for segment in self.segments:
+            key = segment.key or ""
+            match = re.fullmatch(r"MECHPAIR(\d+)L[12]", key, re.IGNORECASE)
+            if match:
+                pair_indices.add(int(match.group(1)))
+        candidate = 0
+        while candidate in pair_indices:
+            candidate += 1
+        return candidate
+
+    def _mechanical_pair_insert_key(self, pair_index: int) -> str | None:
+        existing_keys = {
+            segment.key for segment in self.segments if segment.key is not None
+        }
+        for candidate in range(int(pair_index) - 1, -1, -1):
+            key = f"MECHPAIR{candidate}L2"
+            if key in existing_keys:
+                return key
+        if "LAYERSET5FLIPBOARD" in existing_keys:
+            return "LAYERSET5FLIPBOARD"
+        return None
+
+    def with_route_tool_path_layer(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> "PcbLibLibraryData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        return self._with_segment_value(
+            "ROUTETOOLPATHLAYER",
+            f"MECHANICAL{mechanical_number}",
+            preferred_segment_key=self._mechanical_pair_insert_key(10_000),
+        )
+
+    def with_mechanical_layer_pair(
+        self,
+        layer_1: int | str | PcbLayer,
+        layer_2: int | str | PcbLayer,
+        *,
+        pair_index: int | None = None,
+    ) -> "PcbLibLibraryData":
+        layer_1_number = _coerce_mechanical_layer_number(layer_1)
+        layer_2_number = _coerce_mechanical_layer_number(layer_2)
+        if layer_1_number == layer_2_number:
+            raise ValueError("Mechanical layer pair endpoints must differ")
+        resolved_pair_index = (
+            self._next_mechanical_pair_index()
+            if pair_index is None
+            else int(pair_index)
+        )
+        if resolved_pair_index < 0:
+            raise ValueError("Mechanical layer pair index must be non-negative")
+
+        updated = self.with_mechanical_layer(
+            f"MECHANICAL{layer_1_number}", enabled=True
+        )
+        updated = updated.with_mechanical_layer(
+            f"MECHANICAL{layer_2_number}", enabled=True
+        )
+        prefix = f"MECHPAIR{resolved_pair_index}"
+        updated = updated._with_segment_value(
+            f"{prefix}L1",
+            f"MECHANICAL{layer_1_number}",
+            preferred_segment_key=updated._mechanical_pair_insert_key(
+                resolved_pair_index
+            ),
+        )
+        return updated._with_segment_value(
+            f"{prefix}L2",
+            f"MECHANICAL{layer_2_number}",
+            preferred_segment_key=f"{prefix}L1",
+        )
+
 
 @dataclass(frozen=True)
 class PcbLibBuildProfile:
@@ -1905,6 +2367,118 @@ class PcbLibBuilder:
         self.profile = profile or PcbLibBuildProfile.default()
         self._footprints: list[PcbLibFootprintSpec] = []
         self._embedded_models: list[PcbLibModelSpec] = []
+        self.layer_kind_mapping_data = PcbLibLayerKindMapping.make_default()
+
+    def _set_library_data(self, library_data: PcbLibLibraryData) -> None:
+        self.profile = PcbLibBuildProfile(
+            library_data=library_data,
+            file_header=self.profile.file_header,
+            pad_via_library=self.profile.pad_via_library,
+        )
+
+    def set_mechanical_layer(
+        self,
+        layer: int | str | PcbLayer,
+        *,
+        name: str | None = None,
+        enabled: bool = True,
+    ) -> "PcbLibBuilder":
+        """
+        Set a mechanical layer display name and enabled state.
+
+        Args:
+            layer: Mechanical layer token or number. Supported tokens include
+                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                Mechanical 1 through 16.
+            name: Optional display name. If omitted, the existing layer-table
+                label is preserved, falling back to `Mechanical N`.
+            enabled: Whether the layer is enabled in the PcbLib layer registry.
+        """
+        self._set_library_data(
+            self.profile.library_data.with_mechanical_layer(
+                layer,
+                name=name,
+                enabled=enabled,
+            )
+        )
+        return self
+
+    def set_mechanical_layer_pair(
+        self,
+        layer_1: int | str | PcbLayer,
+        layer_2: int | str | PcbLayer,
+        *,
+        pair_index: int | None = None,
+    ) -> "PcbLibBuilder":
+        """
+        Define a mechanical mirror pair used by component side flipping.
+
+        Args:
+            layer_1: First mechanical layer endpoint.
+            layer_2: Second mechanical layer endpoint.
+            pair_index: Optional native `MECHPAIR{N}` index. If omitted, the
+                first unused index is selected.
+        """
+        self._set_library_data(
+            self.profile.library_data.with_mechanical_layer_pair(
+                layer_1,
+                layer_2,
+                pair_index=pair_index,
+            )
+        )
+        return self
+
+    def set_route_tool_path_layer(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> "PcbLibBuilder":
+        """Set the PcbLib route-tool-path mechanical layer token."""
+
+        self._set_library_data(
+            self.profile.library_data.with_route_tool_path_layer(layer)
+        )
+        return self
+
+    @property
+    def mechanical_layer_kinds(self) -> dict[int, MechanicalLayerKind]:
+        """Return the current mechanical layer kind mapping by native layer id."""
+
+        return dict(self.layer_kind_mapping_data.mapping)
+
+    def get_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> MechanicalLayerKind | None:
+        """Return the configured kind for a mechanical layer, if present."""
+
+        from .altium_pcb_layer_kind_mapping import coerce_layer_kind_mapping_layer_id
+
+        return self.layer_kind_mapping_data.mapping.get(
+            coerce_layer_kind_mapping_layer_id(layer)
+        )
+
+    def set_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> "PcbLibBuilder":
+        """
+        Set the semantic kind assigned to a mechanical layer.
+
+        PcbLib files persist this both in `Library/LayerKindMapping/Data` and
+        in several `Library/Data` layer registry/cache `MECHKIND` fields.
+        """
+        kind_value = coerce_mechanical_layer_kind(kind)
+        self.layer_kind_mapping_data = self.layer_kind_mapping_data.with_layer_kind(
+            layer,
+            kind_value,
+        )
+        self._set_library_data(
+            self.profile.library_data.with_mechanical_layer_kind(layer, kind_value)
+        )
+        if kind_value == MechanicalLayerKind.ROUTE_TOOL_PATH:
+            self.set_route_tool_path_layer(layer)
+        return self
 
     @staticmethod
     def _format_model_id(value: uuid.UUID | str | None = None) -> str:
@@ -3228,7 +3802,8 @@ class PcbLibBuilder:
         pcblib.raw_pad_via_library_header = PcbLibCountHeader.zero().to_bytes()
         pcblib.raw_pad_via_library_data = self.profile.pad_via_library.to_bytes()
         pcblib.raw_layer_kind_mapping_header = PcbLibCountHeader.one().to_bytes()
-        pcblib.raw_layer_kind_mapping = PcbLibLayerKindMapping().to_bytes()
+        pcblib.raw_layer_kind_mapping = self.layer_kind_mapping_data.to_bytes()
+        pcblib._sync_layer_kind_mapping_from_raw()
         pcblib.raw_file_version_info_header = PcbLibCountHeader.one().to_bytes()
         pcblib.raw_file_version_info = PcbLibFileVersionInfo.default().to_bytes()
         pcblib.raw_section_keys = self._assign_storage_names()

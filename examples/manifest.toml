@@ -960,6 +960,23 @@ requires_extra = []
 tags = ["pcbdoc", "mutation", "custom-pad", "region", "outline-vertices", "arc"]
 
 [[examples]]
+id = "pcbdoc_create_mechanical_layer_kinds"
+title = "Create PCB mechanical layer kind assignments"
+summary = "Create a PcbDoc, assign standalone mechanical layer kinds at low indices and paired component kinds at high indices, save it, and write a JSON readback manifest."
+areas = ["pcbdoc", "generation"]
+status = "ready"
+entrypoint = "pcbdoc_create_mechanical_layer_kinds/pcbdoc_create_mechanical_layer_kinds.py"
+doc = "pcbdoc_create_mechanical_layer_kinds/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_create_mechanical_layer_kinds/output/pcbdoc_create_mechanical_layer_kinds.PcbDoc",
+  "pcbdoc_create_mechanical_layer_kinds/output/pcbdoc_create_mechanical_layer_kinds.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "generation", "mechanical-layer", "layer-kind"]
+
+[[examples]]
 id = "pcbdoc_insert_footprint_from_pcblib"
 title = "Insert PcbLib footprints into a PcbDoc"
 summary = "Create a PcbDoc, place resistor footprints from an existing PcbLib, assign component parameters and pad nets, and save the board."
@@ -1070,6 +1087,23 @@ outputs = [
 ]
 requires_extra = []
 tags = ["hello-world", "generation", "library", "footprint", "embedded-model", "step"]
+
+[[examples]]
+id = "pcblib_create_mechanical_layer_kinds"
+title = "Create PcbLib mechanical layer kind assignments"
+summary = "Create a PcbLib footprint, assign standalone mechanical layer kinds at low indices and paired component kinds at high indices, save it, and write a JSON readback manifest."
+areas = ["pcblib"]
+status = "ready"
+entrypoint = "pcblib_create_mechanical_layer_kinds/pcblib_create_mechanical_layer_kinds.py"
+doc = "pcblib_create_mechanical_layer_kinds/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcblib_create_mechanical_layer_kinds/output/pcblib_create_mechanical_layer_kinds.PcbLib",
+  "pcblib_create_mechanical_layer_kinds/output/pcblib_create_mechanical_layer_kinds.json",
+]
+requires_extra = []
+tags = ["pcblib", "generation", "mechanical-layer", "layer-kind", "footprint"]
 
 [[examples]]
 id = "pcblib_add_via_ipc4761_matrix"

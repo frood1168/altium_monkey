@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from enum import IntEnum
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .altium_record_types import (
     SchPrimitive,
     SchRecordType,
-    color_to_hex,
     parse_bool,
     serialize_bool,
 )
@@ -943,7 +943,7 @@ class AltiumSchSheet(SchPrimitive):
         title_font = "Times New Roman"
         text_color = line_color
 
-        x_to_svg = lambda x: _sheet_x_to_svg(ctx, scale, x)
+        x_to_svg = partial(_sheet_x_to_svg, ctx, scale)
 
         def y_to_svg(y: float) -> float:
             if ctx.flip_y:
@@ -1099,7 +1099,7 @@ class AltiumSchSheet(SchPrimitive):
         title_font = font_name
         text_color = line_color
 
-        x_to_svg = lambda x: _sheet_x_to_svg(ctx, scale, x)
+        x_to_svg = partial(_sheet_x_to_svg, ctx, scale)
 
         def y_to_svg(y: float) -> float:
             # Use sheet_height for Y-flip: svg_y = sheet_height - altium_y

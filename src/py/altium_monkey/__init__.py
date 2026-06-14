@@ -275,6 +275,7 @@ from .altium_record_pcb__arc import AltiumPcbArc
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
 from .altium_pcb_enums import (
+    MechanicalLayerKind,
     PadHoleShape,
     PadShape,
     PcbBarcodeKind,
@@ -479,6 +480,7 @@ __all__ = [
     # PCB record classes
     "PcbLayer",
     "PcbRecordType",
+    "MechanicalLayerKind",
     "AltiumPcbTrack",
     "AltiumPcbArc",
     "PadHoleShape",

@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
-    from .altium_sch_svg_renderer import SchSvgRenderContext
 
 from .altium_record_types import SchGraphicalObject, SchRecordType
 from .altium_serializer import AltiumSerializer

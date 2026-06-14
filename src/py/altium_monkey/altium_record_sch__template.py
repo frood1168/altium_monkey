@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .altium_sch_svg_renderer import SchSvgRenderContext
 
 from .altium_record_types import SchGraphicalObject, SchRecordType
-from .altium_serializer import AltiumSerializer, CaseMode, Fields
+from .altium_serializer import AltiumSerializer, Fields
 from .altium_sch_record_helpers import detect_case_mode_method_from_uppercase_fields
 
 

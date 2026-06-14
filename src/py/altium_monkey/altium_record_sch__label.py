@@ -1,6 +1,7 @@
 """Schematic record model for SchRecordType.LABEL."""
 
 import math
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -19,7 +20,6 @@ from .altium_record_types import (
 from .altium_sch_binding import SingleFontBindableRecordMixin
 from .altium_serializer import (
     AltiumSerializer,
-    CaseMode,
     Fields,
     read_dynamic_string_field,
     write_dynamic_string_field,
@@ -315,9 +315,8 @@ class AltiumSchLabel(SingleFontBindableRecordMixin, SchGraphicalObject):
             geometry_x = baseline_x + sin_theta * baseline_font_size
             geometry_y = baseline_y - cos_theta * baseline_font_size
 
-            rotate_point = lambda px, py: rotate_point_about_origin(
-                px,
-                py,
+            rotate_point = partial(
+                rotate_point_about_origin,
                 origin_x=baseline_x,
                 origin_y=baseline_y,
                 cos_theta=cos_theta,

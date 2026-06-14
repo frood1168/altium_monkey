@@ -29,6 +29,11 @@
   require a positive slot length; square holes require a positive drill size.
 - Inspect user-defined PCB unions through union-name records, typed smart-union
   records, and computed user-union member summaries.
+- Inspect and author semantic mechanical layer kind assignments through
+  `mechanical_layer_kinds`, `get_mechanical_layer_kind(...)`, and
+  `set_mechanical_layer_kind(...)`. The mapping is stored in
+  `LayerKindMapping/Data` and synchronized into the Board6 `MECHKIND`
+  layer-table/cache fields used by Altium.
 - Render PCB SVG and PCB layer SVGs.
 
 ## Object Model
@@ -118,6 +123,9 @@ fallback is not a replacement for STEP-derived model geometry.
 ## Layer Names
 
 Stable layer keys use token names such as `TOP`, `BOTTOM`, and `TOPOVERLAY`.
+Mechanical layer display names, enabled flags, and mirror pairs are board
+registry metadata. Mechanical layer kind assignments are semantic metadata and
+do not by themselves rename or enable mechanical layers.
 Use the resolved layer stack when board-specific user-facing names are needed.
 Default display labels are fallback labels, not stable identifiers.
 `ResolvedLayerStack` is a derived read-only consumer view; new PcbDoc authoring

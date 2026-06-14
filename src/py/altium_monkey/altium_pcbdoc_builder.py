@@ -17,7 +17,7 @@ import zlib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence
 
 from .altium_api_markers import public_api
 from .altium_pcbdoc_board_defaults import DEFAULT_PCBDOC_BOARD_SEGMENT_TEXTS
@@ -37,12 +37,22 @@ from .altium_board import (
     resolve_outline_arc_segment,
 )
 from .altium_pcb_enums import (
+    MechanicalLayerKind,
     PcbGuidType,
     PcbIpc4761ViaType,
     PcbLibIdentifierKind,
     PcbRegionKind,
     PcbTextAutoposition,
     pcb_mechanical_layer_number_to_v7_saved_layer_id,
+)
+from .altium_pcb_layer_kind_mapping import (
+    PcbLayerKindMapping,
+    coerce_layer_kind_mapping_layer_id,
+    coerce_mechanical_layer_kind,
+    mechanical_layer_kind_to_data_token,
+    mechanical_layer_number_to_legacy_layer_id,
+    mechanical_layer_set_token,
+    split_layer_set_nonmechanical_parts,
 )
 from .altium_pcb_extended_primitive_information import (
     AltiumPcbExtendedPrimitiveInformation,
@@ -181,9 +191,8 @@ if TYPE_CHECKING:
     from .altium_pcblib import AltiumPcbFootprint, AltiumPcbLib
 
 _ZERO_HEADER = b"\x00\x00\x00\x00"
-_DEFAULT_LAYER_KIND_MAPPING_DATA = (
-    b"\x08\x00\x00\x001\x00.\x000\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-)
+_DEFAULT_LAYER_KIND_MAPPING_DATA = PcbLayerKindMapping.make_default().to_bytes()
+_LAYER_V8_KEY_RE = re.compile(r"^LAYER_V8_(\d+)(.+)$", re.IGNORECASE)
 _DEFAULT_CONSTRAINT_MANAGER_TOKEN = "eNoDAAAAAAE="
 _DEFAULT_SIGNAL_CLASS_NAME = "All xSignals"
 _DEFAULT_SIGNAL_CLASS_KIND = 10
@@ -1206,7 +1215,9 @@ def _normalize_region_point_list(
     origin_x, origin_y = origin_mils
     if not points_are_local:
         return [(float(px), float(py)) for px, py in points]
-    return [(float(origin_x) + float(px), float(origin_y) + float(py)) for px, py in points]
+    return [
+        (float(origin_x) + float(px), float(origin_y) + float(py)) for px, py in points
+    ]
 
 
 def _normalize_region_outline_vertices(
@@ -1289,21 +1300,48 @@ class _PcbDocEntryLookupMixin:
         return default
 
 
-def _coerce_mechanical_layer_id(layer: int | str | PcbLayer) -> int:
+def _coerce_mechanical_layer_number(layer: int | str | PcbLayer) -> int:
     if isinstance(layer, PcbLayer):
         layer_id = int(layer)
+        if PcbLayer.MECHANICAL_1.value <= layer_id <= PcbLayer.MECHANICAL_16.value:
+            return layer_id - PcbLayer.MECHANICAL_1.value + 1
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
     elif isinstance(layer, int):
-        layer_id = int(layer)
+        value = int(layer)
+        if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
+            return value - PcbLayer.MECHANICAL_1.value + 1
+        if 1 <= value <= 32:
+            return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
     else:
         token = "".join(ch for ch in str(layer or "").upper() if ch.isalnum())
         if token.isdigit():
-            layer_id = int(token)
-        else:
-            try:
-                layer_id = int(PcbLayer.from_json_name(token))
-            except ValueError as exc:
-                raise ValueError(f"Unsupported mechanical layer: {layer!r}") from exc
-    if not PcbLayer.MECHANICAL_1.value <= layer_id <= PcbLayer.MECHANICAL_16.value:
+            value = int(token)
+            if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
+                return value - PcbLayer.MECHANICAL_1.value + 1
+            if 1 <= value <= 32:
+                return value
+            raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+        if token.startswith("MECHANICAL"):
+            suffix = token.removeprefix("MECHANICAL")
+            if suffix.isdigit():
+                value = int(suffix)
+                if 1 <= value <= 32:
+                    return value
+            raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+        try:
+            parsed = int(PcbLayer.from_json_name(token))
+        except ValueError as exc:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}") from exc
+        if PcbLayer.MECHANICAL_1.value <= parsed <= PcbLayer.MECHANICAL_16.value:
+            return parsed - PcbLayer.MECHANICAL_1.value + 1
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+
+
+def _coerce_mechanical_layer_id(layer: int | str | PcbLayer) -> int:
+    mechanical_number = _coerce_mechanical_layer_number(layer)
+    layer_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+    if layer_id is None:
         raise ValueError(f"Layer is not Mechanical 1..16: {layer!r}")
     return layer_id
 
@@ -2085,6 +2123,312 @@ class PcbDocBoardData:
             ),
         )
 
+    def _value_for_key(self, key: str) -> str | None:
+        for segment in self.segments:
+            value = segment.get_value(key)
+            if value is not None:
+                return value
+        return None
+
+    def _with_entry_value_after_key(
+        self,
+        key: str,
+        value: str,
+        *,
+        preferred_key: str | None = None,
+    ) -> "PcbDocBoardData":
+        for segment_index, segment in enumerate(self.segments):
+            for entry_index, entry in enumerate(segment.entries):
+                if entry.key != key:
+                    continue
+                entries = list(segment.entries)
+                entries[entry_index] = PcbDocBoardDataEntry(raw=f"{key}={value}")
+                return self.with_segment(
+                    segment_index,
+                    PcbDocBoardDataSegment(
+                        entries=tuple(entries),
+                        leading_pipe=segment.leading_pipe,
+                    ),
+                )
+
+        if preferred_key is not None:
+            for segment_index, segment in enumerate(self.segments):
+                for entry_index, entry in enumerate(segment.entries):
+                    if entry.key != preferred_key:
+                        continue
+                    entries = list(segment.entries)
+                    entries.insert(
+                        entry_index + 1,
+                        PcbDocBoardDataEntry(raw=f"{key}={value}"),
+                    )
+                    return self.with_segment(
+                        segment_index,
+                        PcbDocBoardDataSegment(
+                            entries=tuple(entries),
+                            leading_pipe=segment.leading_pipe,
+                        ),
+                    )
+
+        return self._with_segment_value(key, value, preferred_segment_key=preferred_key)
+
+    def _indexed_layer_group(
+        self,
+        key_re: re.Pattern[str],
+        layer_id: int,
+    ) -> tuple[int, int, dict[str, int]] | None:
+        for segment_index, segment in enumerate(self.segments):
+            groups: dict[int, dict[str, int]] = {}
+            for entry_index, entry in enumerate(segment.entries):
+                key = entry.key or ""
+                match = key_re.match(key)
+                if match is None:
+                    continue
+                group_index = int(match.group(1))
+                suffix = match.group(2).upper()
+                groups.setdefault(group_index, {})[suffix] = entry_index
+            for group_index, positions in groups.items():
+                layer_id_index = positions.get("LAYERID")
+                if layer_id_index is None:
+                    continue
+                if segment.entries[layer_id_index].value == str(int(layer_id)):
+                    return segment_index, group_index, positions
+        return None
+
+    def _indexed_layer_field_value(
+        self,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        field_name: str,
+    ) -> str | None:
+        group = self._indexed_layer_group(key_re, layer_id)
+        if group is None:
+            return None
+        segment_index, _group_index, positions = group
+        field_index = positions.get(field_name.upper())
+        if field_index is None:
+            return None
+        return self.segments[segment_index].entries[field_index].value
+
+    def _with_indexed_layer_field(
+        self,
+        *,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        field_name: str,
+        value: str,
+        key_prefix: str,
+        separator: str,
+    ) -> "PcbDocBoardData":
+        group = self._indexed_layer_group(key_re, layer_id)
+        if group is None:
+            raise KeyError(f"Board6/Data indexed layer not found: {layer_id}")
+        segment_index, group_index, positions = group
+
+        field_key = f"{key_prefix}{group_index}{separator}{field_name.upper()}"
+        segment = self.segments[segment_index]
+        entries = list(segment.entries)
+        field_index = positions.get(field_name.upper())
+        if field_index is not None:
+            entries[field_index] = PcbDocBoardDataEntry(raw=f"{field_key}={value}")
+        else:
+            preferred_suffixes = ("MECHENABLED", "USEDBYPRIMS", "LAYERID", "NAME")
+            insert_after = next(
+                (
+                    positions[suffix]
+                    for suffix in preferred_suffixes
+                    if suffix in positions
+                ),
+                max(positions.values()),
+            )
+            entries.insert(
+                insert_after + 1,
+                PcbDocBoardDataEntry(raw=f"{field_key}={value}"),
+            )
+        return self.with_segment(
+            segment_index,
+            PcbDocBoardDataSegment(
+                entries=tuple(entries),
+                leading_pipe=segment.leading_pipe,
+            ),
+        )
+
+    def _v7_layer_index_for_layer_id(self, layer_id: int) -> int | None:
+        for segment in self.segments:
+            for entry in segment.entries:
+                key = entry.key or ""
+                match = re.fullmatch(r"LAYERV7_(\d+)LAYERID", key, re.IGNORECASE)
+                if match is None or entry.value != str(int(layer_id)):
+                    continue
+                return int(match.group(1))
+        return None
+
+    def mechanical_layer_kind_field_values(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> dict[str, str | None]:
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        fields: dict[str, str | None] = {}
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        if legacy_id is not None:
+            fields["legacy"] = self._value_for_key(f"LAYER{legacy_id}MECHKIND")
+        else:
+            v7_index = self._v7_layer_index_for_layer_id(v7_layer_id)
+            fields["v7"] = (
+                None
+                if v7_index is None
+                else self._value_for_key(f"LAYERV7_{v7_index}MECHKIND")
+            )
+        fields["layer_v8"] = self._indexed_layer_field_value(
+            _LAYER_V8_KEY_RE,
+            v7_layer_id,
+            "MECHKIND",
+        )
+        fields["v9_cache"] = self._indexed_layer_field_value(
+            LAYER_STACK_CACHE_RE,
+            v7_layer_id,
+            "MECHKIND",
+        )
+        return fields
+
+    def with_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> "PcbDocBoardData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        token = mechanical_layer_kind_to_data_token(kind)
+        updated = self
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        if legacy_id is not None:
+            updated = updated._with_entry_value_after_key(
+                f"LAYER{legacy_id}MECHKIND",
+                token,
+                preferred_key=f"LAYER{legacy_id}MECHENABLED",
+            )
+        else:
+            v7_index = updated._v7_layer_index_for_layer_id(v7_layer_id)
+            if v7_index is None:
+                raise KeyError(
+                    f"Mechanical layer not found in Board6 V7 layer table: {layer!r}"
+                )
+            updated = updated._with_entry_value_after_key(
+                f"LAYERV7_{v7_index}MECHKIND",
+                token,
+                preferred_key=f"LAYERV7_{v7_index}MECHENABLED",
+            )
+
+        updated = updated._with_indexed_layer_field(
+            key_re=_LAYER_V8_KEY_RE,
+            layer_id=v7_layer_id,
+            field_name="MECHKIND",
+            value=token,
+            key_prefix="LAYER_V8_",
+            separator="",
+        )
+        return updated._with_indexed_layer_field(
+            key_re=LAYER_STACK_CACHE_RE,
+            layer_id=v7_layer_id,
+            field_name="MECHKIND",
+            value=token,
+            key_prefix="V9_CACHE_LAYER",
+            separator="_",
+        )
+
+    def _enabled_mechanical_layer_numbers(self) -> tuple[int, ...]:
+        groups: dict[int, dict[str, str]] = {}
+        for segment in self.segments:
+            for entry in segment.entries:
+                key = entry.key or ""
+                match = LAYER_STACK_CACHE_RE.match(key)
+                if match is None or entry.value is None:
+                    continue
+                groups.setdefault(int(match.group(1)), {})[match.group(2).upper()] = (
+                    entry.value
+                )
+
+        first_v7_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(1)
+        if first_v7_id is None:
+            return ()
+        enabled_numbers: set[int] = set()
+        for values in groups.values():
+            layer_id_text = values.get("LAYERID")
+            if layer_id_text is None:
+                continue
+            try:
+                layer_id = int(layer_id_text)
+            except ValueError:
+                continue
+            number = layer_id - first_v7_id + 1
+            if not 1 <= number <= 32:
+                continue
+            if _parse_bool_text(values.get("MECHENABLED")) is True:
+                enabled_numbers.add(number)
+        return tuple(sorted(enabled_numbers))
+
+    def _with_enabled_mechanical_layers_in_layer_sets(self) -> "PcbDocBoardData":
+        enabled_numbers = self._enabled_mechanical_layer_numbers()
+        enabled_legacy_tokens = tuple(
+            mechanical_layer_set_token(number)
+            for number in enabled_numbers
+            if number <= 16
+        )
+        enabled_extended_tokens = tuple(
+            mechanical_layer_set_token(number)
+            for number in enabled_numbers
+            if number > 16
+        )
+        enabled_tokens = enabled_legacy_tokens + enabled_extended_tokens
+
+        updated = self
+        layer_set_1_value = updated._value_for_key("LAYERSET1LAYERS")
+        if layer_set_1_value is not None:
+            layers = tuple(part for part in layer_set_1_value.split(",") if part)
+            prefix, has_drill_drawing, suffix = split_layer_set_nonmechanical_parts(
+                layers
+            )
+            updated = updated._with_segment_value(
+                "LAYERSET1LAYERS",
+                ",".join(
+                    prefix
+                    + enabled_legacy_tokens
+                    + (("DrillDrawing",) if has_drill_drawing else ())
+                    + enabled_extended_tokens
+                    + suffix
+                ),
+                preferred_segment_key="LAYERSET1NAME",
+            )
+
+        if updated._value_for_key("LAYERSET5LAYERS") is not None:
+            updated = updated._with_segment_value(
+                "LAYERSET5LAYERS",
+                ",".join(enabled_tokens),
+                preferred_segment_key="LAYERSET5NAME",
+            )
+        return updated
+
+    def with_route_tool_path_layer(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> "PcbDocBoardData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        return self._with_segment_value(
+            "ROUTETOOLPATHLAYER",
+            f"MECHANICAL{mechanical_number}",
+            preferred_segment_key="LAYERSET5FLIPBOARD",
+        )
+
     def _with_v9_cache_mechanical_layer(
         self,
         *,
@@ -2176,59 +2520,62 @@ class PcbDocBoardData:
         name: str | None = None,
         enabled: bool = True,
     ) -> "PcbDocBoardData":
-        layer_id = _coerce_mechanical_layer_id(layer)
-        mechanical_number = _mechanical_layer_number(layer_id)
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        layer_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
         v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
             mechanical_number
         )
         if v7_layer_id is None:
             raise ValueError(f"Unsupported mechanical layer: {layer!r}")
 
-        legacy_name_key = f"LAYER{layer_id}NAME"
         existing_name = None
-        if name is None:
+        if name is None and layer_id is not None:
+            legacy_name_key = f"LAYER{layer_id}NAME"
             for segment in self.segments:
                 found = segment.get_value(legacy_name_key)
                 if found is not None and found.strip():
                     existing_name = found.strip()
                     break
-            if existing_name is None:
-                for segment in self.segments:
-                    for entry in segment.entries:
-                        key = entry.key or ""
-                        match = LAYER_STACK_CACHE_RE.match(key)
-                        if not match or match.group(2).upper() != "LAYERID":
-                            continue
-                        if entry.value != str(int(v7_layer_id)):
-                            continue
-                        name_key = f"V9_CACHE_LAYER{match.group(1)}_NAME"
-                        for candidate in segment.entries:
-                            if candidate.key == name_key and candidate.value:
-                                existing_name = candidate.value.strip()
-                                break
-                        break
-                    if existing_name is not None:
-                        break
+        if name is None and existing_name is None:
+            for segment in self.segments:
+                for entry in segment.entries:
+                    key = entry.key or ""
+                    match = LAYER_STACK_CACHE_RE.match(key)
+                    if not match or match.group(2).upper() != "LAYERID":
+                        continue
+                    if entry.value != str(int(v7_layer_id)):
+                        continue
+                    name_key = f"V9_CACHE_LAYER{match.group(1)}_NAME"
+                    for candidate in segment.entries:
+                        if candidate.key == name_key and candidate.value:
+                            existing_name = candidate.value.strip()
+                            break
+                    break
+                if existing_name is not None:
+                    break
         layer_name = (
             (name or "").strip() or existing_name or f"Mechanical {mechanical_number}"
         )
 
-        prefix = f"LAYER{layer_id}"
-        updated = self._with_segment_value(
-            legacy_name_key,
-            layer_name,
-            preferred_segment_key="LAYER1NAME",
-        )
-        updated = updated._with_segment_value(
-            f"{prefix}MECHENABLED",
-            _format_bool_text(enabled),
-            preferred_segment_key="LAYER1NAME",
-        )
-        return updated._with_v9_cache_mechanical_layer(
+        updated = self
+        if layer_id is not None:
+            prefix = f"LAYER{layer_id}"
+            updated = updated._with_segment_value(
+                f"{prefix}NAME",
+                layer_name,
+                preferred_segment_key="LAYER1NAME",
+            )
+            updated = updated._with_segment_value(
+                f"{prefix}MECHENABLED",
+                _format_bool_text(enabled),
+                preferred_segment_key="LAYER1NAME",
+            )
+        updated = updated._with_v9_cache_mechanical_layer(
             v7_layer_id=v7_layer_id,
             layer_name=layer_name,
             enabled=enabled,
         )
+        return updated._with_enabled_mechanical_layers_in_layer_sets()
 
     def _next_mechanical_pair_index(self) -> int:
         pair_indices: set[int] = set()
@@ -2250,9 +2597,9 @@ class PcbDocBoardData:
         *,
         pair_index: int | None = None,
     ) -> "PcbDocBoardData":
-        layer_1_id = _coerce_mechanical_layer_id(layer_1)
-        layer_2_id = _coerce_mechanical_layer_id(layer_2)
-        if layer_1_id == layer_2_id:
+        layer_1_number = _coerce_mechanical_layer_number(layer_1)
+        layer_2_number = _coerce_mechanical_layer_number(layer_2)
+        if layer_1_number == layer_2_number:
             raise ValueError("Mechanical layer pair endpoints must differ")
         resolved_pair_index = (
             self._next_mechanical_pair_index()
@@ -2262,17 +2609,21 @@ class PcbDocBoardData:
         if resolved_pair_index < 0:
             raise ValueError("Mechanical layer pair index must be non-negative")
 
-        updated = self.with_mechanical_layer(layer_1_id, enabled=True)
-        updated = updated.with_mechanical_layer(layer_2_id, enabled=True)
+        updated = self.with_mechanical_layer(
+            f"MECHANICAL{layer_1_number}", enabled=True
+        )
+        updated = updated.with_mechanical_layer(
+            f"MECHANICAL{layer_2_number}", enabled=True
+        )
         prefix = f"MECHPAIR{resolved_pair_index}"
         updated = updated._with_segment_value(
             f"{prefix}L1",
-            f"MECHANICAL{_mechanical_layer_number(layer_1_id)}",
+            f"MECHANICAL{layer_1_number}",
             preferred_segment_key="LAYERPAIR0LOW",
         )
         return updated._with_segment_value(
             f"{prefix}L2",
-            f"MECHANICAL{_mechanical_layer_number(layer_2_id)}",
+            f"MECHANICAL{layer_2_number}",
             preferred_segment_key=f"{prefix}L1",
         )
 
@@ -3329,6 +3680,7 @@ class PcbDocBuildProfile:
     classes_data: PcbDocClassesData | None = None
     board_regions_data: PcbDocBoardRegionsData | None = None
     primitive_guids_data: PcbDocPrimitiveGuidsData | None = None
+    layer_kind_mapping_data: PcbLayerKindMapping | None = None
     nets_data: tuple[AltiumPcbNet, ...] | None = None
     texts_data: PcbDocTextsData | None = None
     texts6_data: PcbDocTexts6Data | None = None
@@ -3403,6 +3755,9 @@ class PcbDocBuildProfile:
         primitive_guids_data = PcbDocPrimitiveGuidsData.from_bytes(
             raw_streams["PrimitiveGuids/Data"]
         )
+        layer_kind_mapping_data = PcbLayerKindMapping.from_bytes(
+            raw_streams.get("LayerKindMapping/Data", _DEFAULT_LAYER_KIND_MAPPING_DATA)
+        )
         texts_data = PcbDocTextsData.from_streams(
             raw_streams["Texts/Header"],
             raw_streams["Texts/Data"],
@@ -3448,6 +3803,7 @@ class PcbDocBuildProfile:
             classes_data=PcbDocClassesData.from_bytes(raw_streams["Classes6/Data"]),
             board_regions_data=board_regions_data,
             primitive_guids_data=primitive_guids_data,
+            layer_kind_mapping_data=layer_kind_mapping_data,
             nets_data=parse_net_stream(raw_streams["Nets6/Data"]),
             texts_data=texts_data,
             texts6_data=PcbDocTexts6Data.from_bytes(
@@ -3517,6 +3873,7 @@ class PcbDocBuildProfile:
             classes_data=PcbDocClassesData.default(),
             board_regions_data=PcbDocBoardRegionsData.default(),
             primitive_guids_data=PcbDocPrimitiveGuidsData.default(),
+            layer_kind_mapping_data=PcbLayerKindMapping.make_default(),
             nets_data=(),
             texts_data=PcbDocTextsData.default(),
             texts6_data=PcbDocTexts6Data.empty(),
@@ -3608,6 +3965,15 @@ class PcbDocBuilder:
             self.profile.primitive_guids_data
             or PcbDocPrimitiveGuidsData.from_bytes(
                 self.profile.raw_streams["PrimitiveGuids/Data"]
+            )
+        )
+        self.layer_kind_mapping_data = (
+            self.profile.layer_kind_mapping_data
+            or PcbLayerKindMapping.from_bytes(
+                self.profile.raw_streams.get(
+                    "LayerKindMapping/Data",
+                    _DEFAULT_LAYER_KIND_MAPPING_DATA,
+                )
             )
         )
         self.nets: list[AltiumPcbNet] = list(
@@ -4119,8 +4485,9 @@ class PcbDocBuilder:
         Set a mechanical layer display name and enabled state.
 
         Args:
-            layer: Mechanical layer token, enum, or native id. Supported tokens
-                include `"MECHANICAL13"` and `PcbLayer.MECHANICAL_13`.
+            layer: Mechanical layer token or number. Supported tokens include
+                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                Mechanical 1 through 16.
             name: Optional display name. If omitted, Altium's default
                 `Mechanical N` label is used.
             enabled: Whether the layer is enabled in the Board6 registry.
@@ -4153,6 +4520,43 @@ class PcbDocBuilder:
             layer_2,
             pair_index=pair_index,
         )
+        return self
+
+    @property
+    def mechanical_layer_kinds(self) -> Mapping[int, MechanicalLayerKind]:
+        """Return the current mechanical layer kind mapping by native layer id."""
+
+        return self.layer_kind_mapping_data.mapping
+
+    def get_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> MechanicalLayerKind | None:
+        """Return the configured kind for a mechanical layer, if present."""
+
+        return self.layer_kind_mapping_data.mapping.get(
+            coerce_layer_kind_mapping_layer_id(layer)
+        )
+
+    def set_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> "PcbDocBuilder":
+        """
+        Set the semantic kind assigned to a mechanical layer.
+
+        The layer may be a `PcbLayer`, a native classic mechanical layer id, a
+        `"MECHANICAL17"` token, or a mechanical layer number `1..32`.
+        """
+        kind_value = coerce_mechanical_layer_kind(kind)
+        self.layer_kind_mapping_data = self.layer_kind_mapping_data.with_layer_kind(
+            layer,
+            kind_value,
+        )
+        self.board_data = self.board_data.with_mechanical_layer_kind(layer, kind_value)
+        if kind_value == MechanicalLayerKind.ROUTE_TOOL_PATH:
+            self.board_data = self.board_data.with_route_tool_path_layer(layer)
         return self
 
     def _find_net_index(self, name: str) -> int | None:
@@ -5425,7 +5829,7 @@ class PcbDocBuilder:
             streams[stream_name] = _ZERO_HEADER
 
         streams["LayerKindMapping/Header"] = b"\x01\x00\x00\x00"
-        streams["LayerKindMapping/Data"] = _DEFAULT_LAYER_KIND_MAPPING_DATA
+        streams["LayerKindMapping/Data"] = self.layer_kind_mapping_data.to_bytes()
         streams["FileHeader"] = self.file_header_data.build_stream()
         streams["FileHeaderSix"] = _build_file_header_six(
             self.profile.file_header_six_id,

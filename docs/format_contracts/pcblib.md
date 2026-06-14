@@ -22,6 +22,15 @@
   fabrication/assembly testpoint flags.
 - Author footprint-level primitive parameters through the PcbLib
   `PrimitiveParameters` stream.
+- Inspect and author semantic mechanical layer kind assignments through
+  `mechanical_layer_kinds`, `get_mechanical_layer_kind(...)`, and
+  `set_mechanical_layer_kind(...)`. The mapping is stored in
+  `Library/LayerKindMapping/Data` and synchronized into the PcbLib
+  `Library/Data` `MECHKIND` layer-table/cache fields used by Altium.
+- Author mechanical layer display names, enabled flags, and component mirror
+  pairs through `set_mechanical_layer(...)` and
+  `set_mechanical_layer_pair(...)`. These update the PcbLib `Library/Data`
+  layer table and `MECHPAIR*` entries.
 - Author custom-pad anchor geometry with explicit anchor width, height,
   rotation, and shape. Custom-pad regions use the native 1-based `PADINDEX`
   that corresponds to the authored anchor pad.
@@ -57,6 +66,9 @@ a recovery projection. This fallback is not a geometry-equivalent STEP import.
 
 PcbLib footprints do not have a board layer stack. Stable layer keys use token
 names, and default display labels are used only for human-facing labels.
+Mechanical layer display names, enabled flags, and mirror pairs are library
+registry metadata. Mechanical layer kind assignments are semantic metadata and
+do not by themselves rename or enable mechanical layers.
 
 ## SVG
 

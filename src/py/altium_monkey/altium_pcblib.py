@@ -11,7 +11,7 @@ import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
 from .altium_api_markers import public_api
 from .altium_embedded_files import sanitize_embedded_asset_name
@@ -19,7 +19,7 @@ from .altium_pcb_stream_helpers import (
     build_length_prefixed_ascii as _build_length_prefixed_ascii,
     count_length_prefixed_records as _count_length_prefixed_records,
 )
-from .altium_pcblib_sections import PcbLibSectionKeys
+from .altium_pcblib_sections import PcbLibLayerKindMapping, PcbLibSectionKeys
 from .altium_pcb_embedded_model_compose import (
     collect_pcblib_embedded_model_entries,
     copy_footprint_with_models_into_builder,
@@ -33,6 +33,7 @@ from .altium_pcb_extended_primitive_information import (
 )
 from .altium_ole import AltiumOleFile, AltiumOleWriter
 from .altium_pcb_enums import (
+    MechanicalLayerKind,
     PadHoleShape,
     PadShape,
     PcbBarcodeKind,
@@ -42,6 +43,9 @@ from .altium_pcb_enums import (
     PcbRegionKind,
     PcbTextJustification,
     PcbTextKind,
+)
+from .altium_pcb_layer_kind_mapping import (
+    coerce_layer_kind_mapping_layer_id,
 )
 from .altium_pcbdoc_builder_text import (
     PCB_TEXT_BARCODE_MARGIN_MILS,
@@ -2100,6 +2104,10 @@ class AltiumPcbLib:
         self.raw_pad_via_library_data: bytes | None = None
         self.raw_layer_kind_mapping_header: bytes | None = None
         self.raw_layer_kind_mapping: bytes | None = None
+        self._layer_kind_mapping_data = PcbLibLayerKindMapping.make_default()
+        self.mechanical_layer_kinds: Mapping[int, MechanicalLayerKind] = (
+            self._layer_kind_mapping_data.mapping
+        )
         self.raw_embedded_fonts: bytes | None = None
         self.raw_textures_header: bytes | None = None
         self.raw_textures_data: bytes | None = None
@@ -2127,6 +2135,7 @@ class AltiumPcbLib:
         from .altium_pcblib_builder import PcbLibBuilder
 
         builder = PcbLibBuilder(profile=self._profile_for_authoring_builder())
+        builder.layer_kind_mapping_data = self._layer_kind_mapping_data
         if self.footprints:
             model_entries = collect_pcblib_embedded_model_entries(
                 self.raw_models_data,
@@ -2162,6 +2171,8 @@ class AltiumPcbLib:
         self.raw_pad_via_library_data = authored.raw_pad_via_library_data
         self.raw_layer_kind_mapping_header = authored.raw_layer_kind_mapping_header
         self.raw_layer_kind_mapping = authored.raw_layer_kind_mapping
+        self._layer_kind_mapping_data = authored._layer_kind_mapping_data
+        self.mechanical_layer_kinds = authored.mechanical_layer_kinds
         self.raw_embedded_fonts = authored.raw_embedded_fonts
         self.raw_textures_header = authored.raw_textures_header
         self.raw_textures_data = authored.raw_textures_data
@@ -2235,6 +2246,87 @@ class AltiumPcbLib:
             revision_guid=revision_guid,
             copy_footprint=copy_footprint,
         )
+
+    def set_mechanical_layer(
+        self,
+        layer: int | str | PcbLayer,
+        *,
+        name: str | None = None,
+        enabled: bool = True,
+    ) -> None:
+        """
+        Set a mechanical layer display name and enabled state.
+
+        Args:
+            layer: Mechanical layer token or number. Supported tokens include
+                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                Mechanical 1 through 16.
+            name: Optional display name. If omitted, the existing layer-table
+                label is preserved, falling back to `Mechanical N`.
+            enabled: Whether the layer is enabled in the PcbLib layer registry.
+        """
+        self._ensure_authoring_builder().set_mechanical_layer(
+            layer,
+            name=name,
+            enabled=enabled,
+        )
+
+    def set_mechanical_layer_pair(
+        self,
+        layer_1: int | str | PcbLayer,
+        layer_2: int | str | PcbLayer,
+        *,
+        pair_index: int | None = None,
+    ) -> None:
+        """
+        Define a mechanical mirror pair used by component side flipping.
+
+        Args:
+            layer_1: First mechanical layer endpoint.
+            layer_2: Second mechanical layer endpoint.
+            pair_index: Optional native `MECHPAIR{N}` index. If omitted, the
+                first unused index is selected.
+        """
+        self._ensure_authoring_builder().set_mechanical_layer_pair(
+            layer_1,
+            layer_2,
+            pair_index=pair_index,
+        )
+
+    def get_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> MechanicalLayerKind | None:
+        """
+        Return the semantic kind assigned to a mechanical layer, if present.
+
+        Args:
+            layer: Mechanical layer token, enum, native layer id, or mechanical
+                layer number.
+        """
+        return self.mechanical_layer_kinds.get(
+            coerce_layer_kind_mapping_layer_id(layer)
+        )
+
+    def set_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> None:
+        """
+        Set the semantic kind assigned to a mechanical layer.
+
+        Args:
+            layer: Mechanical layer token, enum, native layer id, or mechanical
+                layer number.
+            kind: `MechanicalLayerKind`, enum name, or native kind value.
+        """
+        builder = self._ensure_authoring_builder()
+        builder.set_mechanical_layer_kind(layer, kind)
+        self._layer_kind_mapping_data = builder.layer_kind_mapping_data
+        self.mechanical_layer_kinds = self._layer_kind_mapping_data.mapping
+        self.raw_layer_kind_mapping_header = b"\x01\x00\x00\x00"
+        self.raw_layer_kind_mapping = self._layer_kind_mapping_data.to_bytes()
 
     def add_embedded_model(
         self,
@@ -2419,12 +2511,22 @@ class AltiumPcbLib:
         ):
             cls._load_optional_stream(ole, pcblib, attr_name, stream_path)
 
+        pcblib._sync_layer_kind_mapping_from_raw()
+
         model_num = 0
         while ole.exists(["Library", "Models", str(model_num)]):
             pcblib.raw_models[model_num] = ole.openstream(
                 ["Library", "Models", str(model_num)]
             )
             model_num += 1
+
+    def _sync_layer_kind_mapping_from_raw(self) -> None:
+        data = self.raw_layer_kind_mapping
+        if data is None:
+            self._layer_kind_mapping_data = PcbLibLayerKindMapping.make_default()
+        else:
+            self._layer_kind_mapping_data = PcbLibLayerKindMapping.from_bytes(data)
+        self.mechanical_layer_kinds = self._layer_kind_mapping_data.mapping
 
     @staticmethod
     def _load_section_key_map(
@@ -3123,6 +3225,7 @@ class AltiumPcbLib:
         from .altium_pcblib_builder import PcbLibBuilder
 
         builder = PcbLibBuilder(profile=self._profile_for_authoring_builder())
+        builder.layer_kind_mapping_data = self._layer_kind_mapping_data
         model_entries = collect_pcblib_embedded_model_entries(
             self.raw_models_data,
             self.raw_models,

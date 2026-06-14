@@ -862,7 +862,7 @@ def parse_widestrings6(ole: AltiumOleFile, verbose: bool = False) -> dict[int, s
             log.info(f"[WideStrings6]   Decoded text: {repr(text)}")
             if has_control_chars:
                 log.warning(
-                    f"[WideStrings6]   WARNING: Text contains control characters!"
+                    "[WideStrings6]   WARNING: Text contains control characters!"
                 )
 
         strings[index] = text

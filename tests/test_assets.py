@@ -366,6 +366,155 @@ def _run_example_entrypoint(
     )
 
 
+def _mechanical_kind_sample_layer_set_1() -> list[str]:
+    return [
+        "MultiLayer",
+        "TopPaste",
+        "TopOverlay",
+        "TopSolder",
+        "TopLayer",
+        "BottomLayer",
+        "BottomSolder",
+        "BottomOverlay",
+        "BottomPaste",
+        "DrillGuide",
+        "KeepOutLayer",
+        *[f"Mechanical{number}" for number in range(1, 17)],
+        "DrillDrawing",
+        *[f"Mechanical{number}" for number in range(17, 32)],
+    ]
+
+
+def _mechanical_kind_sample_layer_set_5() -> list[str]:
+    return [f"Mechanical{number}" for number in range(1, 32)]
+
+
+def _split_layer_set(value: object) -> list[str]:
+    return [
+        part.strip() for part in str(value or "").strip().split(",") if part.strip()
+    ]
+
+
+def _public_mechanical_kind_pairs() -> list[tuple[str, str]]:
+    return [
+        ("MECHANICAL10", "MECHANICAL11"),
+        ("MECHANICAL12", "MECHANICAL13"),
+        ("MECHANICAL14", "MECHANICAL15"),
+        ("MECHANICAL16", "MECHANICAL17"),
+        ("MECHANICAL18", "MECHANICAL19"),
+        ("MECHANICAL20", "MECHANICAL21"),
+        ("MECHANICAL22", "MECHANICAL23"),
+        ("MECHANICAL24", "MECHANICAL25"),
+        ("MECHANICAL26", "MECHANICAL27"),
+        ("MECHANICAL28", "MECHANICAL29"),
+        ("MECHANICAL30", "MECHANICAL31"),
+    ]
+
+
+def _mechanical_layer_number(layer: str) -> int:
+    return int(layer.removeprefix("MECHANICAL"))
+
+
+def _expected_mechanical_kind_fields(
+    layer: str,
+    token: str,
+) -> dict[str, str]:
+    expected = {
+        "layer_v8": token,
+        "v9_cache": token,
+    }
+    if _mechanical_layer_number(layer) <= 16:
+        expected["legacy"] = token
+    else:
+        expected["v7"] = token
+    return expected
+
+
+def _indexed_raw_layer_field(
+    raw_record: dict[str, object],
+    key_re: re.Pattern[str],
+    layer_id: int,
+    field_name: str,
+) -> str | None:
+    groups: dict[int, dict[str, str]] = {}
+    for key, value in raw_record.items():
+        match = key_re.match(str(key))
+        if match is None:
+            continue
+        groups.setdefault(int(match.group(1)), {})[match.group(2).upper()] = str(value)
+    for values in groups.values():
+        if values.get("LAYERID") == str(int(layer_id)):
+            return values.get(field_name.upper())
+    return None
+
+
+def _v7_raw_layer_index(
+    raw_record: dict[str, object],
+    layer_id: int,
+) -> int | None:
+    for key, value in raw_record.items():
+        match = re.fullmatch(r"LAYERV7_(\d+)LAYERID", str(key), re.IGNORECASE)
+        if match is None or str(value) != str(int(layer_id)):
+            continue
+        return int(match.group(1))
+    return None
+
+
+def _pcbdoc_mechanical_kind_fields(
+    raw_record: dict[str, object],
+    layer: str,
+) -> dict[str, str | None]:
+    mechanical_number = _mechanical_layer_number(layer)
+    v7_layer_id = 0x01020000 + mechanical_number
+    fields: dict[str, str | None] = {}
+    if mechanical_number <= 16:
+        legacy_value = raw_record.get(f"LAYER{56 + mechanical_number}MECHKIND")
+        fields["legacy"] = str(legacy_value) if legacy_value else None
+    else:
+        v7_index = _v7_raw_layer_index(raw_record, v7_layer_id)
+        v7_value = (
+            None if v7_index is None else raw_record.get(f"LAYERV7_{v7_index}MECHKIND")
+        )
+        fields["v7"] = str(v7_value) if v7_value else None
+    fields["layer_v8"] = _indexed_raw_layer_field(
+        raw_record,
+        re.compile(r"^LAYER_V8_(\d+)(.+)$", re.IGNORECASE),
+        v7_layer_id,
+        "MECHKIND",
+    )
+    fields["v9_cache"] = _indexed_raw_layer_field(
+        raw_record,
+        re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE),
+        v7_layer_id,
+        "MECHKIND",
+    )
+    return fields
+
+
+def _assert_mechanical_kind_manifest(manifest: dict[str, object]) -> None:
+    assert manifest["registry_layer_count"] == 32
+    assert manifest["assignment_count"] == 30
+    assert manifest["pair_count"] == 11
+    assert manifest["route_tool_path_layer"] == "MECHANICAL3"
+    assert manifest["layer_set_1_layers"] == _mechanical_kind_sample_layer_set_1()
+    assert manifest["layer_set_5_layers"] == _mechanical_kind_sample_layer_set_5()
+    assert manifest["primitive_counts"] == {
+        key: 0 for key in manifest["primitive_counts"]
+    }
+    assignments = manifest["assignments"]
+    assert assignments[0]["layer"] == "MECHANICAL2"
+    assert assignments[0]["kind"] == "BOARD_SHAPE"
+    assert assignments[1]["layer"] == "MECHANICAL3"
+    assert assignments[1]["kind"] == "ROUTE_TOOL_PATH"
+    assert assignments[-1]["layer"] == "MECHANICAL31"
+    assert assignments[-1]["kind"] == "VALUE_BOTTOM"
+    if "mechanical_kind_fields" in manifest:
+        assert len(manifest["mechanical_kind_fields"]) == manifest["assignment_count"]
+    assert [
+        (pair["layer_1"], pair["layer_2"]) for pair in manifest["component_layer_pairs"]
+    ] == _public_mechanical_kind_pairs()
+
+
 @pytest.mark.parametrize(
     "example",
     _load_examples(),
@@ -393,6 +542,141 @@ def test_asset_example_runs_and_writes_declared_outputs(
         assert output_path.exists(), (
             f"{example['id']} missing declared output: {output}"
         )
+
+
+def test_pcbdoc_create_mechanical_layer_kinds_is_metadata_only_and_visible(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_mechanical_layer_kinds"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbDoc, MechanicalLayerKind
+    from altium_monkey.altium_pcb_layer_kind_mapping import (
+        mechanical_layer_kind_to_data_token,
+    )
+
+    output_root = check_examples_root / "pcbdoc_create_mechanical_layer_kinds"
+    output_path = output_root / "output" / "pcbdoc_create_mechanical_layer_kinds.PcbDoc"
+    manifest = json.loads(
+        (
+            output_root / "output" / "pcbdoc_create_mechanical_layer_kinds.json"
+        ).read_text(encoding="utf-8")
+    )
+    pcbdoc = AltiumPcbDoc.from_file(output_path)
+
+    _assert_mechanical_kind_manifest(manifest)
+    assert pcbdoc.board is not None
+    assert pcbdoc.get_mechanical_layer_kind("MECHANICAL2") == (
+        MechanicalLayerKind.BOARD_SHAPE
+    )
+    assert pcbdoc.get_mechanical_layer_kind("MECHANICAL3") == (
+        MechanicalLayerKind.ROUTE_TOOL_PATH
+    )
+    assert pcbdoc.get_mechanical_layer_kind("MECHANICAL31") == (
+        MechanicalLayerKind.VALUE_BOTTOM
+    )
+    raw_board = pcbdoc.board.raw_record or {}
+    assert str(raw_board.get("ROUTETOOLPATHLAYER", "")).strip() == "MECHANICAL3"
+    assert _split_layer_set(raw_board.get("LAYERSET1LAYERS")) == (
+        _mechanical_kind_sample_layer_set_1()
+    )
+    assert _split_layer_set(raw_board.get("LAYERSET5LAYERS")) == (
+        _mechanical_kind_sample_layer_set_5()
+    )
+    for pair_index, (layer_1, layer_2) in enumerate(_public_mechanical_kind_pairs()):
+        assert str(raw_board.get(f"MECHPAIR{pair_index}L1", "")).strip() == layer_1
+        assert str(raw_board.get(f"MECHPAIR{pair_index}L2", "")).strip() == layer_2
+    for assignment in manifest["assignments"]:
+        layer = str(assignment["layer"])
+        kind = MechanicalLayerKind[str(assignment["kind"])]
+        token = mechanical_layer_kind_to_data_token(kind)
+        assert _pcbdoc_mechanical_kind_fields(raw_board, layer) == (
+            _expected_mechanical_kind_fields(layer, token)
+        )
+    assert len(pcbdoc.components) == 0
+    assert len(pcbdoc.pads) == 0
+    assert len(pcbdoc.tracks) == 0
+    assert len(pcbdoc.vias) == 0
+
+
+def test_pcblib_create_mechanical_layer_kinds_is_metadata_only_and_visible(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcblib_create_mechanical_layer_kinds"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbLib, MechanicalLayerKind
+    from altium_monkey.altium_pcb_layer_kind_mapping import (
+        mechanical_layer_kind_to_data_token,
+    )
+    from altium_monkey.altium_pcblib_builder import PcbLibBuildProfile
+
+    output_root = check_examples_root / "pcblib_create_mechanical_layer_kinds"
+    output_path = output_root / "output" / "pcblib_create_mechanical_layer_kinds.PcbLib"
+    manifest = json.loads(
+        (
+            output_root / "output" / "pcblib_create_mechanical_layer_kinds.json"
+        ).read_text(encoding="utf-8")
+    )
+    pcblib = AltiumPcbLib.from_file(output_path)
+    library_data = PcbLibBuildProfile.from_pcblib(output_path).library_data
+
+    _assert_mechanical_kind_manifest(manifest)
+    assert pcblib.get_mechanical_layer_kind("MECHANICAL2") == (
+        MechanicalLayerKind.BOARD_SHAPE
+    )
+    assert pcblib.get_mechanical_layer_kind("MECHANICAL3") == (
+        MechanicalLayerKind.ROUTE_TOOL_PATH
+    )
+    assert pcblib.get_mechanical_layer_kind("MECHANICAL31") == (
+        MechanicalLayerKind.VALUE_BOTTOM
+    )
+    route_record = library_data.get_board_record("ROUTETOOLPATHLAYER")
+    assert route_record is not None
+    assert str(route_record.get_value("ROUTETOOLPATHLAYER", "")).strip() == (
+        "MECHANICAL3"
+    )
+    layer_set_1 = library_data.layer_sets.layer_set(1)
+    layer_set_5 = library_data.layer_sets.layer_set(5)
+    assert layer_set_1 is not None
+    assert layer_set_5 is not None
+    assert list(layer_set_1.layers) == _mechanical_kind_sample_layer_set_1()
+    assert list(layer_set_5.layers) == _mechanical_kind_sample_layer_set_5()
+    pair_values: dict[int, dict[int, str]] = {}
+    for segment in library_data.segments:
+        key = segment.key or ""
+        match = re.fullmatch(r"MECHPAIR(\d+)L([12])", key, re.IGNORECASE)
+        if match is None or segment.value is None:
+            continue
+        pair_values.setdefault(int(match.group(1)), {})[int(match.group(2))] = (
+            segment.value
+        )
+    assert [
+        (pair_values[index][1], pair_values[index][2])
+        for index in range(len(_public_mechanical_kind_pairs()))
+    ] == _public_mechanical_kind_pairs()
+    for assignment in manifest["assignments"]:
+        layer = str(assignment["layer"])
+        kind = MechanicalLayerKind[str(assignment["kind"])]
+        token = mechanical_layer_kind_to_data_token(kind)
+        assert library_data.mechanical_layer_kind_field_values(layer) == (
+            _expected_mechanical_kind_fields(layer, token)
+        )
+    assert len(pcblib.footprints) == 1
+    footprint = pcblib.footprints[0]
+    assert len(footprint.pads) == 0
+    assert len(footprint.tracks) == 0
+    assert len(footprint.vias) == 0
 
 
 def test_draftsman_blank_project_example_writes_parseable_drawing(

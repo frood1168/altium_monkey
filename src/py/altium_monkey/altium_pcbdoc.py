@@ -7,7 +7,7 @@ import logging
 import math
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Required, Sequence, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, Mapping, Required, Sequence, TypedDict, Unpack
 import zlib
 
 from .altium_api_markers import public_api
@@ -96,6 +96,7 @@ from .altium_record_pcb__shapebased_region import (
     PcbExtendedVertex,
 )
 from .altium_pcb_enums import (
+    MechanicalLayerKind,
     PadHoleShape,
     PadShape,
     PcbBarcodeKind,
@@ -108,6 +109,10 @@ from .altium_pcb_enums import (
     PcbTextAutoposition,
     PcbTextJustification,
     PcbTextKind,
+)
+from .altium_pcb_layer_kind_mapping import (
+    PcbLayerKindMapping,
+    coerce_layer_kind_mapping_layer_id,
 )
 from .altium_pcb_mask_expansion import (
     PcbMaskExpansionInput,
@@ -1073,6 +1078,10 @@ class AltiumPcbDoc:
         self._union_authoring_dirty: bool = False
         self.raw_custom_shapes_header: bytes | None = None
         self.raw_custom_shapes_data: bytes | None = None
+        self._layer_kind_mapping_data = PcbLayerKindMapping.make_default()
+        self.mechanical_layer_kinds: Mapping[int, MechanicalLayerKind] = (
+            self._layer_kind_mapping_data.mapping
+        )
         self._authoring_builder: Any | None = None
 
     def _profile_for_authoring_builder(self) -> "PcbDocBuildProfile":
@@ -1123,6 +1132,8 @@ class AltiumPcbDoc:
         self.component_bodies = builder.component_bodies
         self.shapebased_component_bodies = builder.shapebased_component_bodies
         self.board = builder.board_data.top_level_board
+        self._layer_kind_mapping_data = builder.layer_kind_mapping_data
+        self.mechanical_layer_kinds = builder.mechanical_layer_kinds
 
     def _sync_from_saved_authoring_file(
         self,
@@ -1251,8 +1262,9 @@ class AltiumPcbDoc:
         Set a mechanical layer display name and enabled state.
 
         Args:
-            layer: Mechanical layer token, enum, or native id. Supported tokens
-                include `"MECHANICAL13"` and `PcbLayer.MECHANICAL_13`.
+            layer: Mechanical layer token or number. Supported tokens include
+                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                Mechanical 1 through 16.
             name: Optional display name. If omitted, Altium's default
                 `Mechanical N` label is used.
             enabled: Whether the layer is enabled in the Board6 registry.
@@ -1285,6 +1297,37 @@ class AltiumPcbDoc:
             layer_2,
             pair_index=pair_index,
         )
+        self._mirror_authoring_builder_state()
+
+    def get_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> MechanicalLayerKind | None:
+        """
+        Return the semantic kind assigned to a mechanical layer, if present.
+
+        Args:
+            layer: Mechanical layer token, enum, native layer id, or mechanical
+                layer number.
+        """
+        return self.mechanical_layer_kinds.get(
+            coerce_layer_kind_mapping_layer_id(layer)
+        )
+
+    def set_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> None:
+        """
+        Set the semantic kind assigned to a mechanical layer.
+
+        Args:
+            layer: Mechanical layer token, enum, native layer id, or mechanical
+                layer number.
+            kind: `MechanicalLayerKind`, enum name, or native kind value.
+        """
+        self._ensure_authoring_builder().set_mechanical_layer_kind(layer, kind)
         self._mirror_authoring_builder_state()
 
     def add_net(
@@ -2737,6 +2780,7 @@ class AltiumPcbDoc:
         if verbose:
             log.info("  Storing unparsed streams for passthrough...")
         self._store_raw_streams(ole, verbose=verbose)
+        self._parse_layer_kind_mapping()
         self._parse_union_streams(verbose=verbose)
 
     def _parse_text_lookup_tables(
@@ -3796,6 +3840,17 @@ class AltiumPcbDoc:
                 len(self.union_name_records),
                 len(self.smart_unions),
             )
+
+    def _parse_layer_kind_mapping(self) -> None:
+        """
+        Decode mechanical layer kind assignments from raw passthrough streams.
+        """
+        data = self._raw_streams.get("LayerKindMapping/Data")
+        if data is None:
+            self._layer_kind_mapping_data = PcbLayerKindMapping.make_default()
+        else:
+            self._layer_kind_mapping_data = PcbLayerKindMapping.from_bytes(data)
+        self.mechanical_layer_kinds = self._layer_kind_mapping_data.mapping
 
     def save(self, filepath: Path | str, verbose: bool = False) -> None:
         """

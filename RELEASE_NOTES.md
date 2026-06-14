@@ -1,3 +1,63 @@
+# altium-monkey 2026.06.14 Release Notes
+
+Package version: `2026.6.14`
+
+`2026.06.14` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.14`.
+
+This release fixes alternate display-mode schematic netlisting and adds
+first-class PcbDoc/PcbLib mechanical layer kind authoring.
+
+## SchDoc Display-Mode Netlisting
+
+SchDoc netlist extraction now follows the active symbol `DisplayMode` for
+placed components instead of assuming the primary symbol mode. Component pin
+views and WireList output now match the active display body, including the
+native single-sheet extractor path.
+
+## PcbDoc And PcbLib Mechanical Layer Kinds
+
+PcbDoc and PcbLib now expose typed mechanical layer kind assignments through
+`MechanicalLayerKind`, `mechanical_layer_kinds`,
+`get_mechanical_layer_kind(...)`, and `set_mechanical_layer_kind(...)`.
+`PcbDocBuilder.set_mechanical_layer_kind(...)` is also available for direct
+PcbDoc builder workflows.
+
+The mapping reads and writes `LayerKindMapping/Data` for PcbDoc and
+`Library/LayerKindMapping/Data` for PcbLib, including classic Mechanical 1..16
+ids and extended Mechanical 17..32 ids. Authored output also synchronizes
+Altium-visible `MECHKIND` layer-table and cache fields so assignments appear in
+Altium's layer manager after save/reopen.
+
+PcbDoc mechanical layer display-name, enabled-state, and mirror-pair authoring
+now supports Mechanical 17..32 through Board6 V9 cache fields and `MECHPAIR*`
+entries without colliding with legacy system-layer ids such as Drill Drawing.
+PcbLib has matching mechanical layer registry and mirror-pair authoring through
+`AltiumPcbLib.set_mechanical_layer(...)` and
+`AltiumPcbLib.set_mechanical_layer_pair(...)`, including Mechanical 17..32
+`LAYERV7_*` and `Library/Data` `MECHPAIR*` updates.
+
+## Public Examples
+
+Two new public examples demonstrate metadata-only mechanical layer kind
+authoring:
+
+1. `pcbdoc_create_mechanical_layer_kinds`
+2. `pcblib_create_mechanical_layer_kinds`
+
+Both examples create mechanical layer names, enabled states, component-layer
+pairs, standalone kind assignments at lower mechanical layer indices, paired
+component kind assignments at higher indices, and save/reparse JSON readback
+manifests for Altium UI verification.
+
+## Validation
+
+This release was prepared with focused SchDoc display-mode coverage, PcbDoc and
+PcbLib mechanical layer kind round-trip tests, exported mechanical-layer
+example readback checks, clean Ruff lint, and the asset test lane.
+
+---
+
 # altium-monkey 2026.06.13 Release Notes
 
 Package version: `2026.6.13`

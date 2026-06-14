@@ -238,6 +238,31 @@ Use `set_layer_stack_template(...)` for the current limited rigid-board
 template helper. That helper is routed through the source-aware layer-stack
 model and preserves the established two-layer/four-layer output semantics.
 
+## Mechanical Layer Kinds
+
+Mechanical layer display names, enabled flags, and mirror pairs are stored in
+the Board6 layer registry. Semantic layer roles are stored separately in
+`LayerKindMapping/Data` and are exposed through `MechanicalLayerKind`.
+Authored output also synchronizes Altium's Board6 `MECHKIND` layer-table/cache
+fields so the assignments are visible in Altium's layer manager.
+
+Use `mechanical_layer_kinds` to inspect the parsed mapping, and use
+`get_mechanical_layer_kind(...)` / `set_mechanical_layer_kind(...)` for common
+lookup and authoring:
+
+```python
+from altium_monkey import AltiumPcbDoc, MechanicalLayerKind
+
+pcbdoc = AltiumPcbDoc()
+pcbdoc.set_mechanical_layer("MECHANICAL13", name="3D Bodies", enabled=True)
+pcbdoc.set_mechanical_layer_kind("MECHANICAL13", MechanicalLayerKind.BODY_3D_TOP)
+pcbdoc.save("mechanical_kind.PcbDoc")
+```
+
+Mechanical layers 1 through 16 use classic PCB layer ids in the mapping.
+Mechanical layers 17 through 32 use Altium's extended
+`0x04000000 | mechanical_number` id form.
+
 ## Via Protection, Tenting, And Delay
 
 `AltiumPcbDoc.add_via(...)` can author ordinary through vias and promoted via
@@ -334,41 +359,42 @@ Start with:
 2. [`pcbdoc_stats`](../examples/pcbdoc_stats/README.md)
 3. [`pcbdoc_inspect_layer_stack`](../examples/pcbdoc_inspect_layer_stack/README.md)
 4. [`pcbdoc_create_layer_stack`](../examples/pcbdoc_create_layer_stack/README.md)
-5. [`pcbdoc_create_custom_rigid_stack`](../examples/pcbdoc_create_custom_rigid_stack/README.md)
-6. [`pcbdoc_create_impedance_rigid_stack`](../examples/pcbdoc_create_impedance_rigid_stack/README.md)
-7. [`pcbdoc_create_flex_stiffener`](../examples/pcbdoc_create_flex_stiffener/README.md)
-8. [`pcbdoc_create_rigid_flex_split_lines`](../examples/pcbdoc_create_rigid_flex_split_lines/README.md)
-9. [`pcbdoc_create_flex_in_cutout`](../examples/pcbdoc_create_flex_in_cutout/README.md)
-10. [`pcbdoc_create_rigid_flex_branch`](../examples/pcbdoc_create_rigid_flex_branch/README.md)
-11. [`pcbdoc_create_rigid_flex_branch_intrusion`](../examples/pcbdoc_create_rigid_flex_branch_intrusion/README.md)
-12. [`pcbdoc_create_rigid_flex_two_branch`](../examples/pcbdoc_create_rigid_flex_two_branch/README.md)
-13. [`pcbdoc_create_rigid_flex_impedance_backdrill`](../examples/pcbdoc_create_rigid_flex_impedance_backdrill/README.md)
-14. [`pcbdoc_create_cavity_placements`](../examples/pcbdoc_create_cavity_placements/README.md)
-15. [`pcbdoc_create_rigid_flex_multibranch`](../examples/pcbdoc_create_rigid_flex_multibranch/README.md)
-16. [`pcbdoc_flex_topology_report`](../examples/pcbdoc_flex_topology_report/README.md)
-17. [`pcbdoc_bom`](../examples/pcbdoc_bom/README.md)
-18. [`pcbdoc_pick_n_place`](../examples/pcbdoc_pick_n_place/README.md)
-19. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
-20. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
-21. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
-22. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
-23. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
-24. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
-25. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
-26. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
-27. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
-28. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
-29. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
-30. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
-31. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
-32. [`pcbdoc_add_custom_pad_region_outline`](../examples/pcbdoc_add_custom_pad_region_outline/README.md)
-33. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
-34. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
-35. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
-36. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
-37. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
-38. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
-39. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
+5. [`pcbdoc_create_mechanical_layer_kinds`](../examples/pcbdoc_create_mechanical_layer_kinds/README.md)
+6. [`pcbdoc_create_custom_rigid_stack`](../examples/pcbdoc_create_custom_rigid_stack/README.md)
+7. [`pcbdoc_create_impedance_rigid_stack`](../examples/pcbdoc_create_impedance_rigid_stack/README.md)
+8. [`pcbdoc_create_flex_stiffener`](../examples/pcbdoc_create_flex_stiffener/README.md)
+9. [`pcbdoc_create_rigid_flex_split_lines`](../examples/pcbdoc_create_rigid_flex_split_lines/README.md)
+10. [`pcbdoc_create_flex_in_cutout`](../examples/pcbdoc_create_flex_in_cutout/README.md)
+11. [`pcbdoc_create_rigid_flex_branch`](../examples/pcbdoc_create_rigid_flex_branch/README.md)
+12. [`pcbdoc_create_rigid_flex_branch_intrusion`](../examples/pcbdoc_create_rigid_flex_branch_intrusion/README.md)
+13. [`pcbdoc_create_rigid_flex_two_branch`](../examples/pcbdoc_create_rigid_flex_two_branch/README.md)
+14. [`pcbdoc_create_rigid_flex_impedance_backdrill`](../examples/pcbdoc_create_rigid_flex_impedance_backdrill/README.md)
+15. [`pcbdoc_create_cavity_placements`](../examples/pcbdoc_create_cavity_placements/README.md)
+16. [`pcbdoc_create_rigid_flex_multibranch`](../examples/pcbdoc_create_rigid_flex_multibranch/README.md)
+17. [`pcbdoc_flex_topology_report`](../examples/pcbdoc_flex_topology_report/README.md)
+18. [`pcbdoc_bom`](../examples/pcbdoc_bom/README.md)
+19. [`pcbdoc_pick_n_place`](../examples/pcbdoc_pick_n_place/README.md)
+20. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
+21. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
+22. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
+23. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
+24. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
+25. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
+26. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
+27. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
+28. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
+29. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
+30. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
+31. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
+32. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
+33. [`pcbdoc_add_custom_pad_region_outline`](../examples/pcbdoc_add_custom_pad_region_outline/README.md)
+34. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
+35. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
+36. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
+37. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
+38. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
+39. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
+40. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.
