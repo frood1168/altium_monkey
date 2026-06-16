@@ -19,6 +19,9 @@ Symbol properties such as `symbol.pins`, `symbol.parameters`,
 
 Add symbol records with `symbol.add_object(...)` or symbol helper methods. Keep
 visual ordering in mind: body graphics should usually be behind pins and text.
+That order is preserved when a symbol is inserted into a SchDoc through
+`AltiumSchDoc.add_component_from_library(...)` and when placed symbols are
+extracted back to SchLib.
 
 ## Units
 

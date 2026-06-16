@@ -4,8 +4,9 @@ Shared helpers for schematic component insertion from SchLib symbols.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, cast
 
 from .altium_record_sch__designator import AltiumSchDesignator
 from .altium_record_sch__label import AltiumSchLabel
@@ -18,6 +19,91 @@ if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
     from .altium_record_sch__component import AltiumSchComponent
     from .altium_schlib import AltiumSchLib
+
+
+@dataclass(frozen=True)
+class ClonedSymbolChildren:
+    """
+    Cloned SchLib children grouped for bookkeeping and ordered for placement.
+    """
+
+    ordered_children: list[object]
+    graphics: list[object]
+    pins: list[AltiumSchPin]
+    parameters: list[object]
+    images: list[object]
+    labels: list[AltiumSchLabel]
+    text_frames: list[AltiumSchTextFrame]
+
+
+_CloneKind = Literal[
+    "graphic",
+    "pin",
+    "parameter",
+    "image",
+    "label",
+    "text_frame",
+]
+
+
+@dataclass(frozen=True)
+class _SymbolChildIndex:
+    graphics: set[int]
+    pins: set[int]
+    parameters: set[int]
+    designators: set[int]
+    images: set[int]
+    labels: set[int]
+    text_frames: set[int]
+
+
+@dataclass
+class _CloneBuckets:
+    ordered_children: list[object]
+    graphics: list[object]
+    pins: list[AltiumSchPin]
+    parameters: list[object]
+    images: list[object]
+    labels: list[AltiumSchLabel]
+    text_frames: list[AltiumSchTextFrame]
+
+    @classmethod
+    def empty(cls) -> "_CloneBuckets":
+        return cls(
+            ordered_children=[],
+            graphics=[],
+            pins=[],
+            parameters=[],
+            images=[],
+            labels=[],
+            text_frames=[],
+        )
+
+    def append(self, kind: _CloneKind, child: object) -> None:
+        self.ordered_children.append(child)
+        if kind == "graphic":
+            self.graphics.append(child)
+        elif kind == "pin":
+            self.pins.append(cast(AltiumSchPin, child))
+        elif kind == "parameter":
+            self.parameters.append(child)
+        elif kind == "image":
+            self.images.append(child)
+        elif kind == "label":
+            self.labels.append(cast(AltiumSchLabel, child))
+        elif kind == "text_frame":
+            self.text_frames.append(cast(AltiumSchTextFrame, child))
+
+    def to_public(self) -> ClonedSymbolChildren:
+        return ClonedSymbolChildren(
+            ordered_children=self.ordered_children,
+            graphics=self.graphics,
+            pins=self.pins,
+            parameters=self.parameters,
+            images=self.images,
+            labels=self.labels,
+            text_frames=self.text_frames,
+        )
 
 
 def remap_font_ids(obj: object, font_id_map: dict[int, int]) -> None:
@@ -87,6 +173,138 @@ def belongs_to_part(obj: object, part_id: int) -> bool:
     return owner_part_id == -1 or owner_part_id == part_id
 
 
+def _ordered_symbol_children(symbol: object) -> list[object]:
+    """
+    Return symbol children in source order with typed-view fallbacks.
+    """
+    ordered: list[object] = list(getattr(symbol, "objects", []) or [])
+    seen = {id(child) for child in ordered}
+    fallback_children: list[object] = []
+
+    for collection_name in (
+        "graphic_primitives",
+        "pins",
+        "parameters",
+        "designators",
+        "images",
+        "labels",
+        "text_frames",
+    ):
+        for child in getattr(symbol, collection_name, []) or []:
+            child_id = id(child)
+            if child_id in seen:
+                continue
+            seen.add(child_id)
+            fallback_children.append(child)
+
+    fallback_children.sort(
+        key=lambda child: int(getattr(child, "_record_index", 999999999) or 999999999)
+    )
+    return ordered + fallback_children
+
+
+def _symbol_child_index(symbol: object) -> _SymbolChildIndex:
+    return _SymbolChildIndex(
+        graphics={
+            id(graphic)
+            for graphic in getattr(symbol, "graphic_primitives", [])
+            if not isinstance(graphic, AltiumSchPin)
+        },
+        pins={id(pin) for pin in getattr(symbol, "pins", [])},
+        parameters={id(param) for param in getattr(symbol, "parameters", [])},
+        designators={id(param) for param in getattr(symbol, "designators", [])},
+        images={id(image) for image in getattr(symbol, "images", [])},
+        labels={id(label) for label in getattr(symbol, "labels", [])},
+        text_frames={
+            id(text_frame) for text_frame in getattr(symbol, "text_frames", [])
+        },
+    )
+
+
+def _child_clone_kind(source_id: int, index: _SymbolChildIndex) -> _CloneKind | None:
+    if source_id in index.graphics:
+        return "graphic"
+    if source_id in index.pins:
+        return "pin"
+    if source_id in index.parameters or source_id in index.designators:
+        return "parameter"
+    if source_id in index.images:
+        return "image"
+    if source_id in index.labels:
+        return "label"
+    if source_id in index.text_frames:
+        return "text_frame"
+    return None
+
+
+def _clone_child_in_schematic_space(
+    source_child: object,
+    component: "AltiumSchComponent",
+    *,
+    font_id_map: dict[int, int],
+) -> object:
+    transformed = to_schematic_space(source_child, component, regenerate_id=True)
+    remap_font_ids(transformed, font_id_map)
+    return transformed
+
+
+def _is_designator_child(source_child: object) -> bool:
+    if isinstance(source_child, AltiumSchDesignator):
+        return True
+    name = getattr(source_child, "name", "")
+    return bool(name) and str(name).upper() == "DESIGNATOR"
+
+
+def _clone_symbol_child(
+    kind: _CloneKind,
+    source_child: object,
+    component: "AltiumSchComponent",
+    *,
+    designator: str,
+    part_id: int,
+    font_id_map: dict[int, int],
+) -> object | None:
+    if kind != "parameter" and not belongs_to_part(source_child, part_id):
+        return None
+
+    if kind == "image":
+        return to_schematic_space(source_child, component, regenerate_id=True)
+
+    transformed = _clone_child_in_schematic_space(
+        source_child,
+        component,
+        font_id_map=font_id_map,
+    )
+    if kind == "pin":
+        setattr(transformed, "_source_is_binary", False)
+    elif kind == "parameter" and _is_designator_child(source_child):
+        setattr(transformed, "text", designator)
+    return transformed
+
+
+def _ensure_designator(
+    buckets: _CloneBuckets,
+    component: "AltiumSchComponent",
+    designator: str,
+) -> None:
+    if _contains_designator(buckets.parameters):
+        return
+
+    designator_record = AltiumSchDesignator()
+    designator_record.text = designator
+    designator_record.location = CoordPoint.from_mils(
+        component.location.x_mils,
+        component.location.y_mils + 100,
+    )
+    designator_record.unique_id = generate_unique_id()
+    buckets.parameters.append(designator_record)
+    buckets.ordered_children.append(designator_record)
+
+
+def _contains_designator(parameters: list[object]) -> bool:
+    return any(_is_designator_child(param) for param in parameters)
+
+
 def clone_symbol_children(
     symbol: object,
     component: "AltiumSchComponent",
@@ -94,91 +312,27 @@ def clone_symbol_children(
     designator: str,
     part_id: int,
     font_id_map: dict[int, int],
-) -> tuple[
-    list[object],
-    list[AltiumSchPin],
-    list[object],
-    list[object],
-    list[AltiumSchLabel],
-    list[AltiumSchTextFrame],
-]:
+) -> ClonedSymbolChildren:
     """
     Clone and transform library symbol children into schematic space.
     """
-    graphics: list[object] = []
-    for graphic in getattr(symbol, "graphic_primitives", []):
-        if isinstance(graphic, AltiumSchPin):
-            continue
-        if not belongs_to_part(graphic, part_id):
-            continue
-        transformed = to_schematic_space(graphic, component, regenerate_id=True)
-        remap_font_ids(transformed, font_id_map)
-        graphics.append(transformed)
+    index = _symbol_child_index(symbol)
+    buckets = _CloneBuckets.empty()
 
-    pins: list[AltiumSchPin] = []
-    for pin in getattr(symbol, "pins", []):
-        if not belongs_to_part(pin, part_id):
+    for source_child in _ordered_symbol_children(symbol):
+        kind = _child_clone_kind(id(source_child), index)
+        if kind is None:
             continue
-        transformed_pin = to_schematic_space(pin, component, regenerate_id=True)
-        remap_font_ids(transformed_pin, font_id_map)
-        transformed_pin._source_is_binary = False
-        pins.append(transformed_pin)
-
-    parameters: list[object] = []
-    for param in getattr(symbol, "parameters", []):
-        transformed = to_schematic_space(param, component, regenerate_id=True)
-        remap_font_ids(transformed, font_id_map)
-        if (
-            hasattr(param, "name")
-            and getattr(param, "name", "")
-            and str(getattr(param, "name")).upper() == "DESIGNATOR"
-        ):
-            transformed.text = designator
-        parameters.append(transformed)
-
-    has_designator = any(
-        isinstance(param, AltiumSchDesignator)
-        or (
-            hasattr(param, "name")
-            and getattr(param, "name", "")
-            and str(getattr(param, "name")).upper() == "DESIGNATOR"
-        )
-        for param in parameters
-    )
-    if not has_designator:
-        designator_record = AltiumSchDesignator()
-        designator_record.text = designator
-        designator_record.location = CoordPoint.from_mils(
-            component.location.x_mils,
-            component.location.y_mils + 100,
-        )
-        designator_record.unique_id = generate_unique_id()
-        parameters.append(designator_record)
-
-    images: list[object] = []
-    for image in getattr(symbol, "images", []):
-        if not belongs_to_part(image, part_id):
-            continue
-        images.append(to_schematic_space(image, component, regenerate_id=True))
-
-    labels: list[AltiumSchLabel] = []
-    for label in getattr(symbol, "labels", []):
-        if not belongs_to_part(label, part_id):
-            continue
-        transformed = to_schematic_space(label, component, regenerate_id=True)
-        remap_font_ids(transformed, font_id_map)
-        labels.append(transformed)
-
-    text_frames: list[AltiumSchTextFrame] = []
-    for text_frame in getattr(symbol, "text_frames", []):
-        if not belongs_to_part(text_frame, part_id):
-            continue
-        transformed = to_schematic_space(
-            text_frame,
+        transformed = _clone_symbol_child(
+            kind,
+            source_child,
             component,
-            regenerate_id=True,
+            designator=designator,
+            part_id=part_id,
+            font_id_map=font_id_map,
         )
-        remap_font_ids(transformed, font_id_map)
-        text_frames.append(transformed)
+        if transformed is not None:
+            buckets.append(kind, transformed)
 
-    return graphics, pins, parameters, images, labels, text_frames
+    _ensure_designator(buckets, component, designator)
+    return buckets.to_public()

@@ -1,3 +1,43 @@
+# altium-monkey 2026.06.16 Release Notes
+
+Package version: `2026.6.16`
+
+`2026.06.16` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.16`.
+
+This release fixes SchLib-to-SchDoc component insertion order so schematic
+symbol draw order is preserved through placement, save/reopen, and symbol
+extraction.
+
+## SchLib Component Insertion Order
+
+`AltiumSchDoc.add_component_from_library(...)` now preserves the source
+`AltiumSymbol.objects` child order when cloning pins, body graphics,
+designators, labels, images, text frames, and parameters into a placed
+component.
+
+This matters for symbols where body graphics intentionally sit in front of or
+behind pins. Earlier insertion grouped cloned records by type, which could move
+rounded rectangles ahead of pins and change the visible Altium z-order.
+
+SchLib designator records are also preserved during insertion when the source
+symbol provides them; their text is still replaced with the requested placed
+designator.
+
+## Validation
+
+This release was checked with focused SchLib insertion tests that create a
+SchDoc, place symbols from SchLib, save and reopen the SchDoc, extract the
+placed symbol back to SchLib, and assert that source and extracted child order
+match. The corpus-backed checks cover both the original `SCTA1A0103.SchLib`
+order and the intentional inverse order in `SCTA1A0103_pin_on_top.SchLib` so
+the release proves preservation rather than forcing one preferred order.
+
+The focused public example checks and `altium_cruncher` mate tests also passed
+against the patched local `altium-monkey` source.
+
+---
+
 # altium-monkey 2026.06.14 Release Notes
 
 Package version: `2026.6.14`

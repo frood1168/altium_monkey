@@ -82,7 +82,8 @@ For SchLib creation and mutation, work through `AltiumSchLib` and
 `AltiumSymbol`. Add a symbol to the library, add pins and graphics to the
 symbol, then save the library. Symbol object order matters visually because
 schematic library graphics can cover pins or text, so preserve intentional
-ordering when changing existing symbols.
+ordering when changing existing symbols. `AltiumSchDoc.add_component_from_library(...)`
+preserves that order when placing a symbol into a schematic.
 
 For PcbDoc and PcbLib authoring, use the high-level `add_*` methods. They keep
 the record lists, net tables, embedded model streams, layer references, and

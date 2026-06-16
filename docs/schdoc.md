@@ -58,6 +58,11 @@ components.
 Use `schdoc.add_component_from_library(...)` for normal component insertion from
 SchLib.
 
+When placing a SchLib symbol, `add_component_from_library(...)` preserves the
+symbol's child record order. This keeps intentional schematic draw order intact
+for cases where pins, rounded rectangles, designators, and other visible child
+records overlap.
+
 ## Templates
 
 Use `clear_template()`, `apply_template(...)`, and `extract_template(...)` for

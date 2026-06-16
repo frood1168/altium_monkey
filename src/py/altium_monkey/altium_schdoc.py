@@ -2731,14 +2731,7 @@ class AltiumSchDoc(JsonApplyMixin):
 
         self.add_object(component)
 
-        (
-            graphics,
-            pins,
-            parameters,
-            images,
-            labels,
-            text_frames,
-        ) = clone_symbol_children(
+        cloned_children = clone_symbol_children(
             symbol,
             component,
             designator=designator,
@@ -2746,17 +2739,7 @@ class AltiumSchDoc(JsonApplyMixin):
             font_id_map=font_id_map,
         )
 
-        for child in graphics:
-            self.add_object(child, owner=component)
-        for child in pins:
-            self.add_object(child, owner=component)
-        for child in parameters:
-            self.add_object(child, owner=component)
-        for child in images:
-            self.add_object(child, owner=component)
-        for child in labels:
-            self.add_object(child, owner=component)
-        for child in text_frames:
+        for child in cloned_children.ordered_children:
             self.add_object(child, owner=component)
 
         component.index_in_sheet = self._get_object_position(component)
