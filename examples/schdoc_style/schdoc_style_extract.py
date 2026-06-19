@@ -16,7 +16,6 @@ from altium_monkey import (
     AltiumSchParameter,
     AltiumSchPolyline,
     AltiumSchRectangle,
-    AltiumSchSignalHarness,
     ColorValue,
     NoErcSymbol,
     SchHorizontalAlign,
@@ -67,6 +66,7 @@ _SECTION_ORDER = [
     "wire",
     "net_label",
     "port",
+    "port.cross_ref",
     "power_port",
     "cross_sheet_connector",
     "note",
@@ -142,7 +142,19 @@ class StyleCollector:
     def to_toml(self, header_lines: list[str]) -> str:
         lines: list[str] = list(header_lines) + [""]
 
+        _fixed = set(_SECTION_ORDER)
+        param_subsections = sorted(
+            s for s in self._data
+            if s.startswith("component.parameter.") and s not in _fixed
+        )
+
+        sections_to_emit: list[str] = []
         for section in _SECTION_ORDER:
+            sections_to_emit.append(section)
+            if section == "component.parameter":
+                sections_to_emit.extend(param_subsections)
+
+        for section in sections_to_emit:
             props = self._data.get(section, {})
             if not props:
                 continue
@@ -201,6 +213,17 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
             c.record("port", "alignment", al_name)
         c.record("port", "cross_reference", port.cross_reference)
 
+    _component_param_ids = {
+        id(p)
+        for comp in schdoc.components
+        for p in getattr(comp, "parameters", [])
+        if isinstance(p, AltiumSchParameter)
+    }
+    for param in schdoc.objects.of_type(AltiumSchParameter):
+        if id(param) not in _component_param_ids and param.name == "CrossRef":
+            c.record_font("port.cross_ref", param)
+            c.record_color("port.cross_ref", param, "color", "color")
+
     for power_port in schdoc.power_ports:
         c.record_font("power_port", power_port)
         c.record_color("power_port", power_port, "color", "color")
@@ -228,14 +251,6 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
         symbol_name = _NO_ERC_SYMBOL_NAME.get(int(no_erc.symbol))
         if symbol_name is not None:
             c.record("no_erc", "symbol", symbol_name)
-
-    for signal_harness in schdoc.objects.of_type(AltiumSchSignalHarness):
-        c.record_color("signal_harness", signal_harness, "color", "color")
-        c.record_line_width("signal_harness", signal_harness)
-
-    for connector in schdoc.harness_connectors:
-        c.record_color("harness_connector", connector, "color", "color")
-        c.record_color("harness_connector", connector, "area_color", "area_color")
 
     for entry in schdoc.harness_entries:
         c.record_font("harness_entry", entry)
@@ -265,8 +280,10 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
                 c.record_font("component.designator", parameter)
                 c.record_color("component.designator", parameter, "color", "color")
             elif isinstance(parameter, AltiumSchParameter) and not parameter.is_hidden:
-                c.record_font("component.parameter", parameter)
-                c.record_color("component.parameter", parameter, "color", "color")
+                param_name = parameter.name or ""
+                section = f"component.parameter.{param_name}" if param_name else "component.parameter"
+                c.record_font(section, parameter)
+                c.record_color(section, parameter, "color", "color")
 
         for graphic in getattr(component, "graphics", []):
             if isinstance(graphic, AltiumSchRectangle):

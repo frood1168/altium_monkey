@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import shutil
 import sys
@@ -198,6 +199,19 @@ def apply_layout_to_schdoc(
     }
 
 
+def _take_history_snapshot(output_dir: Path, output_paths: list[Path]) -> Path | None:
+    """Copy existing output SchDocs to clean/history/<timestamp>/ before overwriting."""
+    existing = [p for p in output_paths if p.exists()]
+    if not existing:
+        return None
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    snap_dir = output_dir / "history" / timestamp
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    for src in existing:
+        shutil.copy2(src, snap_dir / src.name)
+    return snap_dir
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -249,6 +263,9 @@ def main() -> None:
         raise RuntimeError(f"No SchDoc files found in project: {prjpcb_path}")
 
     output_prjpcb = output_dir / prjpcb_path.name
+    output_paths = [output_dir / p.name for p in schdoc_paths]
+    snapshot_dir = _take_history_snapshot(output_dir, output_paths)
+
     documents = [
         apply_layout_to_schdoc(p, output_dir / p.name, layout)
         for p in schdoc_paths
@@ -291,6 +308,8 @@ def main() -> None:
             " (lib_ref in template but rotation not — all params hidden)"
         )
     print(f"Total parameter placements: {total_placements}")
+    if snapshot_dir:
+        print(f"History snapshot: {snapshot_dir}")
     print(f"Wrote SchDocs: {output_dir}")
     print(f"Wrote manifest: {manifest_paths[0]}")
 

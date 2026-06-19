@@ -1471,6 +1471,20 @@ requires_extra = []
 tags = ["schdoc", "parameter", "layout", "mutation", "project", "template"]
 
 [[examples]]
+id = "schdoc_pin_connections"
+title = "Generate a pin-connection table for a component"
+summary = "Given a project file and component designator, compile the netlist, walk all SchDocs for matching pins, and write a CSV of Pin, Pin Name, and connected Net."
+areas = ["schdoc", "design", "netlist"]
+status = "ready"
+entrypoint = "schdoc_pin_connections/schdoc_pin_connections.py"
+doc = "schdoc_pin_connections/README.md"
+inputs = []
+assets = []
+outputs = []
+requires_extra = []
+tags = ["schdoc", "netlist", "pin", "connections", "csv", "report", "multi-part"]
+
+[[examples]]
 id = "schdoc_svg"
 title = "Render project schematics to SVG"
 summary = "Open the Hydroscope PrjPcb, pass project parameters into the schematic SVG renderer, and write one SVG per schematic page."

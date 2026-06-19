@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import shutil
 import sys
@@ -25,7 +26,6 @@ from altium_monkey import (
     AltiumSchPolygon,
     AltiumSchPolyline,
     AltiumSchRectangle,
-    AltiumSchSignalHarness,
     ColorValue,
     LineStyle,
     LineWidth,
@@ -147,10 +147,15 @@ def _apply_component_style(
                 parameter.color = _color(designator_cfg["color"])
             counts["component_designators"] += 1
         elif isinstance(parameter, AltiumSchParameter) and not parameter.is_hidden:
-            if _has_font_keys(parameter_cfg):
-                parameter.font = _resolve_font(parameter, parameter_cfg)
-            if "color" in parameter_cfg:
-                parameter.color = _color(parameter_cfg["color"])
+            param_name = parameter.name or ""
+            named_cfg = parameter_cfg.get(param_name) if param_name else None
+            named_cfg = named_cfg if isinstance(named_cfg, dict) else {}
+            font_cfg = named_cfg if _has_font_keys(named_cfg) else parameter_cfg
+            color_cfg = named_cfg if "color" in named_cfg else parameter_cfg
+            if _has_font_keys(font_cfg):
+                parameter.font = _resolve_font(parameter, font_cfg)
+            if "color" in color_cfg:
+                parameter.color = _color(color_cfg["color"])
             counts["component_parameters"] += 1
 
     for graphic in getattr(component, "graphics", []):
@@ -229,6 +234,22 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             port.cross_reference = bool(port_cfg["cross_reference"])
         counts["ports"] += 1
 
+    cross_ref_cfg = port_cfg.get("cross_ref", {})
+    if cross_ref_cfg:
+        _component_param_ids = {
+            id(p)
+            for comp in schdoc.components
+            for p in getattr(comp, "parameters", [])
+            if isinstance(p, AltiumSchParameter)
+        }
+        for param in schdoc.objects.of_type(AltiumSchParameter):
+            if id(param) not in _component_param_ids and param.name == "CrossRef":
+                if _has_font_keys(cross_ref_cfg):
+                    param.font = _resolve_font(param, cross_ref_cfg)
+                if "color" in cross_ref_cfg:
+                    param.color = _color(cross_ref_cfg["color"])
+                counts["port_cross_refs"] += 1
+
     power_port_cfg = style.get("power_port", {})
     for power_port in schdoc.power_ports:
         if _has_font_keys(power_port_cfg):
@@ -275,24 +296,6 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
             if symbol_value is not None:
                 no_erc.symbol = symbol_value
         counts["no_ercs"] += 1
-
-    signal_harness_cfg = style.get("signal_harness", {})
-    for signal_harness in schdoc.objects.of_type(AltiumSchSignalHarness):
-        if "color" in signal_harness_cfg:
-            signal_harness.color = _color(signal_harness_cfg["color"])
-        if "line_width" in signal_harness_cfg:
-            lw = _LINE_WIDTH_MAP.get(signal_harness_cfg["line_width"].upper())
-            if lw is not None:
-                signal_harness.line_width = lw
-        counts["signal_harnesses"] += 1
-
-    harness_connector_cfg = style.get("harness_connector", {})
-    for connector in schdoc.harness_connectors:
-        if "color" in harness_connector_cfg:
-            connector.color = _color(harness_connector_cfg["color"])
-        if "area_color" in harness_connector_cfg:
-            connector.area_color = _color(harness_connector_cfg["area_color"])
-        counts["harness_connectors"] += 1
 
     harness_entry_cfg = style.get("harness_entry", {})
     for entry in schdoc.harness_entries:
@@ -356,6 +359,19 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
     }
 
 
+def _take_history_snapshot(output_dir: Path, output_paths: list[Path]) -> Path | None:
+    """Copy existing output SchDocs to clean/history/<timestamp>/ before overwriting."""
+    existing = [p for p in output_paths if p.exists()]
+    if not existing:
+        return None
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    snap_dir = output_dir / "history" / timestamp
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    for src in existing:
+        shutil.copy2(src, snap_dir / src.name)
+    return snap_dir
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Apply a style.toml config to every SchDoc in an Altium project.",
@@ -393,6 +409,9 @@ def main() -> None:
 
     project_dir = prjpcb_path.parent
     output_prjpcb = output_dir / prjpcb_path.name
+    output_paths = [output_dir / p.relative_to(project_dir) for p in schdoc_paths]
+    snapshot_dir = _take_history_snapshot(output_dir, output_paths)
+
     documents = [
         style_schdoc(p, output_dir / p.relative_to(project_dir), style)
         for p in schdoc_paths
@@ -421,6 +440,8 @@ def main() -> None:
     if totals:
         summary = ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in sorted(totals.items()) if v)
         print(f"Mutations: {summary}")
+    if snapshot_dir:
+        print(f"History snapshot: {snapshot_dir}")
     print(f"Wrote SchDocs: {output_dir}")
     print(f"Wrote manifest: {manifest_path}")
 
