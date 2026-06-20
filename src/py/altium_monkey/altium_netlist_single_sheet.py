@@ -373,10 +373,12 @@ class AltiumNetlistSingleSheetCompiler:
                 if not entry_name:
                     continue
 
-                # Compute connection hotspot based on entry side
-                dist = (
-                    entry.distance_from_top * 10
-                )  # Convert to CoordPoint (10-mil) units
+                # Compute connection hotspot based on entry side.
+                # Include the fractional DistanceFromTop_Frac1 component so
+                # half-grid entries resolve to the correct hotspot.
+                dist = round(
+                    entry._distance_from_top_native_units()
+                )  # CoordPoint (10-mil) units, fraction-aware
                 side = entry.side
 
                 if side == 0:  # Left

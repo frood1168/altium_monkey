@@ -116,7 +116,9 @@ def _build_port_location_map(schdoc: "AltiumSchDoc") -> dict[tuple[int, int], st
                 entry_x = record.location.x + record.x_size
             else:
                 entry_x = record.location.x
-            entry_y = record.location.y - distance_from_top * 10
+            # Include the fractional DistanceFromTop_Frac1 component so half-grid
+            # harness sheet entries resolve to the correct hotspot.
+            entry_y = record.location.y - round(entry._distance_from_top_native_units())
             port_location_map[(entry_x, entry_y)] = entry_name
 
     return port_location_map

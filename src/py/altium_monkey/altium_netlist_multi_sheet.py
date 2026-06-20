@@ -736,7 +736,13 @@ class AltiumNetlistMultiSheetCompiler:
                 )
 
                 for entry in connector.entries:
-                    entry_y = connector.location.y - entry.distance_from_top * 10
+                    # Harness-entry DistanceFromTop carries a fractional component
+                    # (DistanceFromTop_Frac1). Using only the integer part places
+                    # half-grid entries 5 units off, so the wire lookup misses and
+                    # the harness member never propagates across sheets.
+                    entry_y = connector.location.y - round(
+                        entry._distance_from_top_native_units()
+                    )
                     entry_x_left = connector.location.x
                     entry_x_right = connector.location.x + connector.xsize
 
