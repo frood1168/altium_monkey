@@ -15,6 +15,7 @@ from altium_monkey import (
     AltiumSchDoc,
     AltiumSchParameter,
     AltiumSchPin,
+    ComponentKind,
     CoordPoint,
     TextJustification,
     TextOrientation,
@@ -38,6 +39,22 @@ _JUST_MAP = {
     "CENTER_LEFT": 3,  "CENTER_CENTER": 4, "CENTER_RIGHT": 5,
     "TOP_LEFT":    6,  "TOP_CENTER":    7, "TOP_RIGHT":    8,
 }
+
+
+_DNP_PARAM_NAMES: frozenset[str] = frozenset({
+    "value", "resistance", "inductance", "capacitance",
+    "voltage", "current", "power", "tolerance",
+})
+
+
+def _is_dnp(component: object) -> bool:
+    for param in getattr(component, "parameters", []):
+        if not isinstance(param, AltiumSchParameter):
+            continue
+        if param.name and param.name.lower() in _DNP_PARAM_NAMES:
+            if (param.text or "").strip().upper() == "DNP":
+                return True
+    return False
 
 
 def _param_name(param: object) -> str | None:
@@ -157,6 +174,8 @@ def apply_layout_to_schdoc(
     matched = 0
     rot_missing = 0
     defaulted = 0
+    dnp_set = 0
+    dnp_reset = 0
 
     for component in schdoc.components:
         lib_ref = component.lib_reference
@@ -186,6 +205,14 @@ def apply_layout_to_schdoc(
             _apply_default_visibility(component, default_vis, counts)
             defaulted += 1
 
+        if _is_dnp(component):
+            if component.component_kind != ComponentKind.STANDARD_NO_BOM:
+                component.component_kind = ComponentKind.STANDARD_NO_BOM
+                dnp_set += 1
+        elif component.component_kind == ComponentKind.STANDARD_NO_BOM:
+            component.component_kind = ComponentKind.STANDARD
+            dnp_reset += 1
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     schdoc.save(output_path)
 
@@ -195,6 +222,8 @@ def apply_layout_to_schdoc(
         "components_matched": matched,
         "components_rotation_missing": rot_missing,
         "components_defaulted": defaulted,
+        "dnp_set_no_bom": dnp_set,
+        "dnp_reset_to_standard": dnp_reset,
         "parameter_placements": dict(sorted(counts.items())),
     }
 
@@ -297,6 +326,8 @@ def main() -> None:
     total_matched = sum(doc["components_matched"] for doc in documents)
     total_rot_missing = sum(doc["components_rotation_missing"] for doc in documents)
     total_defaulted = sum(doc["components_defaulted"] for doc in documents)
+    total_dnp_set = sum(doc["dnp_set_no_bom"] for doc in documents)
+    total_dnp_reset = sum(doc["dnp_reset_to_standard"] for doc in documents)
 
     print(f"Loaded project: {prjpcb_path}")
     print(f"Layout config: {layout_toml}")
@@ -308,6 +339,8 @@ def main() -> None:
             " (lib_ref in template but rotation not — all params hidden)"
         )
     print(f"Total parameter placements: {total_placements}")
+    if total_dnp_set or total_dnp_reset:
+        print(f"DNP → Standard (No BOM): {total_dnp_set}  reset → Standard: {total_dnp_reset}")
     if snapshot_dir:
         print(f"History snapshot: {snapshot_dir}")
     print(f"Wrote SchDocs: {output_dir}")
