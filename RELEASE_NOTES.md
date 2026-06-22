@@ -1,3 +1,61 @@
+# altium-monkey 2026.06.21 Release Notes
+
+Package version: `2026.6.21`
+
+`2026.06.21` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.21`.
+
+This release fixes focused schematic-library and PCB library/document behavior
+reported from real Altium workflows.
+
+## SchLib Comment And Designator Visibility
+
+`AltiumSchLib` now supports `show_comments_designators=True` in the constructor
+and a `show_comments_designators` property. When enabled, generated SchLib files
+write `AlwaysShowCD=T` in the FileHeader so Altium's library editor opens with
+symbol comments and designators visible.
+
+The default remains unchanged for compatibility: newly authored libraries omit
+the field unless the option is enabled. Parsed libraries hydrate the property
+from existing FileHeader data when present.
+
+The public `hello_schlib` example now opts into this setting so its generated
+comment and designator are visible in Altium without manually changing document
+options.
+
+## SchDoc Vertical Port Rendering
+
+SchDoc SVG rendering now matches Altium for vertically oriented page-level
+ports. Port bodies, connection anchors, and text labels follow the native
+on-screen geometry for vertical port styles instead of leaving port labels
+horizontal.
+
+## Legacy Rounded PcbLib Pads
+
+PcbLib footprint SVG and placed PcbDoc SVG rendering now handles legacy pads
+stored as raw Altium `TShape.eRounded` with unequal dimensions and no modern
+alternate-shape record. These pads render as native obround/capsule geometry.
+
+PcbLib footprint SVG previews now also treat rule-based solder-mask and
+paste-mask expansion as zero when no board-rule context exists, while preserving
+manual expansion values.
+
+## Pad Testpoint Flags
+
+PcbLib and PcbDoc pad testpoint flags now decode and author the observed Altium
+fields. Fabrication top pads use the Altium `flags1 0x80` bit, and assembly
+top/bottom pads use the SubRecord 5 tail bytes saved by Altium instead of
+unrelated flag bits.
+
+## Validation
+
+This release was prepared with focused SchLib FileHeader coverage, the updated
+public `hello_schlib` sample, focused SchDoc SVG checks, PcbLib/PcbDoc rounded
+pad SVG and IPC/Draftsman oracle coverage, pad testpoint flag fixtures, and the
+release validation pipeline.
+
+---
+
 # altium-monkey 2026.06.16 Release Notes
 
 Package version: `2026.6.16`

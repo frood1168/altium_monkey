@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import zlib
+from collections.abc import MutableMapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -26,7 +27,13 @@ from .altium_font_manager import FontIDManager
 from .altium_json_apply_helpers import JsonApplyMixin
 from .altium_object_collection import ObjectCollection, ObjectCollectionView
 from .altium_ole import AltiumOleFile, AltiumOleWriter
-from .altium_record_types import CoordPoint, LineWidth, SchRecordType, TextOrientation
+from .altium_record_types import (
+    CoordPoint,
+    LineWidth,
+    SchRecordType,
+    TextOrientation,
+    parse_bool,
+)
 from .altium_sch_binding import SchematicBindingContext
 from .altium_sch_implementation_helpers import (
     build_footprint_implementation_payload,
@@ -1488,7 +1495,13 @@ class AltiumSchLib(JsonApplyMixin):
     Complete parser for Altium .SchLib files.
     """
 
-    def __init__(self, filepath: Path | str | None = None, debug: bool = False) -> None:
+    def __init__(
+        self,
+        filepath: Path | str | None = None,
+        debug: bool = False,
+        *,
+        show_comments_designators: bool = False,
+    ) -> None:
         """
         Create an AltiumSchLib.
 
@@ -1496,20 +1509,71 @@ class AltiumSchLib(JsonApplyMixin):
                     filepath: Path to .SchLib binary file to parse.
                               If None, creates an empty library for authoring.
                     debug: Enable debug output.
+                    show_comments_designators: Write the SchLib document option
+                              that makes Altium show component comments and
+                              designators by default in the library editor.
         """
         self.symbols: list[AltiumSymbol] = []
         self.font_manager: FontIDManager | None = None
         self.file_header = None
         self.embedded_images = {}
         self.debug = debug
+        self._show_comments_designators = bool(show_comments_designators)
 
         if filepath is not None:
             self.filepath = Path(filepath)
             self.filename = self.filepath.name
             self._parse()
+            if show_comments_designators:
+                self.show_comments_designators = True
+            else:
+                self._load_show_comments_designators_from_header()
         else:
             self.filepath = None
             self.filename = ""
+
+    @staticmethod
+    def _remove_always_show_cd_fields(header: MutableMapping[str, object]) -> None:
+        """
+        Remove any casing variant of the AlwaysShowCD FileHeader field.
+        """
+        for key in list(header.keys()):
+            if key.upper() == "ALWAYSSHOWCD":
+                header.pop(key, None)
+
+    def _load_show_comments_designators_from_header(self) -> None:
+        """
+        Hydrate the OOP option from a parsed SchLib FileHeader when present.
+        """
+        if not self.file_header:
+            return
+        for key, value in self.file_header.items():
+            if key.upper() == "ALWAYSSHOWCD":
+                self._show_comments_designators = parse_bool(value)
+                return
+
+    @property
+    def show_comments_designators(self) -> bool:
+        """
+        Whether saved SchLib files ask Altium to show comments/designators.
+
+        The default for newly authored libraries is False to preserve existing
+        output. Set this to True to emit ``AlwaysShowCD=T`` in the SchLib
+        FileHeader.
+        """
+        return self._show_comments_designators
+
+    @show_comments_designators.setter
+    def show_comments_designators(self, value: bool) -> None:
+        enabled = bool(value)
+        self._show_comments_designators = enabled
+        if not self.file_header:
+            return
+        self._remove_always_show_cd_fields(
+            cast(MutableMapping[str, object], self.file_header)
+        )
+        if enabled:
+            self.file_header["AlwaysShowCD"] = "T"
 
     def _ensure_font_manager(self) -> FontIDManager:
         """
@@ -1918,6 +1982,8 @@ class AltiumSchLib(JsonApplyMixin):
             "Display_Unit": "0",
             "CompCount": str(len(self.symbols)),
         }
+        if self.show_comments_designators:
+            header["AlwaysShowCD"] = "T"
 
         # Build font table from font_manager or default
         if self.font_manager and self.font_manager.fonts:

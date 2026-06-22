@@ -43,7 +43,7 @@ def _assert_pin_grid(symbol: object) -> None:
 def build_schlib(output_path: Path = OUTPUT_PATH) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    schlib = AltiumSchLib()
+    schlib = AltiumSchLib(show_comments_designators=True)
     symbol = schlib.add_symbol("HELLO_IC_6PIN")
     symbol.set_description("Hello world 6-pin example")
     symbol.add_rectangle(

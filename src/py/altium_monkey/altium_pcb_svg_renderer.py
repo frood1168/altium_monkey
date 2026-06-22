@@ -118,6 +118,9 @@ class PcbSvgRenderOptions:
     # When true in overlay mode, render drill holes as outline-only strokes
     # so underlying copper/tracks remain visible inside hole interiors.
     drill_hole_overlay_outline: bool = False
+    # PcbLib footprint preview has no board rule context. Altium's PcbLib editor
+    # resolves rule-driven solder/paste expansion as zero in that preview.
+    footprint_rule_mask_expansion_zero: bool = False
     # Stroke width used for overlay-outline holes (mm).
     drill_hole_overlay_outline_width_mm: float = 0.10
     # Emit drill holes in a dedicated synthetic layer group (`layer-DRILLS`)
@@ -483,7 +486,9 @@ class PcbSvgRenderer:
         self._embedded_font_resolver_cache: dict[str, object | None] = {}
 
     @staticmethod
-    def _resolved_layer_stack_safe(pcbdoc: "AltiumPcbDoc") -> "ResolvedLayerStack | None":
+    def _resolved_layer_stack_safe(
+        pcbdoc: "AltiumPcbDoc",
+    ) -> "ResolvedLayerStack | None":
         """
         Best-effort resolved stack lookup for behavior-preserving consumers.
         """

@@ -8,7 +8,7 @@ import logging
 import struct
 import uuid
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
@@ -1212,9 +1212,13 @@ class AltiumPcbFootprint:
         Returns:
             SVG document text.
         """
-        from .altium_pcb_svg_renderer import PcbSvgRenderer
+        from .altium_pcb_svg_renderer import PcbSvgRenderer, PcbSvgRenderOptions
 
-        renderer = PcbSvgRenderer(options=options)
+        render_options = replace(
+            options or PcbSvgRenderOptions(),
+            footprint_rule_mask_expansion_zero=True,
+        )
+        renderer = PcbSvgRenderer(options=render_options)
         return renderer.render_board(
             self._to_transient_pcbdoc_for_svg(),
             project_parameters=project_parameters,
@@ -1236,9 +1240,13 @@ class AltiumPcbFootprint:
         Returns:
             Dict mapping layer name to SVG document text.
         """
-        from .altium_pcb_svg_renderer import PcbSvgRenderer
+        from .altium_pcb_svg_renderer import PcbSvgRenderer, PcbSvgRenderOptions
 
-        renderer = PcbSvgRenderer(options=options)
+        render_options = replace(
+            options or PcbSvgRenderOptions(),
+            footprint_rule_mask_expansion_zero=True,
+        )
+        renderer = PcbSvgRenderer(options=render_options)
         return renderer.render_layers(
             self._to_transient_pcbdoc_for_svg(),
             project_parameters=project_parameters,

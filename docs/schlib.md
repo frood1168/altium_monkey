@@ -40,6 +40,15 @@ symbol.add_object(make_sch_pin(...))
 schlib.save("my_symbols.SchLib")
 ```
 
+Pass `show_comments_designators=True` when creating a library if Altium should
+open the SchLib editor with symbol comments and designators visible:
+
+```python
+schlib = AltiumSchLib(show_comments_designators=True)
+```
+
+You can also set `schlib.show_comments_designators = True` before saving.
+
 For parsed libraries, prefer `AltiumSchLib.get_symbol(...)` and symbol views
 over scanning raw streams.
 

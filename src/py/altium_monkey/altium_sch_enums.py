@@ -327,9 +327,9 @@ class PortStyle(IntEnum):
     """
 
     NONE_HORIZONTAL = 0  # ePortNone - horizontal flat end
-    LEFT = 1  # ePortArrowLeft - arrow pointing left
-    RIGHT = 2  # ePortArrowRight - arrow pointing right
-    LEFT_RIGHT = 3  # ePortArrowLeftRight - arrows both directions
+    LEFT = 1  # ePortLeft - arrow pointing left
+    RIGHT = 2  # ePortRight - arrow pointing right
+    LEFT_RIGHT = 3  # ePortLeftRight - arrows both directions
     NONE_VERTICAL = 4  # ePortNoneVertical - vertical flat end
     TOP = 5  # ePortTop - arrow pointing up
     BOTTOM = 6  # ePortBottom - arrow pointing down

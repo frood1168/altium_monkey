@@ -21,7 +21,9 @@ details.
 10. keeping pin lengths and pin hotspots on the 100 mil schematic grid
 11. `AltiumSymbol.add_designator(...)`
 12. `AltiumSymbol.add_parameter(...)`
-13. `AltiumSchLib.save(...)`
+13. `AltiumSchLib(show_comments_designators=True)` so Altium's SchLib editor
+    shows the symbol comment and designator by default
+14. `AltiumSchLib.save(...)`
 
 ## Run
 

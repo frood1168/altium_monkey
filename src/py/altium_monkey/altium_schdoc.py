@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
 from .altium_api_markers import public_api
 from .altium_json_apply_helpers import JsonApplyMixin
 from .altium_sch_display_mode import record_belongs_to_display_mode
+from .altium_sch_enums import PortStyle
 
 from . import (
     AltiumSchArc,
@@ -5349,10 +5350,15 @@ class AltiumSchDoc(JsonApplyMixin):
     def _port_is_vertical(port: object) -> bool:
         style = getattr(port, "style", 0)
         try:
-            style_value = int(style)
+            port_style = PortStyle(int(style))
         except (TypeError, ValueError):
             return False
-        return style_value in {4, 5, 6, 7}
+        return port_style in {
+            PortStyle.NONE_VERTICAL,
+            PortStyle.TOP,
+            PortStyle.BOTTOM,
+            PortStyle.TOP_BOTTOM,
+        }
 
     def _port_connection_endpoints(
         self, port: object

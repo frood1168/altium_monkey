@@ -30,6 +30,14 @@ children back in the placed component order.
 High-level public symbol-authoring APIs use mils. Low-level records may expose
 source storage units.
 
+## Editor Display Options
+
+`AltiumSchLib(show_comments_designators=True)` and the
+`show_comments_designators` property write `AlwaysShowCD=T` in the SchLib
+`FileHeader`. This asks Altium's library editor to show symbol comments and
+designators by default. The default remains `False`, which omits the field for
+newly authored libraries and preserves the previous output.
+
 ## SVG
 
 `AltiumSchLib.symbol_to_svg(...)` and symbol `to_svg(...)` accept
