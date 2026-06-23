@@ -1,0 +1,47 @@
+*RF board*
+
+• maybe add crystal from hackrf schematic (X2) to allow USB DFU so it can be updated from the PI
+
+This is already in place. X2 on the HackRF pro corresponds to X100 on Rfboard.
+
+• L203 not connected
+• L406 not connected
+
+Fixed – I missed fixing these two after a last minute change to sch symbol to facilitate these filter design sections. The project schematic validation was passing, so I am missing an error generation setting in the project. I'll check for that.
+
+• R213 and adjacent resistors should be DNPd (we think)
+
+Confirmed. I didn't have a DNP version of a resistor at that time. Same as for some parts on the Baseboard. But I will review those updates.
+
+• C421, r416 should be DNP
+• R423, R430 should be DNP
+• C470, R437, R436, R434, C469, C474 should be dnp
+
+Got it. I missed to DNP parts from original design. Some of it translated over in conversion, as parameter or value, but the actual DNP directives didn't. I found a few extra to DNP as well, and they should now be equivalent.
+
+I have updated the design according to this DNP data I pulled from the HackRF Pro design.
+
+| HackRF Pro | Rfboard | value | On your list | Function |
+| C207 | C402 | 1 µF | ⚠️ not listed | RX LNA (U404 BGB741) RFOUT bias-snubber cap |
+| C210 | C403 | 1 µF | ⚠️ not listed | RX LNA (U404 BGB741) RFIN bias-snubber cap |
+| C139 | C421 | 1 µF | ✅ listed | TX driver (U405 TRF37C73) RFOUT bias-snubber cap |
+| C191 | C469 | 1 µF | ✅ listed | IF amp (U410) RFOUT bias-snubber cap |
+| C195 | C470 | 1 µF | ✅ listed | IF amp (U410 BGB741) RFIN bias-snubber cap |
+| C188 | C474 | 0.3 pF | ✅ listed | IF amp (U410) RFOUT match shunt |
+| L1 | L419 | DNP | already DNP | Mixer (U409) MIX_IN± differential-tune inductor |
+| R146 | R408 | 220 Ω | ⚠️ not listed | snubber series-R to GND |
+| R42 | R409 | 220 Ω | ⚠️ not listed | snubber series-R to GND |
+| R131 | R416 | 220 Ω | ✅ listed | snubber series-R to GND |
+| R124 | R423 | 220 Ω | ✅ listed | Mixer (U409) MIX_OUT+ bias-couple (220 ∥ 56 nH) |
+| R151 | R430 | 1 kΩ | ✅ listed | Mixer (U409) ref-clock 1 k pull-down behind the 0 Ω jumper |
+| R133 | R434 | 1 kΩ | ✅ listed | IF amp (U410) RFOUT de-Q (1 k ∥ 18 nH) |
+| R130 | R436 | 220 Ω | ✅ listed | snubber series-R to GND |
+| R136 | R437 | 220 Ω | ✅ listed | snubber series-R to GND |
+
+• why have both U500 and U501?
+
+The I2C interface (U500) is the default mux control interface from the HackRF. The GPIO controlled interface (U502) is for "FAST" antenna switching – driven by GPIO.
+
+• Did you ever check with the customer to see if he needs the logic to change the antenna channels?
+
+In the last meeting we had with him, we discussed keeping it the same. In the document he sent last week, he does about keeping things so that the applications work as they are now. It's a low-impact section, with stuffing options that will accommodate whatever the customer ends up wanting. The mux logic for the opera cake is decoded with the logic gates from U502-U508 to select the correct channel on the new mux chip, and they can be DNI'd with the right 0ohm jumpers.
