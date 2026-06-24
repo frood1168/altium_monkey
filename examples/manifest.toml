@@ -1426,6 +1426,36 @@ requires_extra = []
 tags = ["schlib", "symbol", "style", "pin", "rectangle", "mutation", "template"]
 
 [[examples]]
+id = "schdoc_variant_dnp"
+title = "Set Not Fitted variant flags from DNP parameters"
+summary = "Scan all SchDocs for components with a value parameter (Value, Resistance, Capacitance, etc.) equal to 'DNP', then set those components as Not Fitted in the named variant within the .PrjPcb file. Previously Not Fitted components that no longer have DNP are cleared."
+areas = ["schdoc", "prjpcb", "mutation"]
+status = "ready"
+entrypoint = "schdoc_variant_dnp/schdoc_variant_dnp.py"
+doc = "schdoc_variant_dnp/README.md"
+inputs = []
+assets = []
+outputs = [
+  "schdoc_variant_dnp/output/schdoc_variant_dnp_manifest.json",
+]
+requires_extra = []
+tags = ["schdoc", "prjpcb", "variant", "dnp", "not-fitted", "bom", "mutation"]
+
+[[examples]]
+id = "megamaid_unmanaged_parts"
+title = "Report unmanaged parts from a MegaMaid extraction"
+summary = "Parse SchDoc JSON dumps from a MegaMaid output directory to identify components sourced from local .SchLib files (no VaultGUID) rather than the managed online vault. Groups unique parts by schematic symbol and footprint, lists all associated designators, and reports which split SchLib and PcbLib files were extracted for each part."
+areas = ["schdoc", "reporting"]
+status = "ready"
+entrypoint = "megamaid_unmanaged_parts/megamaid_unmanaged_parts.py"
+doc = "megamaid_unmanaged_parts/README.md"
+inputs = []
+assets = []
+outputs = []
+requires_extra = []
+tags = ["schdoc", "reporting", "megamaid", "unmanaged", "schlib", "pcblib", "bom"]
+
+[[examples]]
 id = "schdoc_param_layout_extract"
 title = "Extract parameter positions from a reference schematic"
 summary = "Read a reference SchDoc where parameters are manually positioned, compute component-local offsets (rotation/mirror aware), and write a param_layout.toml template."

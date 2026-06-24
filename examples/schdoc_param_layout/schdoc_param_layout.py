@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime
 import json
 import shutil
@@ -31,7 +32,17 @@ _DEFAULT_LAYOUT_TOML = SAMPLE_DIR / "param_layout.toml"
 
 _ROT_KEY = {0: "DEG_0", 1: "DEG_90", 2: "DEG_180", 3: "DEG_270"}
 _LAYOUT_OPT_PARAM = "sch_layout_opt"
+_LAYOUT_DNP_PARAM = "sch_layout_dnp"
 _PINS_KEY = "__pins__"
+
+# Value-type parameters to swap out when sch_layout_dnp = "DNP", in priority order.
+# The first one that is currently visible is the one that gets replaced.
+_DNP_SWAP_PARAM_NAMES: tuple[str, ...] = (
+    "Resistance", "Capacitance", "Inductance", "PartNumber", "Value",
+)
+
+# Win32 BGR color for the DNP label: #FF0000 red → R=0xFF, G=0, B=0 → 0xFF
+_DNP_LABEL_COLOR: int = 0xFF
 
 _ORIENT_MAP = {"DEGREES_0": 0, "DEGREES_90": 1, "DEGREES_180": 2, "DEGREES_270": 3}
 _JUST_MAP = {
@@ -63,6 +74,13 @@ def _param_name(param: object) -> str | None:
     if isinstance(param, AltiumSchParameter):
         return param.name or None
     return None
+
+
+def _component_designator(component: object) -> str:
+    for param in getattr(component, "parameters", []):
+        if isinstance(param, AltiumSchDesignator):
+            return (param.text or "").strip()
+    return ""
 
 
 def _rot_key_candidates(component: object) -> list[str]:
@@ -111,8 +129,8 @@ def _apply_matched_component(
         if name is None:
             continue
 
-        if name == _LAYOUT_OPT_PARAM:
-            continue  # control parameter — leave visibility unchanged
+        if name in (_LAYOUT_OPT_PARAM, _LAYOUT_DNP_PARAM):
+            continue  # control parameters — handled separately
 
         if name in rot_layout:
             entry = rot_layout[name]
@@ -162,6 +180,56 @@ def _apply_default_visibility(
         counts[f"default.{name}"] += 1
 
 
+def _apply_dnp_swap(component: object, counts: Counter) -> None:
+    """
+    Handle sch_layout_dnp visual swap for one component.
+
+    sch_layout_dnp = "DNP":
+      Find the first visible value-type parameter (Resistance, Capacitance,
+      Inductance, PartNumber, Value), hide it, and position sch_layout_dnp
+      at the same location/orientation/justification and make it visible.
+
+    sch_layout_dnp = anything else (including "0"):
+      Ensure sch_layout_dnp is hidden. The value-type parameter is already
+      visible because the template step ran before this call.
+    """
+    dnp_param: object | None = None
+    for param in getattr(component, "parameters", []):
+        if isinstance(param, AltiumSchParameter) and param.name == _LAYOUT_DNP_PARAM:
+            dnp_param = param
+            break
+    if dnp_param is None:
+        return
+
+    if (dnp_param.text or "").strip().upper() == "DNP":
+        value_param: object | None = None
+        for param in getattr(component, "parameters", []):
+            if (
+                isinstance(param, AltiumSchParameter)
+                and param.name in _DNP_SWAP_PARAM_NAMES
+                and not param.is_hidden
+            ):
+                value_param = param
+                break
+
+        if value_param is not None:
+            dnp_param.location = CoordPoint.from_mils(
+                value_param.location.x_mils,
+                value_param.location.y_mils,
+            )
+            dnp_param.orientation = value_param.orientation
+            dnp_param.justification = value_param.justification
+            dnp_param.font_id = value_param.font_id
+            value_param.is_hidden = True
+
+        dnp_param.color = _DNP_LABEL_COLOR
+        dnp_param.is_hidden = False
+        dnp_param.auto_position = False
+        counts["sch_layout_dnp_shown"] += 1
+    else:
+        dnp_param.is_hidden = True
+
+
 def apply_layout_to_schdoc(
     input_path: Path,
     output_path: Path,
@@ -176,6 +244,7 @@ def apply_layout_to_schdoc(
     defaulted = 0
     dnp_set = 0
     dnp_reset = 0
+    unmatched: dict[str, list[str]] = {}  # lib_ref → [designators]
 
     for component in schdoc.components:
         lib_ref = component.lib_reference
@@ -195,15 +264,20 @@ def apply_layout_to_schdoc(
                 # Hide all parameters — the template is the authority for this lib_ref.
                 for param in getattr(component, "parameters", []):
                     name = _param_name(param)
-                    if name is not None and name != _LAYOUT_OPT_PARAM:
+                    if name is not None and name not in (_LAYOUT_OPT_PARAM, _LAYOUT_DNP_PARAM):
                         param.is_hidden = True
                 rot_missing += 1
             else:
                 _apply_matched_component(component, rot_layout, counts)
                 matched += 1
-        elif default_vis:
-            _apply_default_visibility(component, default_vis, counts)
-            defaulted += 1
+        else:
+            des = _component_designator(component)
+            unmatched.setdefault(lib_ref, []).append(des or "?")
+            if default_vis:
+                _apply_default_visibility(component, default_vis, counts)
+                defaulted += 1
+
+        _apply_dnp_swap(component, counts)
 
         if _is_dnp(component):
             if component.component_kind != ComponentKind.STANDARD_NO_BOM:
@@ -224,7 +298,9 @@ def apply_layout_to_schdoc(
         "components_defaulted": defaulted,
         "dnp_set_no_bom": dnp_set,
         "dnp_reset_to_standard": dnp_reset,
+        "sch_layout_dnp_shown": counts["sch_layout_dnp_shown"],
         "parameter_placements": dict(sorted(counts.items())),
+        "unmatched_lib_refs": {lr: sorted(des) for lr, des in unmatched.items()},
     }
 
 
@@ -328,6 +404,26 @@ def main() -> None:
     total_defaulted = sum(doc["components_defaulted"] for doc in documents)
     total_dnp_set = sum(doc["dnp_set_no_bom"] for doc in documents)
     total_dnp_reset = sum(doc["dnp_reset_to_standard"] for doc in documents)
+    total_dnp_shown = sum(doc["sch_layout_dnp_shown"] for doc in documents)
+
+    # Aggregate unmatched lib_refs across all documents
+    all_unmatched: dict[str, list[str]] = {}
+    for doc in documents:
+        for lib_ref, designators in doc.get("unmatched_lib_refs", {}).items():
+            all_unmatched.setdefault(lib_ref, []).extend(designators)
+    for des_list in all_unmatched.values():
+        des_list.sort()
+
+    total_unmatched_instances = sum(len(v) for v in all_unmatched.values())
+    unmatched_rows = sorted(
+        [(lr, len(des), ", ".join(des)) for lr, des in all_unmatched.items()],
+        key=lambda x: (-x[1], x[0].lower()),
+    )
+    unmatched_path = output_dir / "unmatched_symbols.csv"
+    with unmatched_path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["LibRef", "InstanceCount", "Designators"])
+        writer.writerows(unmatched_rows)
 
     print(f"Loaded project: {prjpcb_path}")
     print(f"Layout config: {layout_toml}")
@@ -336,15 +432,23 @@ def main() -> None:
     if total_rot_missing:
         print(
             f"Components with missing rotation entry: {total_rot_missing}"
-            " (lib_ref in template but rotation not — all params hidden)"
+            " (lib_ref in template but rotation not -- all params hidden)"
         )
     print(f"Total parameter placements: {total_placements}")
     if total_dnp_set or total_dnp_reset:
-        print(f"DNP → Standard (No BOM): {total_dnp_set}  reset → Standard: {total_dnp_reset}")
+        print(f"DNP -> Standard (No BOM): {total_dnp_set}  reset -> Standard: {total_dnp_reset}")
+    if total_dnp_shown:
+        print(f"sch_layout_dnp shown (value param swapped for DNP label): {total_dnp_shown}")
+    if all_unmatched:
+        print(
+            f"Symbols not in layout template: {len(all_unmatched)}"
+            f" ({total_unmatched_instances} instances)"
+        )
     if snapshot_dir:
         print(f"History snapshot: {snapshot_dir}")
     print(f"Wrote SchDocs: {output_dir}")
     print(f"Wrote manifest: {manifest_paths[0]}")
+    print(f"Wrote unmatched: {unmatched_path}")
 
 
 if __name__ == "__main__":
