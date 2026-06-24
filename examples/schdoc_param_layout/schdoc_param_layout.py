@@ -84,12 +84,33 @@ def _component_designator(component: object) -> str:
 
 
 def _rot_key_candidates(component: object) -> list[str]:
-    """Return rot keys to try in priority order for this component."""
+    """Return rot keys to try in priority order for this component.
+
+    For multi-part components (part_count > 1) the part-specific variants
+    (_P{n} suffix) are tried first so each gate/section can have its own
+    parameter layout. Falls back to generic (no part suffix) entries so a
+    template built without part awareness still applies correctly.
+    """
     base = _ROT_KEY[int(component.orientation)]
     mirrored = getattr(component, "is_mirrored", False)
     opt = _get_layout_opt(component)
+    part_count = getattr(component, "part_count", 1)
+    part_id = getattr(component, "current_part_id", 1)
+    part_suffix = f"_P{part_id}" if part_count > 1 else ""
 
     candidates: list[str] = []
+
+    # Part-specific candidates first (only generated for multi-part components)
+    if part_suffix:
+        if mirrored and opt is not None:
+            candidates.append(f"{base}_MIRROR_OPT{opt}{part_suffix}")
+        if mirrored:
+            candidates.append(f"{base}_MIRROR{part_suffix}")
+        if opt is not None:
+            candidates.append(f"{base}_OPT{opt}{part_suffix}")
+        candidates.append(f"{base}{part_suffix}")
+
+    # Generic candidates (always present as fallback)
     if mirrored and opt is not None:
         candidates.append(f"{base}_MIRROR_OPT{opt}")
     if mirrored:

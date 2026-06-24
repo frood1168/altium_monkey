@@ -25,21 +25,26 @@ _ROT_KEY = {0: "DEG_0", 1: "DEG_90", 2: "DEG_180", 3: "DEG_270"}
 _LAYOUT_OPT_PARAM = "sch_layout_opt"
 
 
-def _rot_sort_key(rot: str) -> tuple[int, int, int]:
+def _rot_sort_key(rot: str) -> tuple[int, int, int, int]:
+    # Strip _P{n} part suffix before matching rotation pattern
+    part_m = re.search(r"_P(\d+)$", rot)
+    part_num = int(part_m.group(1)) if part_m else 0
+    r = rot[: part_m.start()] if part_m else rot
+
     for i, base in enumerate(_BASE_ROT_ORDER):
-        if rot == base:
-            return (i, 0, 0)
-        if rot == f"{base}_MIRROR":
-            return (i, 1, 0)
+        if r == base:
+            return (i, 0, 0, part_num)
+        if r == f"{base}_MIRROR":
+            return (i, 1, 0, part_num)
         opt_prefix = f"{base}_OPT"
-        if rot.startswith(opt_prefix) and "_MIRROR" not in rot:
-            suffix = rot[len(opt_prefix):]
-            return (i, 0, int(suffix) if suffix.isdigit() else 99)
+        if r.startswith(opt_prefix) and "_MIRROR" not in r:
+            suffix = r[len(opt_prefix):]
+            return (i, 0, int(suffix) if suffix.isdigit() else 99, part_num)
         mirror_opt_prefix = f"{base}_MIRROR_OPT"
-        if rot.startswith(mirror_opt_prefix):
-            suffix = rot[len(mirror_opt_prefix):]
-            return (i, 1, int(suffix) if suffix.isdigit() else 99)
-    return (99, 0, 0)
+        if r.startswith(mirror_opt_prefix):
+            suffix = r[len(mirror_opt_prefix):]
+            return (i, 1, int(suffix) if suffix.isdigit() else 99, part_num)
+    return (99, 0, 0, part_num)
 
 _ORIENT_NAME = {0: "DEGREES_0", 1: "DEGREES_90", 2: "DEGREES_180", 3: "DEGREES_270"}
 _JUST_NAME = {
@@ -127,6 +132,22 @@ def extract_param_layouts(schdoc: AltiumSchDoc) -> tuple[_CanonicalT, _Conflicts
     canonical: _CanonicalT = {}
     conflicts: _ConflictsT = {}
 
+    # First pass: find lib_refs where multiple distinct part IDs are actually
+    # placed.  Only those are treated as truly multi-part for the layout key —
+    # single-gate chips with part_count=2 (main + hidden power part) are left
+    # without a part suffix.
+    part_ids_seen: dict[str, set[int]] = {}
+    for component in schdoc.components:
+        lib_ref = component.lib_reference
+        if not lib_ref or lib_ref == "*":
+            continue
+        part_ids_seen.setdefault(lib_ref, set()).add(
+            getattr(component, "current_part_id", 1)
+        )
+    multipart_libs: set[str] = {
+        lr for lr, ids in part_ids_seen.items() if len(ids) > 1
+    }
+
     for component in schdoc.components:
         lib_ref = component.lib_reference
         if not lib_ref or lib_ref == "*":
@@ -136,7 +157,9 @@ def extract_param_layouts(schdoc: AltiumSchDoc) -> tuple[_CanonicalT, _Conflicts
         mirror = "_MIRROR" if component.is_mirrored else ""
         opt = _get_layout_opt(component)
         opt_suffix = f"_OPT{opt}" if opt is not None else ""
-        rot_key = f"{base_rot_key}{mirror}{opt_suffix}"
+        part_id = getattr(component, "current_part_id", 1)
+        part_suffix = f"_P{part_id}" if lib_ref in multipart_libs else ""
+        rot_key = f"{base_rot_key}{mirror}{opt_suffix}{part_suffix}"
 
         rot_entry = canonical.setdefault(lib_ref, {}).setdefault(rot_key, {})
 
@@ -294,7 +317,9 @@ def main() -> None:
         "# Rotations: DEG_0, DEG_90, DEG_180, DEG_270",
         "# Mirrored variants: DEG_0_MIRROR, DEG_90_MIRROR, ... (from component.is_mirrored)",
         "# Layout options: DEG_0_OPT1, DEG_0_MIRROR_OPT1, ... (from sch_layout_opt parameter on component)",
-        "# Fallback order when applying: MIRROR_OPT -> MIRROR -> OPT -> base -> hide all",
+        "# Multi-part suffix: DEG_0_P1, DEG_0_P2, ... (from component.current_part_id when part_count > 1)",
+        "# Fallback order when applying: part-specific (MIRROR_OPT_Pn -> MIRROR_Pn -> OPT_Pn -> base_Pn)",
+        "#   then generic (MIRROR_OPT -> MIRROR -> OPT -> base) -> hide all",
         "# Presence = visible; absence = hidden when applied to a matched component.",
         "# offset_x/y: world-frame mils from component origin.",
         "# orientation: DEGREES_0, DEGREES_90, DEGREES_180, DEGREES_270",
