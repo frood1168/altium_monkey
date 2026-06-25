@@ -1559,3 +1559,16 @@ outputs = [
 ]
 requires_extra = []
 tags = ["schdoc", "schlib", "svg", "rendering", "symbol-extraction", "multipart"]
+
+[[examples]]
+id = "intlib_merge"
+title = "Merge multiple IntLib files into one"
+summary = "Discover all .IntLib files in a directory (optionally recursive), extract their embedded SchLib and PcbLib source streams, merge symbols and footprints, and repack into a single combined IntLib."
+areas = ["intlib", "schlib", "pcblib"]
+status = "ready"
+entrypoint = "intlib_merge/intlib_merge.py"
+inputs = []
+assets = []
+outputs = []
+requires_extra = []
+tags = ["intlib", "schlib", "pcblib", "merge", "library-management"]
