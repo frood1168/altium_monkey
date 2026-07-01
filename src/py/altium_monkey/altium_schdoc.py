@@ -6039,39 +6039,58 @@ class AltiumSchDoc(JsonApplyMixin):
 
     def _build_additional_stream_objects(self) -> list[Any]:
         """
-        Build the canonical Additional-stream object order from connector-owned state.
+        Build the Additional-stream object list.
+
+        Harness connectors are re-emitted together with their owned entries and
+        type label so their positional OwnerIndex links stay valid. Every other
+        object that originated from the Additional stream (blankets, signal
+        harnesses, orphaned harness entries/types, unknown raw records) is
+        preserved verbatim in its original parse order, so round-trip saves do
+        not silently drop it. Iterating ``all_objects`` (parse order) keeps the
+        emitted stream self-consistent for positional owner references.
         """
         additional_objects: list[Any] = []
-        top_level_additional = [
-            obj
-            for obj in self.all_objects
-            if isinstance(obj, (AltiumSchHarnessConnector, AltiumSchSignalHarness))
-        ]
+        emitted: set[int] = set()
 
-        for obj in top_level_additional:
-            self._mark_default_source_stream(obj)
-            if isinstance(obj, AltiumSchSignalHarness):
-                additional_objects.append(obj)
+        def _emit(item: Any) -> None:
+            additional_objects.append(item)
+            emitted.add(id(item))
+
+        for obj in self.all_objects:
+            if getattr(obj, "_source_stream", "FileHeader") != "Additional":
+                continue
+            if id(obj) in emitted:
+                # Already placed as a harness connector child.
                 continue
 
-            connector_index = len(additional_objects)
-            additional_objects.append(obj)
+            if isinstance(obj, AltiumSchHarnessConnector):
+                self._mark_default_source_stream(obj)
+                connector_index = len(additional_objects)
+                _emit(obj)
 
-            for entry_index, entry in enumerate(list(getattr(obj, "entries", []))):
-                self._prepare_harness_connector_child(obj, entry)
-                entry.owner_index = connector_index if connector_index > 0 else 0
-                entry.owner_index_additional_list = True
-                entry.index_in_sheet = -2 if entry_index == 0 else entry_index
-                additional_objects.append(entry)
+                for entry_index, entry in enumerate(list(getattr(obj, "entries", []))):
+                    self._prepare_harness_connector_child(obj, entry)
+                    entry.owner_index = connector_index if connector_index > 0 else 0
+                    entry.owner_index_additional_list = True
+                    entry.index_in_sheet = -2 if entry_index == 0 else entry_index
+                    _emit(entry)
 
-            type_label = getattr(obj, "type_label", None)
-            if type_label is not None:
-                self._prepare_harness_connector_child(obj, type_label)
-                type_label.owner_index = connector_index if connector_index > 0 else 0
-                type_label.owner_index_additional_list = True
-                type_label.index_in_sheet = -1
-                type_label.not_auto_position = True
-                additional_objects.append(type_label)
+                type_label = getattr(obj, "type_label", None)
+                if type_label is not None:
+                    self._prepare_harness_connector_child(obj, type_label)
+                    type_label.owner_index = (
+                        connector_index if connector_index > 0 else 0
+                    )
+                    type_label.owner_index_additional_list = True
+                    type_label.index_in_sheet = -1
+                    type_label.not_auto_position = True
+                    _emit(type_label)
+                continue
+
+            # Signal harnesses, blankets, orphaned harness children, and any
+            # other Additional-stream record: preserve as-is.
+            self._mark_default_source_stream(obj)
+            _emit(obj)
 
         return additional_objects
 

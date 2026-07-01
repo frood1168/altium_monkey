@@ -20,6 +20,9 @@ venv/
 .vscode/
 .idea/
 
+# Backup files
+*.bak
+
 # OS
 .DS_Store
 Thumbs.db

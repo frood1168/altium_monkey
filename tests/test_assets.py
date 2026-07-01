@@ -2278,3 +2278,61 @@ def test_pcblib_power_resistor_synthesis_writes_parseable_libraries(
         assert {pad.designator for pad in footprint.pads} == {"1", "2"}
         assert int(model.checksum) & 0xFFFFFFFF == part["model_checksum_unsigned"]
         assert int(body.model_checksum) & 0xFFFFFFFF == part["model_checksum_unsigned"]
+
+
+# Assets carrying records in the Additional OLE stream: blanket directives
+# (RECORD 225) and harness entries/types/signal-harnesses (216/217/218).
+_ADDITIONAL_STREAM_ROUNDTRIP_ASSETS = [
+    "examples/assets/projects/bunny_brain/bunny_brain_D.SchDoc",  # 1 blanket
+    "examples/assets/projects/loz-old-man/RAM.SchDoc",  # 1 blanket
+    "examples/assets/projects/rt_super_c1/RT_SUPER_C1.SchDoc",  # 1 blanket
+    "examples/assets/projects/hydroscope/US_IF.SchDoc",  # harness records
+]
+
+
+def _sch_record_histogram(path: Path) -> dict[int, int]:
+    """Count records by RECORD id across the FileHeader and Additional streams."""
+    from collections import Counter
+
+    from altium_monkey.altium_ole import AltiumOleFile
+    from altium_monkey.altium_schdoc import get_records_in_section
+
+    counts: Counter[int] = Counter()
+    ole = AltiumOleFile(path)
+    try:
+        for section in ("FileHeader", "Additional"):
+            if ole.exists(section) and ole.get_type(section) == 2:
+                for record in get_records_in_section(ole, section):
+                    counts[int(record.get("RECORD", -1))] += 1
+    finally:
+        ole.close()
+    return dict(counts)
+
+
+@pytest.mark.parametrize("asset_rel", _ADDITIONAL_STREAM_ROUNDTRIP_ASSETS)
+def test_schdoc_roundtrip_preserves_additional_stream_records(
+    asset_rel: str, tmp_path: Path
+) -> None:
+    """A round-trip save must not drop Additional-stream records.
+
+    Blanket directives and harness entries/types live in the Additional OLE
+    stream. A regression once rebuilt that stream from harness connectors only,
+    silently dropping blankets and any orphaned harness records on save.
+    """
+    from altium_monkey import AltiumSchDoc
+
+    source = PUBLIC_ROOT / asset_rel
+    assert source.exists(), source
+
+    before = _sch_record_histogram(source)
+
+    output = tmp_path / source.name
+    assert AltiumSchDoc(source).save(output) is True
+    after = _sch_record_histogram(output)
+
+    # Record types carried in the Additional stream must survive verbatim.
+    for record_id in (215, 216, 217, 218, 225):
+        assert after.get(record_id, 0) == before.get(record_id, 0), (
+            f"RECORD={record_id} count changed on round-trip: "
+            f"{before.get(record_id, 0)} -> {after.get(record_id, 0)} ({asset_rel})"
+        )
