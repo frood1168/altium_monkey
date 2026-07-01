@@ -2571,10 +2571,9 @@ class AltiumPcbDoc:
                 magnitude in mils. If either tolerance is supplied, an omitted
                 side is written as 0 mil.
             is_tent_top: Top-side solder-mask tenting flag. Authored vias with
-                tenting use AD25-compatible manual solder-mask expansion defaults.
+                tenting use the default manual solder-mask expansion.
             is_tent_bottom: Bottom-side solder-mask tenting flag. Authored vias
-                with tenting use AD25-compatible manual solder-mask expansion
-                defaults.
+                with tenting use the default manual solder-mask expansion.
             solder_mask_expansion_top_mils: Optional signed top/front manual
                 solder-mask expansion in mils.
             solder_mask_expansion_bottom_mils: Optional signed bottom/back

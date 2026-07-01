@@ -1,3 +1,110 @@
+# altium-monkey 2026.07.01 Release Notes
+
+Package version: `2026.7.1`
+
+`2026.07.01` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.1`.
+
+This release expands PCB stackup authoring, adds named keepout restriction
+helpers, improves font portability, and tightens PcbDoc/PcbLib record
+preservation for automated board generation.
+
+## PCB Stackup Authoring
+
+PcbDoc layer-stack authoring now supports rigid `.stackup` and `.stackupx`
+files as inputs to `AltiumLayerStackDocument.from_stackup(...)` and
+`AltiumLayerStackDocument.from_stackupx(...)`, followed by
+`PcbDocBuilder.set_layer_stack_document(...)`.
+
+Generated PcbDocs preserve copper, dielectric, solder-mask, solder-paste,
+overlay, layer-pair, internal-plane ID, and layer type semantics on readback,
+and can be exported again through `to_stackup(...)` and `to_stackupx(...)`.
+The new public `pcbdoc_create_from_stackup_files` example demonstrates both
+import paths. Rigid-flex StackupX authoring still requires explicit
+board-region geometry and is not inferred from interchange files alone.
+
+Programmatic rigid stack creation is now available through
+`AltiumLayerStackDocument.from_rigid_layer_rows(...)` and
+`AltiumRigidStackRowSpec`. Semantic row constructors cover common rigid
+authoring cases through `AltiumComponentPlacement`,
+`AltiumDielectricLayerKind`, `AltiumCopperMaterialSpec`, and
+`AltiumDielectricMaterialSpec`, so callers do not need raw StackupX GUIDs or
+property type tuples for ordinary copper, prepreg, core, solder-mask, and
+overlay rows.
+
+Stackup-level electrical settings such as roughness model, roughness factors,
+copper resistance, via plating thickness, realistic ratio, and temperatures are
+modeled by `AltiumStackupSettings`, `AltiumStackupType`, and
+`AltiumStackupRoughnessModel`. `AltiumStackupDocument`,
+`AltiumStackupXDocument`, and `AltiumLayerPair` are first-class public exports.
+The `pcbdoc_create_custom_rigid_stack` example now writes PcbDoc, `.stackup`,
+and `.stackupx` outputs from the same code-authored stack model, and the new
+`pcbdoc_create_jlcpcb_rigid_stack` example demonstrates a JLCPCB-style
+eight-layer rigid stack authored through the semantic API.
+
+## PCB Keepout Restrictions
+
+PCB keepout restriction helpers are now public. Python callers can use
+`PcbKeepoutRestriction`, `decode_pcb_keepout_restrictions(...)`,
+`encode_pcb_keepout_restrictions(...)`,
+`pcb_keepout_restriction_names(...)`, and
+`pcb_keepout_restriction_unknown_bits(...)` to decode and author the confirmed
+Altium object-specific keepout mask bits: via `0x01`, track `0x02`, copper
+`0x04`, SMD pad `0x08`, and through-hole pad `0x10`.
+
+The raw `keepout_restrictions` integer remains the authoritative stored field
+so unknown future bits can still round-trip.
+
+## PCB Record Models And Preservation
+
+PcbDoc VIA records now expose the parsed `drill_layer_pair_type` field used by
+backdrill-aware board files.
+
+PcbDoc rule records now expose parsed semantic rule data, including canonical
+rule-kind aliases, semantic model names, parsed scope expressions, typed scalar
+accessors, connect-style settings, per-layer width and differential-pair
+metrics, routing-layer flags, room outlines, clearance object pairs, and
+routing-neckdown layer lengths. Raw `extra_fields` remain preserved for
+unsupported or pass-through fields.
+
+Typed Rules6 write-back is now supported through semantic field setters on
+rule objects. PcbDoc saves rewrite `Rules6/Header` and `Rules6/Data` while
+preserving parsed record leaders.
+
+Rigid-flex board-region bend-line edits, typed Dimensions6 helpers and
+write-back, board-level ExtendedPrimitiveInformation summaries and write-back,
+and read-only board-level CustomShapes summaries are now available through the
+Python API. Parsed custom pads also expose their resolved custom layer set
+through `PcbPadSummary.custom_shape_layers`.
+
+## Font And SchDoc Image Compatibility
+
+Font portability helpers now expose `FontReplacementRule`,
+`portable_font_replacements()`, and
+`ALTIUM_PORTABLE_FONT_REPLACEMENTS` from the `altium_monkey` package root and
+`altium_monkey.altium_font_resolver`. These mirror the existing portable
+replacement table while giving Python callers a typed rule API.
+
+SchDoc IR image geometry now matches Altium for wrapped `TSVGImage` payloads:
+`gotImage` source dimensions use the embedded BMP preview size while runtime
+SVG rendering still uses the SVG payload.
+
+## Compatibility Notes
+
+The internal PcbDoc VIA authoring constant
+`VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU` was renamed to
+`VIA_TENTING_DEFAULT_SOLDER_MASK_EXPANSION_IU` so the API wording describes the
+tenting behavior rather than implying an AD25-only rule. The old name is not
+retained.
+
+## Validation
+
+This release was checked with focused keepout helper tests, package
+validation, public tests, wheel build and clean-install checks, private
+signoff, and the affected source quality gates.
+
+---
+
 # altium-monkey 2026.06.21 Release Notes
 
 Package version: `2026.6.21`
@@ -321,26 +428,24 @@ PcbDoc custom-pad authoring is now available through
 including custom bodies, custom holes, pad-center offsets, net assignment, and
 custom-pad footprint placement without duplicate region replay. Direct PcbDoc
 custom-pad authoring also accepts additional per-layer custom bodies and holes
-through Python `PcbCustomPadLayerShapeSpec` / `layer_shapes=...` and native
-C++ `PcbCustomPadOptions.layer_shapes`.
+through Python `PcbCustomPadLayerShapeSpec` / `layer_shapes=...`.
 
 Placing PcbLib footprints into PcbDoc now preserves footprint-local via
 identity through PcbDoc-to-PcbLib extraction, including IPC-4761 feature side
 tables, feature materials, propagation delay, hole tolerances, mask and tenting
 flags, and fabrication/assembly testpoint flags.
 
-PcbDoc authoring now includes Python and native C++ helpers for mechanical
-layer display names, enabled-state registry fields, and mechanical mirror
-pairing used by component side flipping.
+PcbDoc authoring now includes Python helpers for mechanical layer display
+names, enabled-state registry fields, and mechanical mirror pairing used by
+component side flipping.
 
 PcbDoc user-union creation now supports explicit native union-id replay in
-Python and native C++, enabling deterministic read/mutate/write recreation of
-named user unions while preserving auto-allocation for normal use.
+Python, enabling deterministic read/mutate/write recreation of named user
+unions while preserving auto-allocation for normal use.
 
 Layer-stack document authoring now includes via-span and backdrill-span
-helpers, with native C++ parity for the same `LAYERPAIR*` Board6/Data contract.
-Direct via-tail and counterhole mutation remains intentionally outside this
-API.
+helpers for the same `LAYERPAIR*` Board6/Data contract. Direct via-tail and
+counterhole mutation remains intentionally outside this API.
 
 ## PcbDoc Long Text Fix
 
@@ -368,13 +473,12 @@ The release diff was audited against `altium-monkey/v2026.6.7`. The
 user-facing changed surfaces are: layer-stack document authoring and
 interchange docs, PcbDoc/PcbLib writer parity, PcbLib via feature and
 `PrimitiveParameters` support, public PcbLib examples, long PcbDoc text
-serialization, generated public example docs, and native C++ parity for the
-promoted writer controls.
+serialization, generated public example docs, and the promoted writer
+controls.
 
 This release was tested with focused package authoring tests, public example
-tests, private PcbDoc/PcbLib fixture lanes, native C++ parity lanes for the
-promoted writer surfaces, AD26 interop open/save smoke for the generated PcbLib
-samples, and strict package Pyright with zero diagnostics.
+tests, private PcbDoc/PcbLib fixture lanes, AD26 interop open/save smoke for
+the generated PcbLib samples, and strict package Pyright with zero diagnostics.
 
 ## Public API Compatibility
 
@@ -519,9 +623,9 @@ matching the PcbDoc text surface where the native format supports it.
 
 ## Validation
 
-Focused Python package tests, generated-public-package tests, and native C++
-tests cover the shared primitive option cleanup, including component-body option
-parity and R082-style local stack pad geometry.
+Focused Python package tests and generated-public-package tests cover the
+shared primitive option cleanup, including component-body option parity and
+R082-style local stack pad geometry.
 
 ## Public API Compatibility
 

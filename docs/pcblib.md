@@ -94,6 +94,17 @@ Use `set_ipc4761_feature_side(...)` and
 `set_ipc4761_feature_material(...)` on the returned via to customize IPC-4761
 feature rows such as filling or capping material.
 
+## Keepout Restrictions
+
+Footprint tracks, arcs, fills, and regions can carry Altium's raw
+`keepout_restrictions` mask when authored as object-specific keepouts. Use
+`PcbKeepoutRestriction`, `decode_pcb_keepout_restrictions(...)`,
+`encode_pcb_keepout_restrictions(...)`,
+`pcb_keepout_restriction_names(...)`, and
+`pcb_keepout_restriction_unknown_bits(...)` for named access to the confirmed
+via, track, copper, SMD pad, and through-hole pad restriction bits while
+preserving the raw integer for writeback.
+
 ## Footprint Primitive Parameters
 
 `AltiumPcbFootprint.set_footprint_primitive_parameter(...)` writes

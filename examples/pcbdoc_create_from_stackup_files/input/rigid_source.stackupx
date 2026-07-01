@@ -1,0 +1,100 @@
+<StackupDocument xmlns="http://altium.com/ns/LayerStackManager" SerializerVersion="1.1.0.0" Version="2.1.0.0" Id="e9e4740f-6231-4a54-9fa5-2b8e8601b7b2" RevisionId="ea7535a8-9f53-503b-b394-895578db4626" RevisionDate="2000-01-01T00:00:00.0000000Z">
+  <FeatureSet>
+    <Feature Id="c8939e8a-fd0e-4d52-8860-b7a98f452016">Standard Stackup</Feature>
+    <Feature Id="e3df2b86-5f1b-49ca-b266-d1ae57f0ba6f">Impedance Calculator</Feature>
+  </FeatureSet>
+  <TypeExtensions />
+  <Stackup Type="Standard" RoughnessType="NoRoughness" RoughnessFactorSR="0um" RoughnessFactorRF="1%" RealisticRatio="True" CopperResistance="17.24nohm" ViaPlatingThickness="0.6mil" AmbientTemperature="20C" TemperatureRise="50C">
+    <Stacks>
+      <Stack Id="e9e4740f-6231-4a54-9fa5-2b8e8601b7b2" Name="Master layer stack" IsSymmetric="True" TemplateId="16ee34bb-46e1-57c5-a1fa-51c0bcdc4d96" IsFlex="False">
+        <Layers>
+          <Layer Id="797633fc-b26c-5e6e-bfe8-2e3e2922d018" TypeId="c7ef040e-8d00-490b-b00c-a7e7823ff174" Name="Top Overlay" IsShared="True">
+            <Properties />
+          </Layer>
+          <Layer Id="b362110e-46ee-5427-9701-f13d5f9175bc" TypeId="7b384237-13d8-4318-8bcb-accd8d9a51e7" Name="Top Solder" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">0.4mil</Property>
+              <Property Name="Material" Type="String">Solder Resist</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">3.5</Property>
+              <Property Name="CoverlayExpansion" Type="LengthValue">0mil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="b7d76671-86cd-5543-ab6b-f6da3834760c" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Top Layer" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.4mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyUp</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="6a1fab47-56e7-5bb3-bef8-e4f11c03ec0a" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 1" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">2.8mil</Property>
+              <Property Name="Material" Type="String">PP-006</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.1</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="a43f612d-2f65-5e38-a792-866b8c9e52fc" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="GND" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">None</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="6ded4bf7-c81d-5edf-a3a1-0f67e55cbcb0" TypeId="136c62ef-1fa6-4897-ae71-7e797b632b92" Name="Dielectric 2" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">28.4mil</Property>
+              <Property Name="Material" Type="String">FR-4</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.8</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="930451d2-692e-5ef0-89a1-7f93508c2dc4" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="PWR" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.378mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">None</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="ff001fde-f15e-5545-89d3-a6aef24039c6" TypeId="1a79611a-039d-4d40-a204-53c26c50f8b5" Name="Dielectric 3" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">2.8mil</Property>
+              <Property Name="Material" Type="String">PP-006</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.1</Property>
+              <Property Name="LossTangent" Type="DimensionlessValue">0.02</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="1bc8cd8d-f1c2-5658-9aea-3c4decc21ef5" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Bottom Layer" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.4mil</Property>
+              <Property Name="ComponentPlacement" Type="Altium.LayerStackManager.LayerSchema.ComponentPlacement, Altium.LayerStackManager.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=51600b9dd346ed18">BodyDown</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="65268ac1-5c47-5ccc-88ef-70cb610917c5" TypeId="7b384237-13d8-4318-8bcb-accd8d9a51e7" Name="Bottom Solder" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">0.4mil</Property>
+              <Property Name="Material" Type="String">Solder Resist</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">3.5</Property>
+              <Property Name="CoverlayExpansion" Type="LengthValue">0mil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="e9c4792b-0a33-533b-a11b-cb6c0d1894b9" TypeId="c7ef040e-8d00-490b-b00c-a7e7823ff174" Name="Bottom Overlay" IsShared="True">
+            <Properties />
+          </Layer>
+        </Layers>
+        <ViaSpans>
+          <ViaSpan Id="bb541bee-4d7f-5214-bb92-01d767e42590" AutoName="Thru 1:4" Type="ThruVia" StartLayerId="b7d76671-86cd-5543-ab6b-f6da3834760c" StopLayerId="1bc8cd8d-f1c2-5658-9aea-3c4decc21ef5" />
+        </ViaSpans>
+        <DrillSpans />
+      </Stack>
+    </Stacks>
+    <ImpedanceProfiles />
+    <Branches>
+      <Branch Id="d4703108-75af-5f09-8a10-7ea670797541" Name="Board" Description="">
+        <Sections>
+          <BranchSection Id="5caa113f-e66f-579a-995e-ca33d9978478" Name="Branch Section-1">
+            <Stacks>
+              <BranchSectionStack Id="55d330a3-eac1-5055-8185-5c5a1363cd03" LayerStackId="e9e4740f-6231-4a54-9fa5-2b8e8601b7b2" Description="Master layer stack" MaterialUsage="Common" Source="Design" IsLeftIntrusionsLinked="True" IntrusionLeftBottom="0m" IntrusionLeftTop="0m" IsRightIntrusionsLinked="True" IntrusionRightBottom="0m" IntrusionRightTop="0m" />
+            </Stacks>
+          </BranchSection>
+        </Sections>
+      </Branch>
+    </Branches>
+  </Stackup>
+</StackupDocument>

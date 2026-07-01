@@ -143,6 +143,18 @@ body helpers share the same outline normalization path; custom pads add the
 anchor pad and native `CustomShapes/*` attachment records around that region
 body.
 
+## Keepout Restrictions
+
+Object-specific PCB keepouts preserve Altium's raw `keepout_restrictions`
+integer. Use `PcbKeepoutRestriction`,
+`decode_pcb_keepout_restrictions(...)`,
+`encode_pcb_keepout_restrictions(...)`,
+`pcb_keepout_restriction_names(...)`, and
+`pcb_keepout_restriction_unknown_bits(...)` when you need named access to the
+confirmed mask bits for via, track, copper, SMD pad, and through-hole pad
+restrictions. Keep the raw integer as the stored field for round-trip
+preservation.
+
 ## Dimensions
 
 `AltiumPcbDoc.add_dimension_record(...)` and
@@ -207,6 +219,121 @@ accepts typed `AltiumRigidCopperLayerSpec` and
 dielectric names, thicknesses, material, dielectric constant, dielectric type,
 and loss tangent. Emit the stack into a new builder with
 `PcbDocBuilder.set_layer_stack_document(...)`.
+
+Use `AltiumLayerStackDocument.from_rigid_layer_rows(...)` when the physical
+row sequence matters. It accepts ordered `AltiumRigidStackRowSpec` rows, or
+existing parsed `AltiumStackLayer` rows, and preserves solder-mask, overlay,
+surface-finish, adjacent dielectric/prepreg/core rows, StackupX type IDs,
+StackupX properties, layer-pair spans, typed stackup settings, and impedance
+profiles/transmission lines for rigid new-board authoring. This is the
+programmatic equivalent of starting from a rigid `.stackup` or `.stackupx`
+file, but keeps the stack definition in Python code.
+
+Use the semantic row constructors for normal authoring. They fill the native
+Layer Stack Manager type IDs and StackupX property type names internally. Use
+`AltiumStackupSettings` for stackup-level electrical settings such as roughness
+model, copper resistance, via plating thickness, and temperatures:
+
+```python
+from altium_monkey import (
+    AltiumComponentPlacement,
+    AltiumCopperMaterialSpec,
+    AltiumDielectricMaterialSpec,
+    AltiumLayerPair,
+    AltiumLayerStackDocument,
+    AltiumRigidStackRowSpec,
+    AltiumStackupRoughnessModel,
+    AltiumStackupSettings,
+    PcbDocBuilder,
+)
+
+np_155f_1080 = AltiumDielectricMaterialSpec(
+    name="NP-155F",
+    construction="1080",
+    resin="67%",
+    frequency="1GHz",
+    dielectric_constant=3.91,
+    loss_tangent=0.02,
+    glass_transition_temperature="150C",
+    manufacturer="Nan Ya Plastics",
+)
+copper_foil = AltiumCopperMaterialSpec(
+    weight="1oz",
+    process="ED",
+    manufacturer="Altium Designer",
+    description="Copper Foil",
+)
+
+stack = AltiumLayerStackDocument.from_rigid_layer_rows(
+    name="vendor-8-layer",
+    rows=(
+        AltiumRigidStackRowSpec.overlay("Top Overlay"),
+        AltiumRigidStackRowSpec.solder_mask(
+            "Top Solder",
+            thickness_mils=0.6,
+            material="Solder Resist",
+            dielectric_constant=3.8,
+        ),
+        AltiumRigidStackRowSpec.copper(
+            "Top Layer",
+            thickness_mm=0.035,
+            component_placement=AltiumComponentPlacement.BODY_UP,
+            material=copper_foil,
+        ),
+        AltiumRigidStackRowSpec.prepreg(
+            "Dielectric 1",
+            thickness_mm=0.069,
+            material=np_155f_1080,
+        ),
+        AltiumRigidStackRowSpec.copper(
+            "Inner Layer 1",
+            thickness_mm=0.03,
+            component_placement=AltiumComponentPlacement.NONE,
+            material=copper_foil,
+        ),
+        # Add the remaining rows in the exact physical sequence.
+    ),
+    layer_pairs=(AltiumLayerPair(0, "TOP", "BOTTOM"),),
+    stackup_settings=AltiumStackupSettings(
+        roughness_model=AltiumStackupRoughnessModel.MODIFIED_HAMMERSTAD,
+        roughness_factor_model_sr="1um",
+        roughness_factor_model_rf="2%",
+        via_plating_thickness="18um",
+    ),
+)
+builder = PcbDocBuilder()
+builder.set_layer_stack_document(stack)
+builder.save("vendor_stack.PcbDoc")
+stack.to_stackup().write("vendor_stack.stackup")
+stack.to_stackupx().write("vendor_stack.stackupx")
+```
+
+The direct `AltiumRigidStackRowSpec(...)` constructor and
+`stackupx_properties` tuples are still available as advanced escape hatches
+for preserving unsupported source metadata, but they should not be needed for
+ordinary rigid stack creation.
+
+See
+[`pcbdoc_create_jlcpcb_rigid_stack`](../examples/pcbdoc_create_jlcpcb_rigid_stack/README.md)
+for a complete JLCPCB eight-layer stack authored entirely from Python row and
+material constants.
+
+For simple rigid boards, exported `.stackup` and `.stackupx` files can also be
+used as new-board inputs:
+
+```python
+stack = AltiumLayerStackDocument.from_stackupx("source.stackupx")
+builder = PcbDocBuilder()
+builder.set_layer_stack_document(stack)
+builder.save("from_stackupx.PcbDoc")
+```
+
+Use the same pattern with `from_stackup(...)` for `.stackup` text exports. The
+writer regenerates native PcbDoc stack rows from the imported semantic model;
+reopen the generated PcbDoc with `AltiumPcbDoc` and
+`AltiumLayerStackDocument` to verify readback. See
+[`pcbdoc_create_from_stackup_files`](../examples/pcbdoc_create_from_stackup_files/README.md)
+for a complete `.stackup` and `.stackupx` input example.
 
 For new rigid-flex documents, construct a typed `AltiumLayerStackDocument` with
 physical stack rows, `AltiumStackSubstack` definitions, `AltiumStackRegion`
@@ -361,40 +488,41 @@ Start with:
 4. [`pcbdoc_create_layer_stack`](../examples/pcbdoc_create_layer_stack/README.md)
 5. [`pcbdoc_create_mechanical_layer_kinds`](../examples/pcbdoc_create_mechanical_layer_kinds/README.md)
 6. [`pcbdoc_create_custom_rigid_stack`](../examples/pcbdoc_create_custom_rigid_stack/README.md)
-7. [`pcbdoc_create_impedance_rigid_stack`](../examples/pcbdoc_create_impedance_rigid_stack/README.md)
-8. [`pcbdoc_create_flex_stiffener`](../examples/pcbdoc_create_flex_stiffener/README.md)
-9. [`pcbdoc_create_rigid_flex_split_lines`](../examples/pcbdoc_create_rigid_flex_split_lines/README.md)
-10. [`pcbdoc_create_flex_in_cutout`](../examples/pcbdoc_create_flex_in_cutout/README.md)
-11. [`pcbdoc_create_rigid_flex_branch`](../examples/pcbdoc_create_rigid_flex_branch/README.md)
-12. [`pcbdoc_create_rigid_flex_branch_intrusion`](../examples/pcbdoc_create_rigid_flex_branch_intrusion/README.md)
-13. [`pcbdoc_create_rigid_flex_two_branch`](../examples/pcbdoc_create_rigid_flex_two_branch/README.md)
-14. [`pcbdoc_create_rigid_flex_impedance_backdrill`](../examples/pcbdoc_create_rigid_flex_impedance_backdrill/README.md)
-15. [`pcbdoc_create_cavity_placements`](../examples/pcbdoc_create_cavity_placements/README.md)
-16. [`pcbdoc_create_rigid_flex_multibranch`](../examples/pcbdoc_create_rigid_flex_multibranch/README.md)
-17. [`pcbdoc_flex_topology_report`](../examples/pcbdoc_flex_topology_report/README.md)
-18. [`pcbdoc_bom`](../examples/pcbdoc_bom/README.md)
-19. [`pcbdoc_pick_n_place`](../examples/pcbdoc_pick_n_place/README.md)
-20. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
-21. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
-22. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
-23. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
-24. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
-25. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
-26. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
-27. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
-28. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
-29. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
-30. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
-31. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
-32. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
-33. [`pcbdoc_add_custom_pad_region_outline`](../examples/pcbdoc_add_custom_pad_region_outline/README.md)
-34. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
-35. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
-36. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
-37. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
-38. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
-39. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
-40. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
+7. [`pcbdoc_create_jlcpcb_rigid_stack`](../examples/pcbdoc_create_jlcpcb_rigid_stack/README.md)
+8. [`pcbdoc_create_impedance_rigid_stack`](../examples/pcbdoc_create_impedance_rigid_stack/README.md)
+9. [`pcbdoc_create_flex_stiffener`](../examples/pcbdoc_create_flex_stiffener/README.md)
+10. [`pcbdoc_create_rigid_flex_split_lines`](../examples/pcbdoc_create_rigid_flex_split_lines/README.md)
+11. [`pcbdoc_create_flex_in_cutout`](../examples/pcbdoc_create_flex_in_cutout/README.md)
+12. [`pcbdoc_create_rigid_flex_branch`](../examples/pcbdoc_create_rigid_flex_branch/README.md)
+13. [`pcbdoc_create_rigid_flex_branch_intrusion`](../examples/pcbdoc_create_rigid_flex_branch_intrusion/README.md)
+14. [`pcbdoc_create_rigid_flex_two_branch`](../examples/pcbdoc_create_rigid_flex_two_branch/README.md)
+15. [`pcbdoc_create_rigid_flex_impedance_backdrill`](../examples/pcbdoc_create_rigid_flex_impedance_backdrill/README.md)
+16. [`pcbdoc_create_cavity_placements`](../examples/pcbdoc_create_cavity_placements/README.md)
+17. [`pcbdoc_create_rigid_flex_multibranch`](../examples/pcbdoc_create_rigid_flex_multibranch/README.md)
+18. [`pcbdoc_flex_topology_report`](../examples/pcbdoc_flex_topology_report/README.md)
+19. [`pcbdoc_bom`](../examples/pcbdoc_bom/README.md)
+20. [`pcbdoc_pick_n_place`](../examples/pcbdoc_pick_n_place/README.md)
+21. [`pcbdoc_svg`](../examples/pcbdoc_svg/README.md)
+22. [`pcbdoc_netclass_svg`](../examples/pcbdoc_netclass_svg/README.md)
+23. [`pcbdoc_add_track`](../examples/pcbdoc_add_track/README.md)
+24. [`pcbdoc_user_union`](../examples/pcbdoc_user_union/README.md)
+25. [`pcbdoc_add_arc`](../examples/pcbdoc_add_arc/README.md)
+26. [`pcbdoc_add_pad`](../examples/pcbdoc_add_pad/README.md)
+27. [`pcbdoc_add_hole_tolerances`](../examples/pcbdoc_add_hole_tolerances/README.md)
+28. [`pcbdoc_add_via_ipc4761_matrix`](../examples/pcbdoc_add_via_ipc4761_matrix/README.md)
+29. [`pcbdoc_add_differential_pairs`](../examples/pcbdoc_add_differential_pairs/README.md)
+30. [`pcbdoc_diff_pair_report`](../examples/pcbdoc_diff_pair_report/README.md)
+31. [`pcbdoc_mutate_via_ipc4761`](../examples/pcbdoc_mutate_via_ipc4761/README.md)
+32. [`pcbdoc_add_text`](../examples/pcbdoc_add_text/README.md)
+33. [`pcbdoc_add_filled_region`](../examples/pcbdoc_add_filled_region/README.md)
+34. [`pcbdoc_add_custom_pad_region_outline`](../examples/pcbdoc_add_custom_pad_region_outline/README.md)
+35. [`pcbdoc_insert_nets_route`](../examples/pcbdoc_insert_nets_route/README.md)
+36. [`pcbdoc_insert_footprint_from_pcblib`](../examples/pcbdoc_insert_footprint_from_pcblib/README.md)
+37. [`pcbdoc_add_free_3d_extruded`](../examples/pcbdoc_add_free_3d_extruded/README.md)
+38. [`pcbdoc_add_free_3d_step`](../examples/pcbdoc_add_free_3d_step/README.md)
+39. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
+40. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
+41. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.

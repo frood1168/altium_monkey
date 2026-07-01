@@ -1756,21 +1756,26 @@ class AltiumPcbPad(PcbGraphicalObject):
         """
         pct = 0
         explicit_pct = False
+        source_pct = False
         layer_idx = layer.value - 1
         if 0 <= layer_idx < len(self.corner_radius):
             pct = int(self.corner_radius[layer_idx])
             explicit_pct = True
+            source_pct = pct > 0
         elif self.corner_radius_percentage > 0:
             pct = int(self.corner_radius_percentage)
+            source_pct = True
 
-        if pct <= 0 and not explicit_pct:
+        if pct <= 0 and (default_percent or not explicit_pct):
             pct = int(default_percent or 0)
+            source_pct = False
 
         if pct <= 0:
             return 0.0
 
         minor_mils = min(width_mils, height_mils)
-        return min((pct / 100.0) * minor_mils, minor_mils / 2.0)
+        divisor = 200.0 if source_pct else 100.0
+        return min((pct / divisor) * minor_mils, minor_mils / 2.0)
 
     def _octagon_points(
         self,

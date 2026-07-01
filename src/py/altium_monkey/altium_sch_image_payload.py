@@ -68,6 +68,17 @@ class SchEmbeddedImagePayload:
     def preferred_size_px(self) -> tuple[int, int] | None:
         return image_size_px_from_data(self.preferred_data)
 
+    @property
+    def altium_source_size_px(self) -> tuple[int, int] | None:
+        """
+        Return the source size Altium reports in GeometryMaker image ops.
+        """
+        if self.native_format == SchEmbeddedImageFormat.SVG and self.preview_data:
+            preview = parse_bmp_info(self.preview_data)
+            if preview is not None:
+                return preview.size_px
+        return self.preferred_size_px
+
 
 def detect_image_format(data: bytes) -> SchEmbeddedImageFormat | None:
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -152,15 +163,17 @@ def decode_sch_embedded_image_payload(data: bytes) -> SchEmbeddedImagePayload:
     )
 
 
-def decode_32bit_bmp_rgba(data: bytes) -> tuple[int, int, bytes] | None:
+def decode_bmp_rgba(data: bytes) -> tuple[int, int, bytes] | None:
     bmp = parse_bmp_info(data)
-    if bmp is None or bmp.bits_per_pixel != 32:
+    if bmp is None or bmp.bits_per_pixel not in (24, 32):
         return None
     width = abs(bmp.width)
     height = abs(bmp.height)
     if width <= 0 or height <= 0:
         return None
-    row_bytes = width * 4
+
+    bytes_per_pixel = bmp.bits_per_pixel // 8
+    row_bytes = ((width * 3 + 3) // 4) * 4 if bmp.bits_per_pixel == 24 else width * 4
     if bmp.pixel_offset + (row_bytes * height) > len(data):
         return None
 
@@ -169,16 +182,23 @@ def decode_32bit_bmp_rgba(data: bytes) -> tuple[int, int, bytes] | None:
     for source_row in range(height):
         dest_row = source_row if top_down else (height - 1 - source_row)
         source_offset = bmp.pixel_offset + source_row * row_bytes
-        dest_offset = dest_row * row_bytes
+        dest_offset = dest_row * width * 4
         for pixel in range(width):
-            source_index = source_offset + pixel * 4
+            source_index = source_offset + pixel * bytes_per_pixel
             dest_index = dest_offset + pixel * 4
             b = data[source_index]
             g = data[source_index + 1]
             r = data[source_index + 2]
-            a = data[source_index + 3]
+            a = data[source_index + 3] if bmp.bits_per_pixel == 32 else 0xFF
             rgba[dest_index : dest_index + 4] = bytes((r, g, b, a))
     return (width, height, bytes(rgba))
+
+
+def decode_32bit_bmp_rgba(data: bytes) -> tuple[int, int, bytes] | None:
+    bmp = parse_bmp_info(data)
+    if bmp is None or bmp.bits_per_pixel != 32:
+        return None
+    return decode_bmp_rgba(data)
 
 
 def bmp_alpha_extrema(data: bytes) -> tuple[int, int] | None:

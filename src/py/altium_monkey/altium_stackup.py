@@ -186,7 +186,8 @@ class AltiumStackupDocument:
         from .altium_layer_stack_document import AltiumLayerStackDocument
 
         return AltiumLayerStackDocument.from_board(
-            AltiumBoard.from_record(self.to_record_mapping())
+            AltiumBoard.from_record(self.to_record_mapping()),
+            source_origin="stackup",
         )
 
     def to_debug_json(self) -> dict[str, object]:
@@ -1418,6 +1419,11 @@ def _normalized_guid_key(value: object) -> str:
 
 
 def _type_id_for_layer(layer: object) -> str:
+    stackupx_type_id = _normalized_guid_key(
+        getattr(layer, "stackupx_type_id", "")
+    )
+    if stackupx_type_id:
+        return "{" + stackupx_type_id + "}"
     family = str(getattr(layer, "family", "")).strip().lower()
     if getattr(layer, "is_stiffener", None) is True:
         return _TYPE_ID_CORE

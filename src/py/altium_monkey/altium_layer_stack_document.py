@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from enum import Enum, IntEnum
 from typing import TYPE_CHECKING
 import re
 import uuid
@@ -100,6 +101,8 @@ _STACKUPX_PROPERTY_TYPES = {
     "LOSSTANGENT": "DimensionlessValue",
     "COVERLAYEXPANSION": "LengthValue",
     "WEIGHT": "MassOunceValue",
+    "COMPONENTPLACEMENT": "",
+    "COPPERORIENTATION": "Int32",
 }
 _STACKUPX_PROPERTY_NAMES = {
     "PROCESS": "Process",
@@ -110,6 +113,8 @@ _STACKUPX_PROPERTY_NAMES = {
     "LOSSTANGENT": "LossTangent",
     "COVERLAYEXPANSION": "CoverlayExpansion",
     "WEIGHT": "Weight",
+    "COMPONENTPLACEMENT": "ComponentPlacement",
+    "COPPERORIENTATION": "CopperOrientation",
 }
 
 _STACK_ENTRY_KEY_RE = re.compile(
@@ -331,9 +336,13 @@ def _layer_family(
     *,
     display_name: str,
     legacy_layer_id: int | None,
+    type_id: str | None = None,
     copper_thickness_mils: float | None = None,
     dielectric_height_mils: float | None = None,
 ) -> str:
+    type_family = _layer_family_from_type_id(type_id)
+    if type_family:
+        return type_family
     name = display_name.upper()
     if legacy_layer_id is not None:
         try:
@@ -370,6 +379,36 @@ def _layer_family(
     if "MECHANICAL" in name:
         return "mechanical"
     return "system"
+
+
+def _layer_family_from_type_id(type_id: str | None) -> str:
+    normalized = _normalized_source_id(type_id)
+    if not normalized:
+        return ""
+    schema_families = {
+        "overlay": "overlay",
+        "solder_mask": "solder_mask",
+        "paste_mask": "paste",
+        "mechanical": "mechanical",
+        "copper_foil": "copper",
+        "copper_signal": "copper",
+        "copper_plane": "copper",
+        "base_dielectric": "dielectric",
+        "dielectric": "dielectric",
+        "core": "dielectric",
+        "prepreg": "dielectric",
+        "bikini_coverlay": "overlay",
+        "surface_finish": "surface_finish",
+        "plating": "plating",
+        "adhesive": "dielectric",
+        "stiffener": "dielectric",
+        "misc": "misc",
+        "marking": "marking",
+    }
+    for schema_name, schema_type_id in _LAYER_SCHEMA_TYPE_IDS.items():
+        if normalized == schema_type_id:
+            return schema_families.get(schema_name, schema_name)
+    return ""
 
 
 def _advanced_layer_family(fields: Mapping[str, str]) -> str:
@@ -591,6 +630,7 @@ class AltiumStackLayer:
     source_record_id: str = ""
     layer_id: int | None = None
     legacy_layer_id: int | None = None
+    stackupx_type_id: str = ""
     copper_thickness_mils: float | None = None
     dielectric_constant: float | None = None
     dielectric_loss_tangent: float | None = None
@@ -635,6 +675,7 @@ class AltiumStackLayer:
             "source_record_id": self.source_record_id,
             "layer_id": self.layer_id,
             "legacy_layer_id": self.legacy_layer_id,
+            "stackupx_type_id": self.stackupx_type_id,
             "copper_thickness_mils": self.copper_thickness_mils,
             "dielectric_constant": self.dielectric_constant,
             "dielectric_loss_tangent": self.dielectric_loss_tangent,
@@ -1008,6 +1049,718 @@ class AltiumRigidDielectricLayerSpec:
     loss_tangent: float | None = None
 
 
+class AltiumComponentPlacement(IntEnum):
+    """
+    Component placement policy for authored copper stack rows.
+
+    Altium stores this as an integer in native PcbDoc rows and as a typed
+    StackupX property on export. Public authoring code should use these names
+    instead of raw native integers.
+    """
+
+    NONE = 0
+    BODY_UP = 1
+    BODY_DOWN = 2
+
+
+class AltiumDielectricLayerKind(IntEnum):
+    """
+    Layer Stack Manager dielectric row kind for authored rigid stacks.
+    """
+
+    CORE = 0
+    PREPREG = 2
+    COVERLAY = 4
+
+
+class AltiumStackupType(str, Enum):
+    """
+    Layer Stack Manager stackup type.
+    """
+
+    STANDARD = "Standard"
+    PRINTED = "Printed"
+
+
+class AltiumStackupRoughnessModel(str, Enum):
+    """
+    Layer Stack Manager conductor roughness model.
+    """
+
+    NO_ROUGHNESS = "NoRoughness"
+    MODIFIED_HAMMERSTAD = "MHammerstad"
+    HURAY_SNOWBALL = "HuraySnowball"
+    MODIFIED_GROISS = "MGroiss"
+    HEMISPHERICAL = "Hemispherical"
+    HURAY_BRACKEN = "HurayBracken"
+
+
+@dataclass(frozen=True)
+class AltiumStackupSettings:
+    """
+    Semantic Layer Stack Manager stackup-level electrical settings.
+
+    These fields map to Altium's StackupData/IStackupData model. They serialize
+    to StackupX `<Stackup ...>` attributes and can be read from native
+    `LAYERMASTERSTACK_V8*` fields when a PcbDoc source exposes them.
+    """
+
+    stackup_type: AltiumStackupType = AltiumStackupType.STANDARD
+    realistic_ratio: bool = True
+    is_symmetric: bool | None = None
+    roughness_model: AltiumStackupRoughnessModel = (
+        AltiumStackupRoughnessModel.NO_ROUGHNESS
+    )
+    roughness_factor_model_sr: str = "0um"
+    roughness_factor_model_rf: str = "1%"
+    copper_resistance: str = "17.24nohm"
+    via_plating_thickness: str = "0.6mil"
+    ambient_temperature: str = "20C"
+    temperature_rise: str = "50C"
+
+    @classmethod
+    def default(cls) -> "AltiumStackupSettings":
+        """
+        Return Altium's default stackup-level electrical settings.
+        """
+        return cls()
+
+    @classmethod
+    def from_stackup_attributes(
+        cls,
+        attributes: Sequence[tuple[str, str]],
+    ) -> "AltiumStackupSettings":
+        """
+        Build typed settings from serialized StackupX/native attribute pairs.
+        """
+        values = {str(key): str(value) for key, value in tuple(attributes or ())}
+        defaults = cls()
+        return cls(
+            stackup_type=_coerce_stackup_type(
+                values.get("Type", defaults.stackup_type)
+            ),
+            realistic_ratio=_coerce_bool(
+                values.get("RealisticRatio", defaults.realistic_ratio),
+                field_name="RealisticRatio",
+            ),
+            is_symmetric=(
+                _coerce_bool(values["IsSymmetric"], field_name="IsSymmetric")
+                if "IsSymmetric" in values
+                else None
+            ),
+            roughness_model=_coerce_roughness_model(
+                values.get("RoughnessType", defaults.roughness_model)
+            ),
+            roughness_factor_model_sr=values.get(
+                "RoughnessFactorSR",
+                defaults.roughness_factor_model_sr,
+            ),
+            roughness_factor_model_rf=values.get(
+                "RoughnessFactorRF",
+                defaults.roughness_factor_model_rf,
+            ),
+            copper_resistance=values.get(
+                "CopperResistance", defaults.copper_resistance
+            ),
+            via_plating_thickness=values.get(
+                "ViaPlatingThickness",
+                defaults.via_plating_thickness,
+            ),
+            ambient_temperature=values.get(
+                "AmbientTemperature",
+                defaults.ambient_temperature,
+            ),
+            temperature_rise=values.get("TemperatureRise", defaults.temperature_rise),
+        )
+
+    def to_stackup_attributes(self) -> tuple[tuple[str, str], ...]:
+        """
+        Return serialized StackupX/native attribute pairs.
+        """
+        stackup_type = _coerce_stackup_type(self.stackup_type)
+        roughness_model = _coerce_roughness_model(self.roughness_model)
+        attributes: list[tuple[str, str]] = [("Type", stackup_type.value)]
+        if self.is_symmetric is not None:
+            attributes.append(("IsSymmetric", _bool_text(self.is_symmetric)))
+        attributes.extend(
+            (
+                ("RoughnessType", roughness_model.value),
+                ("RoughnessFactorSR", _non_empty_text(self.roughness_factor_model_sr)),
+                ("RoughnessFactorRF", _non_empty_text(self.roughness_factor_model_rf)),
+                ("RealisticRatio", _bool_text(self.realistic_ratio)),
+                ("CopperResistance", _non_empty_text(self.copper_resistance)),
+                ("ViaPlatingThickness", _non_empty_text(self.via_plating_thickness)),
+                ("AmbientTemperature", _non_empty_text(self.ambient_temperature)),
+                ("TemperatureRise", _non_empty_text(self.temperature_rise)),
+            )
+        )
+        return tuple(attributes)
+
+
+@dataclass(frozen=True)
+class AltiumDielectricMaterialSpec:
+    """
+    Semantic dielectric material metadata for StackupX-capable rigid rows.
+
+    The writer translates these fields into the native StackupX property names
+    and type strings. Callers should not need to know the serialized property
+    tuple shape for common material fields.
+    """
+
+    name: str
+    construction: str = ""
+    resin: str = ""
+    frequency: str = ""
+    dielectric_constant: float | None = None
+    loss_tangent: float | None = None
+    glass_transition_temperature: str = ""
+    manufacturer: str = ""
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class AltiumCopperMaterialSpec:
+    """
+    Semantic copper material metadata for authored rigid copper rows.
+
+    `material` can be a display material name. `entity_ref` is available for
+    advanced callers that need to preserve an Altium material-library reference,
+    but ordinary public examples should not require one.
+    """
+
+    material: str = ""
+    entity_ref: str = ""
+    weight: str = ""
+    process: str = ""
+    manufacturer: str = ""
+    description: str = ""
+    copper_orientation: int | None = None
+
+
+@dataclass(frozen=True)
+class AltiumRigidStackRowSpec:
+    """
+    Authored rigid-board physical row input for new PcbDoc stack synthesis.
+
+    This lower-level constructor input preserves the ordered row model used by
+    `.stackup` and `.stackupx` files, including adjacent dielectric rows,
+    solder-mask/overlay rows, StackupX properties, and explicit native layer
+    metadata. Use `from_rigid_stack(...)` for the simpler copper plus
+    one-dielectric-per-span case.
+    """
+
+    name: str
+    family: str
+    layer_id: int | None = None
+    legacy_layer_id: int | None = None
+    stackupx_type_id: str = ""
+    copper_thickness_mils: float | None = None
+    dielectric_constant: float | None = None
+    dielectric_loss_tangent: float | None = None
+    dielectric_height_mils: float | None = None
+    dielectric_material: str = ""
+    dielectric_type: int | None = None
+    component_placement: int | None = None
+    used_by_primitives: bool | None = None
+    coverlay_expansion: str = ""
+    is_stiffener: bool | None = None
+    is_adhesive: bool | None = None
+    source_record_id: str = ""
+    registry_ref: str = ""
+    stackupx_properties: tuple[tuple[str, str, str], ...] = ()
+    stackupx_is_shared: bool | None = None
+
+    @classmethod
+    def overlay(cls, name: str) -> "AltiumRigidStackRowSpec":
+        """
+        Build an overlay/legend row.
+        """
+        return cls(name=name, family="overlay")
+
+    @classmethod
+    def solder_mask(
+        cls,
+        name: str,
+        *,
+        thickness_mils: float | None = None,
+        thickness_mm: float | None = None,
+        dielectric_constant: float | None = None,
+        material: str | AltiumDielectricMaterialSpec = "Solder Resist",
+        coverlay_expansion: str = "0mm",
+        stackupx_properties: Sequence[tuple[str, str, str]] = (),
+    ) -> "AltiumRigidStackRowSpec":
+        """
+        Build a solder-mask row from semantic thickness/material fields.
+        """
+        resolved_thickness = _resolve_length_mils(
+            thickness_mils=thickness_mils,
+            thickness_mm=thickness_mm,
+            default_mils=None,
+            field_name="solder mask thickness",
+        )
+        thickness_value = _stackupx_length_value(
+            thickness_mils=thickness_mils,
+            thickness_mm=thickness_mm,
+            resolved_mils=resolved_thickness,
+        )
+        material_spec = _coerce_dielectric_material_spec(material)
+        resolved_dielectric_constant = _first_float(
+            dielectric_constant,
+            material_spec.dielectric_constant,
+        )
+        return cls(
+            name=name,
+            family="solder_mask",
+            dielectric_height_mils=resolved_thickness,
+            dielectric_constant=resolved_dielectric_constant,
+            dielectric_loss_tangent=material_spec.loss_tangent,
+            dielectric_material=material_spec.name,
+            coverlay_expansion=coverlay_expansion,
+            stackupx_properties=_merge_stackupx_property_tuples(
+                _dielectric_material_stackupx_properties(
+                    material_spec,
+                    thickness_value=thickness_value,
+                    dielectric_constant=resolved_dielectric_constant,
+                    loss_tangent=material_spec.loss_tangent,
+                    coverlay_expansion=coverlay_expansion,
+                ),
+                stackupx_properties,
+            ),
+        )
+
+    @classmethod
+    def copper(
+        cls,
+        name: str,
+        *,
+        thickness_mils: float | None = None,
+        thickness_mm: float | None = None,
+        component_placement: AltiumComponentPlacement | int | None = None,
+        material: AltiumCopperMaterialSpec | None = None,
+        copper_orientation: int | None = None,
+        stackupx_properties: Sequence[tuple[str, str, str]] = (),
+    ) -> "AltiumRigidStackRowSpec":
+        """
+        Build a copper row from semantic thickness and placement fields.
+        """
+        resolved_thickness = _resolve_length_mils(
+            thickness_mils=thickness_mils,
+            thickness_mm=thickness_mm,
+            default_mils=1.4,
+            field_name="copper thickness",
+        )
+        resolved_placement = _coerce_component_placement(component_placement)
+        resolved_material = material or AltiumCopperMaterialSpec()
+        resolved_orientation = (
+            copper_orientation
+            if copper_orientation is not None
+            else resolved_material.copper_orientation
+        )
+        return cls(
+            name=name,
+            family="copper",
+            copper_thickness_mils=resolved_thickness,
+            component_placement=resolved_placement,
+            stackupx_properties=_merge_stackupx_property_tuples(
+                _copper_material_stackupx_properties(
+                    resolved_material,
+                    thickness_value=_stackupx_length_value(
+                        thickness_mils=thickness_mils,
+                        thickness_mm=thickness_mm,
+                        resolved_mils=resolved_thickness,
+                    ),
+                    component_placement=resolved_placement,
+                    copper_orientation=resolved_orientation,
+                ),
+                stackupx_properties,
+            ),
+        )
+
+    @classmethod
+    def dielectric(
+        cls,
+        name: str,
+        *,
+        kind: AltiumDielectricLayerKind | int,
+        thickness_mils: float | None = None,
+        thickness_mm: float | None = None,
+        dielectric_constant: float | None = None,
+        loss_tangent: float | None = None,
+        material: str | AltiumDielectricMaterialSpec,
+        stackupx_properties: Sequence[tuple[str, str, str]] = (),
+    ) -> "AltiumRigidStackRowSpec":
+        """
+        Build a dielectric row such as a core, prepreg, or coverlay row.
+        """
+        resolved_thickness = _resolve_length_mils(
+            thickness_mils=thickness_mils,
+            thickness_mm=thickness_mm,
+            default_mils=None,
+            field_name="dielectric thickness",
+        )
+        material_spec = _coerce_dielectric_material_spec(material)
+        resolved_dielectric_constant = _first_float(
+            dielectric_constant,
+            material_spec.dielectric_constant,
+        )
+        resolved_loss_tangent = _first_float(loss_tangent, material_spec.loss_tangent)
+        resolved_kind = _coerce_dielectric_kind(kind)
+        return cls(
+            name=name,
+            family="dielectric",
+            dielectric_height_mils=resolved_thickness,
+            dielectric_constant=resolved_dielectric_constant,
+            dielectric_loss_tangent=resolved_loss_tangent,
+            dielectric_material=material_spec.name,
+            dielectric_type=resolved_kind,
+            stackupx_properties=_merge_stackupx_property_tuples(
+                _dielectric_material_stackupx_properties(
+                    material_spec,
+                    thickness_value=_stackupx_length_value(
+                        thickness_mils=thickness_mils,
+                        thickness_mm=thickness_mm,
+                        resolved_mils=resolved_thickness,
+                    ),
+                    dielectric_constant=resolved_dielectric_constant,
+                    loss_tangent=resolved_loss_tangent,
+                ),
+                stackupx_properties,
+            ),
+        )
+
+    @classmethod
+    def prepreg(
+        cls,
+        name: str,
+        *,
+        thickness_mils: float | None = None,
+        thickness_mm: float | None = None,
+        dielectric_constant: float | None = None,
+        loss_tangent: float | None = None,
+        material: str | AltiumDielectricMaterialSpec,
+        stackupx_properties: Sequence[tuple[str, str, str]] = (),
+    ) -> "AltiumRigidStackRowSpec":
+        """
+        Build a prepreg row.
+        """
+        return cls.dielectric(
+            name,
+            kind=AltiumDielectricLayerKind.PREPREG,
+            thickness_mils=thickness_mils,
+            thickness_mm=thickness_mm,
+            dielectric_constant=dielectric_constant,
+            loss_tangent=loss_tangent,
+            material=material,
+            stackupx_properties=stackupx_properties,
+        )
+
+    @classmethod
+    def core(
+        cls,
+        name: str,
+        *,
+        thickness_mils: float | None = None,
+        thickness_mm: float | None = None,
+        dielectric_constant: float | None = None,
+        loss_tangent: float | None = None,
+        material: str | AltiumDielectricMaterialSpec,
+        stackupx_properties: Sequence[tuple[str, str, str]] = (),
+    ) -> "AltiumRigidStackRowSpec":
+        """
+        Build a core row.
+        """
+        return cls.dielectric(
+            name,
+            kind=AltiumDielectricLayerKind.CORE,
+            thickness_mils=thickness_mils,
+            thickness_mm=thickness_mm,
+            dielectric_constant=dielectric_constant,
+            loss_tangent=loss_tangent,
+            material=material,
+            stackupx_properties=stackupx_properties,
+        )
+
+    @classmethod
+    def from_stack_layer(cls, layer: object) -> "AltiumRigidStackRowSpec":
+        """
+        Copy an existing source-aware stack row into authored-row input.
+        """
+        return cls(
+            name=str(getattr(layer, "display_name", "") or ""),
+            family=str(getattr(layer, "family", "") or ""),
+            layer_id=getattr(layer, "layer_id", None),
+            legacy_layer_id=getattr(layer, "legacy_layer_id", None),
+            stackupx_type_id=str(getattr(layer, "stackupx_type_id", "") or ""),
+            copper_thickness_mils=getattr(layer, "copper_thickness_mils", None),
+            dielectric_constant=getattr(layer, "dielectric_constant", None),
+            dielectric_loss_tangent=getattr(
+                layer,
+                "dielectric_loss_tangent",
+                None,
+            ),
+            dielectric_height_mils=getattr(layer, "dielectric_height_mils", None),
+            dielectric_material=str(getattr(layer, "dielectric_material", "") or ""),
+            dielectric_type=getattr(layer, "dielectric_type", None),
+            component_placement=getattr(layer, "component_placement", None),
+            used_by_primitives=getattr(layer, "used_by_primitives", None),
+            coverlay_expansion=str(getattr(layer, "coverlay_expansion", "") or ""),
+            is_stiffener=getattr(layer, "is_stiffener", None),
+            is_adhesive=getattr(layer, "is_adhesive", None),
+            source_record_id=str(getattr(layer, "source_record_id", "") or ""),
+            registry_ref=str(getattr(layer, "registry_ref", "") or ""),
+            stackupx_properties=_coerce_stackupx_property_tuples(
+                getattr(layer, "stackupx_properties", ())
+            ),
+            stackupx_is_shared=getattr(layer, "stackupx_is_shared", None),
+        )
+
+
+def _resolve_length_mils(
+    *,
+    thickness_mils: float | None,
+    thickness_mm: float | None,
+    default_mils: float | None,
+    field_name: str,
+) -> float | None:
+    if thickness_mils is not None and thickness_mm is not None:
+        raise ValueError(f"Pass either {field_name} in mils or mm, not both")
+    if thickness_mils is not None:
+        return float(thickness_mils)
+    if thickness_mm is not None:
+        return float(thickness_mm) / 0.0254
+    return default_mils
+
+
+def _stackupx_length_value(
+    *,
+    thickness_mils: float | None,
+    thickness_mm: float | None,
+    resolved_mils: float | None,
+) -> str:
+    if thickness_mm is not None:
+        return f"{float(thickness_mm):g}mm"
+    if thickness_mils is not None:
+        return f"{float(thickness_mils):g}mil"
+    if resolved_mils is not None:
+        return _format_mil_value(resolved_mils)
+    return ""
+
+
+def _first_float(*values: float | int | None) -> float | None:
+    for value in values:
+        if value is not None:
+            return float(value)
+    return None
+
+
+def _coerce_component_placement(
+    value: AltiumComponentPlacement | int | None,
+) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, AltiumComponentPlacement):
+        return int(value)
+    try:
+        return int(AltiumComponentPlacement(int(value)))
+    except ValueError as exc:
+        valid = ", ".join(item.name for item in AltiumComponentPlacement)
+        raise ValueError(
+            f"Unsupported component placement {value!r}; use {valid}"
+        ) from exc
+
+
+def _coerce_dielectric_kind(value: AltiumDielectricLayerKind | int) -> int:
+    if isinstance(value, AltiumDielectricLayerKind):
+        return int(value)
+    try:
+        return int(AltiumDielectricLayerKind(int(value)))
+    except ValueError as exc:
+        valid = ", ".join(item.name for item in AltiumDielectricLayerKind)
+        raise ValueError(f"Unsupported dielectric kind {value!r}; use {valid}") from exc
+
+
+def _coerce_stackup_type(value: object) -> AltiumStackupType:
+    if isinstance(value, AltiumStackupType):
+        return value
+    token = str(value or "").strip()
+    for item in AltiumStackupType:
+        if token == item.value or token.upper() == item.name:
+            return item
+    valid = ", ".join(item.value for item in AltiumStackupType)
+    raise ValueError(f"Unsupported stackup type {value!r}; use {valid}")
+
+
+def _coerce_roughness_model(value: object) -> AltiumStackupRoughnessModel:
+    if isinstance(value, AltiumStackupRoughnessModel):
+        return value
+    token = str(value or "").strip()
+    for item in AltiumStackupRoughnessModel:
+        if token == item.value or token.upper() == item.name:
+            return item
+    valid = ", ".join(item.value for item in AltiumStackupRoughnessModel)
+    raise ValueError(f"Unsupported roughness model {value!r}; use {valid}")
+
+
+def _coerce_bool(value: object, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    token = str(value or "").strip().lower()
+    if token in {"true", "1", "yes", "y"}:
+        return True
+    if token in {"false", "0", "no", "n"}:
+        return False
+    raise ValueError(f"Unsupported boolean value for {field_name}: {value!r}")
+
+
+def _bool_text(value: object) -> str:
+    return "True" if _coerce_bool(value, field_name="stackup setting") else "False"
+
+
+def _non_empty_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("Stackup settings cannot serialize empty dimension values")
+    return text
+
+
+def _coerce_dielectric_material_spec(
+    value: str | AltiumDielectricMaterialSpec,
+) -> AltiumDielectricMaterialSpec:
+    if isinstance(value, AltiumDielectricMaterialSpec):
+        return value
+    return AltiumDielectricMaterialSpec(name=str(value or ""))
+
+
+def _coerce_stackupx_property_tuples(
+    raw_properties: object,
+) -> tuple[tuple[str, str, str], ...]:
+    if not isinstance(raw_properties, Sequence) or isinstance(
+        raw_properties, (str, bytes)
+    ):
+        return ()
+
+    properties: list[tuple[str, str, str]] = []
+    for raw_property in raw_properties:
+        if not isinstance(raw_property, Sequence) or isinstance(
+            raw_property, (str, bytes)
+        ):
+            continue
+        if len(raw_property) < 3:
+            continue
+        properties.append(
+            (
+                str(raw_property[0]),
+                str(raw_property[1]),
+                str(raw_property[2]),
+            )
+        )
+    return tuple(properties)
+
+
+def _merge_stackupx_property_tuples(
+    generated: object,
+    overrides: object,
+) -> tuple[tuple[str, str, str], ...]:
+    merged: dict[str, tuple[str, str, str]] = {}
+    order: list[str] = []
+    for name, type_name, value in _coerce_stackupx_property_tuples(
+        generated
+    ) + _coerce_stackupx_property_tuples(overrides):
+        prop_name = str(name or "").strip()
+        if not prop_name:
+            continue
+        key = prop_name.lower()
+        if key not in merged:
+            order.append(key)
+        merged[key] = (prop_name, str(type_name or ""), str(value or ""))
+    return tuple(merged[key] for key in order)
+
+
+def _dielectric_material_stackupx_properties(
+    material: AltiumDielectricMaterialSpec,
+    *,
+    thickness_value: str = "",
+    dielectric_constant: float | None = None,
+    loss_tangent: float | None = None,
+    coverlay_expansion: str = "",
+) -> tuple[tuple[str, str, str], ...]:
+    props: list[tuple[str, str, str]] = []
+    if material.name:
+        props.append(("Material", "String", material.name))
+    if material.construction:
+        props.append(("Material.Constructions", "String", material.construction))
+    if material.resin:
+        props.append(("Material.Resin", "DimensionlessValue", material.resin))
+    if material.frequency:
+        props.append(("Material.Frequency", "FrequencyValue", material.frequency))
+    if dielectric_constant is not None:
+        props.append(
+            ("DielectricConstant", "DimensionlessValue", f"{dielectric_constant:g}")
+        )
+    if loss_tangent is not None:
+        props.append(("LossTangent", "DimensionlessValue", f"{loss_tangent:g}"))
+    if material.glass_transition_temperature:
+        props.append(
+            (
+                "Material.GlassTransTemp",
+                "TemperatureValue",
+                material.glass_transition_temperature,
+            )
+        )
+    if material.manufacturer:
+        props.append(("Material.Manufacturer", "String", material.manufacturer))
+    if material.description:
+        props.append(("Material.Description", "String", material.description))
+    if thickness_value:
+        props.append(("Thickness", "LengthValue", thickness_value))
+    if coverlay_expansion:
+        props.append(("CoverlayExpansion", "LengthValue", coverlay_expansion))
+    return tuple(props)
+
+
+def _component_placement_stackupx_value(
+    component_placement: int | None,
+) -> str:
+    if component_placement is None:
+        return ""
+    placement = AltiumComponentPlacement(int(component_placement))
+    return {
+        AltiumComponentPlacement.NONE: "None",
+        AltiumComponentPlacement.BODY_UP: "BodyUp",
+        AltiumComponentPlacement.BODY_DOWN: "BodyDown",
+    }[placement]
+
+
+def _copper_material_stackupx_properties(
+    material: AltiumCopperMaterialSpec,
+    *,
+    thickness_value: str = "",
+    component_placement: int | None = None,
+    copper_orientation: int | None = None,
+) -> tuple[tuple[str, str, str], ...]:
+    props: list[tuple[str, str, str]] = []
+    if material.entity_ref:
+        props.append(("Material", "EntityReference", material.entity_ref))
+    elif material.material:
+        props.append(("Material", "String", material.material))
+    if material.weight:
+        props.append(("Weight", "MassValue", material.weight))
+    if material.process:
+        props.append(("Process", "String", material.process))
+    if material.manufacturer:
+        props.append(("Material.Manufacturer", "String", material.manufacturer))
+    if material.description:
+        props.append(("Material.Description", "String", material.description))
+    if thickness_value:
+        props.append(("Thickness", "LengthValue", thickness_value))
+    if copper_orientation is not None:
+        props.append(("CopperOrientation", "Int32", str(int(copper_orientation))))
+    placement_value = _component_placement_stackupx_value(component_placement)
+    if placement_value:
+        props.append(("ComponentPlacement", "", placement_value))
+    return tuple(props)
+
+
 @dataclass(frozen=True)
 class AltiumStackBendLine:
     """
@@ -1377,6 +2130,17 @@ class AltiumLayerStackDocument:
     stackup_attributes: tuple[tuple[str, str], ...] = ()
     source: AltiumLayerStackSourceMap = field(default_factory=AltiumLayerStackSourceMap)
 
+    @property
+    def stackup_settings(self) -> AltiumStackupSettings:
+        """
+        Return typed stackup-level Layer Stack Manager settings.
+        """
+        attributes = (
+            self.stackup_attributes
+            or AltiumStackupSettings.default().to_stackup_attributes()
+        )
+        return AltiumStackupSettings.from_stackup_attributes(attributes)
+
     @classmethod
     def canonical_empty(cls) -> "AltiumLayerStackDocument":
         """
@@ -1498,6 +2262,114 @@ class AltiumLayerStackDocument:
             base_board_data=base_board_data,
         )
         return _with_authored_impedance_profiles(document, impedance_profiles)
+
+    @classmethod
+    def from_rigid_layer_rows(
+        cls,
+        *,
+        name: str,
+        rows: Sequence[
+            AltiumRigidStackRowSpec
+            | AltiumStackLayer
+            | AltiumRigidCopperLayerSpec
+            | AltiumRigidDielectricLayerSpec
+        ],
+        stack_ref: str | None = None,
+        substack_ref: str | None = None,
+        substack_name: str | None = None,
+        document_id: str | None = None,
+        layer_pairs: Sequence[AltiumLayerPair] = (),
+        impedance_profiles: Sequence[
+            AltiumImpedanceProfile | AltiumImpedanceProfileSpec
+        ] = (),
+        transmission_lines: Sequence[AltiumTransmissionLine] = (),
+        stackup_settings: AltiumStackupSettings | None = None,
+        stackup_attributes: Sequence[tuple[str, str]] = (),
+    ) -> "AltiumLayerStackDocument":
+        """
+        Build a new-document rigid stack from an explicit physical row sequence.
+
+        Unlike `from_rigid_stack(...)`, this constructor keeps the authored row
+        order exactly. That makes it suitable for recreating rigid `.stackup`
+        and `.stackupx` files whose physical stack contains solder-mask rows,
+        overlay rows, adjacent dielectric/prepreg/core rows, surface finishes,
+        layer-pair spans, and impedance profiles.
+        """
+        row_specs = tuple(_rigid_stack_row_spec_from_input(row) for row in rows)
+        if not row_specs:
+            raise ValueError("Rigid layer-row stack requires at least one row")
+
+        stack_name = _text(name) or "Board Layer Stack"
+        resolved_stack_ref = _text(stack_ref) or _authoring_guid(
+            "rigid-row-stack",
+            stack_name,
+        )
+        resolved_substack_ref = _text(substack_ref) or resolved_stack_ref
+        resolved_substack_name = _text(substack_name) or stack_name
+        resolved_document_id = _text(document_id) or _authoring_guid(
+            "rigid-row-document",
+            resolved_stack_ref,
+            stack_name,
+        )
+
+        registry_entries, stack_layers = _build_authored_rigid_row_artifacts(
+            row_specs=row_specs,
+            stack_ref=resolved_stack_ref,
+            substack_ref=resolved_substack_ref,
+        )
+
+        physical_stack = AltiumPhysicalStack(
+            stack_ref=resolved_stack_ref,
+            display_name=stack_name,
+            source_family="authored_rigid_row",
+            is_flex=False,
+            stackupx_is_flex=False,
+            stackupx_stack_type="0",
+            layers=tuple(stack_layers),
+        )
+        substack = AltiumStackSubstack(
+            index=0,
+            field_family="authored_rigid_row",
+            source_stackup_ref=resolved_substack_ref,
+            name=resolved_substack_name,
+            is_flex=False,
+            show_top_dielectric=False,
+            show_bottom_dielectric=False,
+            service_stackup=False,
+            used_by_primitives=False,
+            raw_stackup_type="0",
+            stackupx_is_flex=False,
+            stackupx_stack_type="0",
+            enabled_layer_refs=tuple(layer.registry_ref for layer in stack_layers),
+        )
+        document = cls(
+            layer_registry=AltiumLayerRegistry(entries=tuple(registry_entries)),
+            physical_stacks=(physical_stack,),
+            active_stack_ref=resolved_document_id,
+            rigid_flex_mode="none",
+            substacks=(substack,),
+            layer_pairs=_authored_rigid_layer_pairs(
+                layer_pairs,
+                default_stack_ref=resolved_substack_ref,
+            ),
+            stackup_attributes=_stackup_attributes_from_authoring(
+                settings=stackup_settings,
+                attributes=stackup_attributes,
+            ),
+            source=AltiumLayerStackSourceMap(
+                origin="authored_rigid_row",
+                board_record=(
+                    ("AUTHORED_STACK_REF", resolved_stack_ref),
+                    ("AUTHORED_SUBSTACK_REF", resolved_substack_ref),
+                    ("AUTHORED_DOCUMENT_ID", resolved_document_id),
+                ),
+            ),
+        )
+        return _with_authored_or_preserved_impedance(
+            document,
+            impedance_profiles,
+            transmission_lines,
+        )
 
     @classmethod
     def two_layer_rigid(cls) -> "AltiumLayerStackDocument":
@@ -2033,7 +2905,11 @@ class AltiumLayerStackDocument:
             else PcbDocBoardData.default()
         )
         authored_entries = self.to_authored_board_data_entries()
-        if authored_entries and self.source.origin == "pcbdoc":
+        authored_stack_core_entries = _filter_stack_entries(
+            authored_entries,
+            _is_native_stack_section_entry_key,
+        )
+        if authored_stack_core_entries and self.source.origin == "pcbdoc":
             updated = _replace_board_data_entry_section(
                 board_data,
                 is_layer_stack_source_entry_key,
@@ -2045,7 +2921,7 @@ class AltiumLayerStackDocument:
             return _with_top_level_bend_cache_entries(updated, self)
 
         semantic_entries = False
-        if not authored_entries:
+        if not authored_stack_core_entries:
             support = self.native_pcbdoc_write_support()
             if not support.supported:
                 details = "; ".join(support.reasons) or "unsupported stack shape"
@@ -2399,6 +3275,374 @@ def _with_authored_impedance_profiles(
     )
 
 
+def _rigid_stack_row_spec_from_input(
+    row: AltiumRigidStackRowSpec
+    | AltiumStackLayer
+    | AltiumRigidCopperLayerSpec
+    | AltiumRigidDielectricLayerSpec,
+) -> AltiumRigidStackRowSpec:
+    if isinstance(row, AltiumRigidStackRowSpec):
+        return row
+    if isinstance(row, AltiumStackLayer):
+        return AltiumRigidStackRowSpec.from_stack_layer(row)
+    if isinstance(row, AltiumRigidCopperLayerSpec):
+        return AltiumRigidStackRowSpec(
+            name=str(row.name),
+            family="copper",
+            copper_thickness_mils=row.copper_thickness_mils,
+            component_placement=row.component_placement,
+        )
+    if isinstance(row, AltiumRigidDielectricLayerSpec):
+        return AltiumRigidStackRowSpec(
+            name=str(row.name),
+            family="dielectric",
+            dielectric_height_mils=row.thickness_mils,
+            dielectric_constant=row.dielectric_constant,
+            dielectric_loss_tangent=row.loss_tangent,
+            dielectric_material=row.material,
+            dielectric_type=row.dielectric_type,
+        )
+    raise TypeError(f"Unsupported rigid stack row input: {type(row).__name__}")
+
+
+def _normalized_rigid_row_family(value: object) -> str:
+    token = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "mask": "solder_mask",
+        "solder": "solder_mask",
+        "soldermask": "solder_mask",
+        "solder_mask_layer": "solder_mask",
+        "paste_mask": "paste",
+        "silk": "overlay",
+        "silkscreen": "overlay",
+        "coverlay": "overlay",
+    }
+    token = aliases.get(token, token)
+    allowed = {
+        "copper",
+        "dielectric",
+        "overlay",
+        "solder_mask",
+        "paste",
+        "surface_finish",
+        "plating",
+        "misc",
+        "marking",
+    }
+    if token not in allowed:
+        raise ValueError(f"Unsupported rigid stack row family: {value!r}")
+    return token
+
+
+_STACKUP_SETTING_ATTRIBUTE_NAMES = frozenset(
+    {
+        "Type",
+        "IsSymmetric",
+        "RoughnessType",
+        "RoughnessFactorSR",
+        "RoughnessFactorRF",
+        "RealisticRatio",
+        "CopperResistance",
+        "ViaPlatingThickness",
+        "AmbientTemperature",
+        "TemperatureRise",
+    }
+)
+
+
+def _stackup_attributes_from_authoring(
+    *,
+    settings: AltiumStackupSettings | None,
+    attributes: Sequence[tuple[str, str]],
+) -> tuple[tuple[str, str], ...]:
+    raw_attributes = tuple(
+        (str(key), str(value)) for key, value in tuple(attributes or ())
+    )
+    if settings is not None and raw_attributes:
+        raise ValueError("Pass either stackup_settings or stackup_attributes, not both")
+    if settings is not None:
+        return settings.to_stackup_attributes()
+    if not raw_attributes:
+        return ()
+
+    unknown = sorted(
+        key
+        for key, _value in raw_attributes
+        if key not in _STACKUP_SETTING_ATTRIBUTE_NAMES
+    )
+    if unknown:
+        names = ", ".join(unknown)
+        raise ValueError(
+            f"Unsupported stackup attribute(s): {names}. Use AltiumStackupSettings "
+            "for semantic stackup-level settings."
+        )
+    return AltiumStackupSettings.from_stackup_attributes(
+        raw_attributes,
+    ).to_stackup_attributes()
+
+
+def _validated_rigid_copper_row_indexes(
+    row_specs: Sequence[AltiumRigidStackRowSpec],
+) -> tuple[int, ...]:
+    copper_row_indexes = tuple(
+        index
+        for index, row in enumerate(row_specs)
+        if _normalized_rigid_row_family(row.family) == "copper"
+    )
+    if len(copper_row_indexes) < 2:
+        raise ValueError("Rigid layer-row stack requires at least two copper rows")
+    if len(copper_row_indexes) > 32:
+        raise ValueError("Rigid layer-row stack supports at most 32 copper rows")
+    return copper_row_indexes
+
+
+def _authored_rigid_row_layer_ids(
+    row: AltiumRigidStackRowSpec,
+    *,
+    family: str,
+    copper_order: int | None,
+    copper_count: int,
+) -> tuple[int | None, int | None]:
+    legacy_layer_id = row.legacy_layer_id
+    layer_id = row.layer_id
+    if family != "copper" or copper_order is None:
+        return legacy_layer_id, layer_id
+    if legacy_layer_id is None:
+        legacy_layer_id = _rigid_copper_legacy_layer_id(copper_order, copper_count)
+    if layer_id is None:
+        layer_id = _rigid_copper_v7_layer_id(copper_order, copper_count)
+    return legacy_layer_id, layer_id
+
+
+def _authored_rigid_row_component_placement(
+    row: AltiumRigidStackRowSpec,
+    *,
+    family: str,
+    display_name: str,
+    copper_order: int | None,
+    copper_count: int,
+) -> int | None:
+    component_placement = row.component_placement
+    if family != "copper" or component_placement is not None:
+        return component_placement
+    return _rigid_component_placement(
+        AltiumRigidCopperLayerSpec(display_name),
+        int(copper_order or 0),
+        copper_count,
+    )
+
+
+def _build_authored_rigid_row_artifact(
+    row: AltiumRigidStackRowSpec,
+    *,
+    index: int,
+    copper_order: int | None,
+    copper_count: int,
+    stack_ref: str,
+    substack_ref: str,
+    registry_refs_seen: set[str],
+) -> tuple[AltiumLayerRegistryEntry, AltiumStackLayer]:
+    family = _normalized_rigid_row_family(row.family)
+    display_name = _text(row.name) or f"Layer {index}"
+    legacy_layer_id, layer_id = _authored_rigid_row_layer_ids(
+        row,
+        family=family,
+        copper_order=copper_order,
+        copper_count=copper_count,
+    )
+    component_placement = _authored_rigid_row_component_placement(
+        row,
+        family=family,
+        display_name=display_name,
+        copper_order=copper_order,
+        copper_count=copper_count,
+    )
+    source_record_id = row.source_record_id or _authoring_guid(
+        "rigid-row-layer",
+        stack_ref,
+        index,
+        display_name,
+        family,
+    )
+    registry_ref = row.registry_ref or _model_id(
+        v7_layer_id=layer_id,
+        legacy_layer_id=legacy_layer_id,
+        display_name=display_name,
+        source_family="authored_rigid_row",
+        stack_index=index,
+    )
+    if registry_ref in registry_refs_seen:
+        registry_ref = f"{registry_ref}:row:{index}"
+    registry_refs_seen.add(registry_ref)
+
+    type_id_alias = _normalized_source_id(row.stackupx_type_id)
+    source_aliases = [f"AUTHORED_RIGID_ROW{index}"]
+    if type_id_alias:
+        source_aliases.append(f"stackupx:{type_id_alias}")
+    stackupx_properties = _coerce_stackupx_property_tuples(row.stackupx_properties)
+    registry_entry = AltiumLayerRegistryEntry(
+        model_id=registry_ref,
+        display_name=display_name,
+        family=family,
+        standard_token=_standard_token_from_legacy(legacy_layer_id),
+        legacy_layer_id=legacy_layer_id,
+        v7_layer_id=layer_id,
+        source_layer_id=layer_id,
+        source_record_id=source_record_id,
+        side=_layer_side(display_name, legacy_layer_id),
+        used_by_primitives=row.used_by_primitives,
+        enabled=True,
+        source_aliases=tuple(source_aliases),
+    )
+    stack_layer = AltiumStackLayer(
+        stack_index=index,
+        registry_ref=registry_ref,
+        display_name=display_name,
+        family=family,
+        source_family="authored_rigid_row",
+        source_record_id=source_record_id,
+        layer_id=layer_id,
+        legacy_layer_id=legacy_layer_id,
+        stackupx_type_id=row.stackupx_type_id,
+        copper_thickness_mils=row.copper_thickness_mils,
+        dielectric_constant=row.dielectric_constant,
+        dielectric_loss_tangent=row.dielectric_loss_tangent,
+        dielectric_height_mils=row.dielectric_height_mils,
+        dielectric_material=row.dielectric_material,
+        dielectric_type=row.dielectric_type,
+        component_placement=component_placement,
+        used_by_primitives=row.used_by_primitives,
+        coverlay_expansion=row.coverlay_expansion,
+        is_stiffener=row.is_stiffener,
+        is_adhesive=row.is_adhesive,
+        source_keys=tuple(source_aliases),
+        stackupx_properties=stackupx_properties,
+        stackupx_substack_properties=(
+            ((substack_ref, stackupx_properties),) if stackupx_properties else ()
+        ),
+        stackupx_is_shared=row.stackupx_is_shared,
+        stackupx_substack_is_shared=(
+            ((substack_ref, bool(row.stackupx_is_shared)),)
+            if row.stackupx_is_shared is not None
+            else ()
+        ),
+    )
+    return registry_entry, stack_layer
+
+
+def _build_authored_rigid_row_artifacts(
+    *,
+    row_specs: Sequence[AltiumRigidStackRowSpec],
+    stack_ref: str,
+    substack_ref: str,
+) -> tuple[tuple[AltiumLayerRegistryEntry, ...], tuple[AltiumStackLayer, ...]]:
+    copper_row_indexes = _validated_rigid_copper_row_indexes(row_specs)
+    copper_order_by_row = {
+        row_index: copper_index
+        for copper_index, row_index in enumerate(copper_row_indexes)
+    }
+    copper_count = len(copper_row_indexes)
+    registry_entries: list[AltiumLayerRegistryEntry] = []
+    stack_layers: list[AltiumStackLayer] = []
+    registry_refs_seen: set[str] = set()
+    for index, row in enumerate(row_specs):
+        registry_entry, stack_layer = _build_authored_rigid_row_artifact(
+            row,
+            index=index,
+            copper_order=copper_order_by_row.get(index),
+            copper_count=copper_count,
+            stack_ref=stack_ref,
+            substack_ref=substack_ref,
+            registry_refs_seen=registry_refs_seen,
+        )
+        registry_entries.append(registry_entry)
+        stack_layers.append(stack_layer)
+    return tuple(registry_entries), tuple(stack_layers)
+
+
+def _authored_rigid_layer_pairs(
+    pairs: Sequence[AltiumLayerPair],
+    *,
+    default_stack_ref: str,
+) -> tuple[AltiumLayerPair, ...]:
+    resolved_pairs: list[AltiumLayerPair] = []
+    for index, pair in enumerate(tuple(pairs or ())):
+        if not isinstance(pair, AltiumLayerPair):
+            raise TypeError(
+                f"Unsupported layer pair input at index {index}: {type(pair).__name__}"
+            )
+        refs = tuple(
+            ref for ref in (_text(ref) for ref in pair.source_substack_refs) if ref
+        )
+        if not refs and default_stack_ref:
+            refs = (default_stack_ref,)
+        resolved_pairs.append(replace(pair, source_substack_refs=refs))
+    return tuple(resolved_pairs)
+
+
+def _with_authored_or_preserved_impedance(
+    document: AltiumLayerStackDocument,
+    impedance_profiles: Sequence[AltiumImpedanceProfile | AltiumImpedanceProfileSpec],
+    transmission_lines: Sequence[AltiumTransmissionLine],
+) -> AltiumLayerStackDocument:
+    profiles = tuple(impedance_profiles or ())
+    lines = tuple(transmission_lines or ())
+    if not profiles and not lines:
+        return document
+
+    profile_specs: list[AltiumImpedanceProfileSpec] = []
+    preserved_profiles: list[AltiumImpedanceProfile] = []
+    for index, profile in enumerate(profiles):
+        if isinstance(profile, AltiumImpedanceProfileSpec):
+            profile_specs.append(profile)
+        elif isinstance(profile, AltiumImpedanceProfile):
+            source_record_id = profile.source_record_id or _authoring_guid(
+                "impedance-profile",
+                document.active_stack_ref,
+                index,
+                profile.name,
+            )
+            preserved_profiles.append(
+                replace(profile, index=index, source_record_id=source_record_id)
+            )
+        else:
+            raise TypeError(
+                f"Unsupported impedance profile input at index {index}: "
+                f"{type(profile).__name__}"
+            )
+
+    if profile_specs and (preserved_profiles or lines):
+        raise ValueError(
+            "Impedance profile specs cannot be mixed with preserved impedance "
+            "profiles or standalone transmission lines"
+        )
+    if profile_specs:
+        return _with_authored_impedance_profiles(document, profile_specs)
+    if lines and not preserved_profiles:
+        raise ValueError("Transmission lines require preserved impedance profiles")
+
+    substack_id = _primary_substack_id(document)
+    preserved_lines: list[AltiumTransmissionLine] = []
+    for index, line in enumerate(lines):
+        if not isinstance(line, AltiumTransmissionLine):
+            raise TypeError(
+                f"Unsupported transmission line input at index {index}: "
+                f"{type(line).__name__}"
+            )
+        preserved_lines.append(
+            replace(
+                line,
+                index=index,
+                substack_id=line.substack_id or substack_id,
+            )
+        )
+    return replace(
+        document,
+        impedance_profiles=tuple(preserved_profiles),
+        transmission_lines=tuple(preserved_lines),
+    )
+
+
 def _single_physical_stack(document: AltiumLayerStackDocument) -> AltiumPhysicalStack:
     stacks = tuple(document.physical_stacks or ())
     if len(stacks) != 1:
@@ -2673,6 +3917,12 @@ def _rigid_copper_v7_layer_id(index: int, layer_count: int) -> int:
 def _v7_layer_id_from_legacy_copper(legacy_layer_id: int) -> int:
     if legacy_layer_id == PcbLayer.BOTTOM.value:
         return 0x0100FFFF
+    if (
+        PcbLayer.INTERNAL_PLANE_1.value
+        <= legacy_layer_id
+        <= PcbLayer.INTERNAL_PLANE_16.value
+    ):
+        return 0x01010001 + (legacy_layer_id - PcbLayer.INTERNAL_PLANE_1.value)
     return 0x01000000 + legacy_layer_id
 
 
@@ -2930,6 +4180,9 @@ def _native_pcbdoc_emits_board_layer_row(layer: AltiumStackLayer) -> bool:
 
 
 def _semantic_kvl_type_id_for_layer(layer: AltiumStackLayer) -> str:
+    stackupx_type_id = _normalized_source_id(layer.stackupx_type_id)
+    if stackupx_type_id:
+        return "{" + stackupx_type_id + "}"
     family = str(layer.family or "").strip().lower()
     if layer.is_stiffener is True:
         return _braced_schema_type_id("core")
@@ -2941,6 +4194,8 @@ def _semantic_kvl_type_id_for_layer(layer: AltiumStackLayer) -> str:
         return _braced_schema_type_id("overlay")
     if family == "solder_mask":
         return _braced_schema_type_id("solder_mask")
+    if family == "paste":
+        return _braced_schema_type_id("paste_mask")
     if family == "copper":
         if (
             layer.legacy_layer_id is not None
@@ -3416,6 +4671,8 @@ def _layer_v7_id_for_rigid_template(
 ) -> int:
     if layer.layer_id is not None:
         return int(layer.layer_id)
+    if layer.legacy_layer_id is not None:
+        return _v7_layer_id_from_legacy_copper(int(layer.legacy_layer_id))
     return _rigid_copper_v7_layer_id(index, layer_count)
 
 
@@ -4299,6 +5556,7 @@ def _build_indexed_stack_layers(
             else _layer_family(
                 display_name=display_name,
                 legacy_layer_id=legacy_layer_id,
+                type_id=fields.get("TYPEID"),
                 copper_thickness_mils=copper_thickness,
                 dielectric_height_mils=dielectric_height,
             )
@@ -4349,6 +5607,7 @@ def _build_indexed_stack_layers(
                 source_record_id=_text(fields.get("ID")),
                 layer_id=layer_id,
                 legacy_layer_id=legacy_layer_id,
+                stackupx_type_id=_normalized_source_id(fields.get("TYPEID")),
                 copper_thickness_mils=copper_thickness,
                 dielectric_constant=_float_token(fields.get("DIELCONST")),
                 dielectric_loss_tangent=_float_token(fields.get("DIELLOSSTANGENT")),

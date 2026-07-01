@@ -5530,14 +5530,13 @@ class AltiumSchDoc(JsonApplyMixin):
         Compute which end of each port is connected to a wire.
 
         Port endpoint mapping behavior:
-        For horizontal ports, pin mapping is:
-          Pin1/PortLocation1 = RIGHT end (Location.X + Width) = "Extremity"
-          Pin2/PortLocation2 = LEFT end (Location.X) = "Origin"
+          Origin is the record location.
+          Extremity is ``Location + Width`` along the port's rendered axis.
 
         Sets _computed_connected_end on each port:
-          0 = None (not connected to any wire)
-          1 = Origin (LEFT end has wire endpoint)
-          2 = Extremity (RIGHT end has wire endpoint)
+          0 = None (not connected to any wire/bus endpoint)
+          1 = Origin has wire/bus endpoint
+          2 = Extremity has wire/bus endpoint
           3 = Both ends connected
         """
         # Gather all wire endpoints
@@ -5550,11 +5549,7 @@ class AltiumSchDoc(JsonApplyMixin):
                 wire_endpoints.add((pt.x, pt.y))
 
         for port in self.ports:
-            # Origin = LEFT end = (Location.X, Location.Y)
-            origin = (port.location.x, port.location.y)
-            # Extremity = RIGHT end = (Location.X + Width, Location.Y)
-            extremity = (port.location.x + port.width, port.location.y)
-
+            origin, extremity = self._port_connection_endpoints(port)
             has_origin = origin in wire_endpoints
             has_extremity = extremity in wire_endpoints
 

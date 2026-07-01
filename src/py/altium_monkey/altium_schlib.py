@@ -8,7 +8,7 @@ import logging
 import zlib
 from collections.abc import MutableMapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from . import (
     AltiumSchDesignator,
@@ -63,6 +63,8 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from .altium_sch_geometry_oracle import SchGeometryDocument
     from .altium_sch_svg_renderer import SchSvgRenderOptions
+
+_SchLibWeightPolicy = Literal["authored", "serialized_data_records"]
 
 
 def _parse_pinfunctiondata_from_ole(
@@ -1519,6 +1521,7 @@ class AltiumSchLib(JsonApplyMixin):
         self.embedded_images = {}
         self.debug = debug
         self._show_comments_designators = bool(show_comments_designators)
+        self._weight_policy: _SchLibWeightPolicy = "authored"
 
         if filepath is not None:
             self.filepath = Path(filepath)
@@ -1948,6 +1951,28 @@ class AltiumSchLib(JsonApplyMixin):
                 total += len(getattr(implementation, "children", []))
         return total
 
+    def _calculate_serialized_data_records_weight(
+        self, serialized_record_counts: dict[str, int] | None = None
+    ) -> int:
+        """
+        Calculate FileHeader Weight from the emitted symbol Data records.
+
+        Altium's managed SchLib V5 exporter writes the base warehouse count as
+        FileHeader Weight. For split/merge outputs this corresponds to one
+        library/header item plus the serialized records in each symbol's Data
+        stream.
+        """
+        if serialized_record_counts is not None:
+            return 1 + sum(serialized_record_counts.values())
+
+        total = 1
+        for symbol in self.symbols:
+            if symbol.raw_records:
+                total += len(symbol.raw_records)
+            else:
+                total += len(symbol.synthesize_raw_records())
+        return total
+
     def _synthesize_file_header(self, *, minimal: bool = False) -> dict[str, str]:
         """
         Create FileHeader for SchLib builds.
@@ -2372,7 +2397,7 @@ class AltiumSchLib(JsonApplyMixin):
         *,
         debug: bool,
         sync_pin_text_data: bool,
-    ) -> None:
+    ) -> int:
         stream_path = f"{symbol.name}/Data"
         records_to_write, is_oop_built_symbol = self._records_for_symbol_save(
             symbol,
@@ -2400,6 +2425,7 @@ class AltiumSchLib(JsonApplyMixin):
             symbol,
             skip_pintextdata=sync_pin_text_data,
         )
+        return len(records_to_write)
 
     def _write_file_header_to_ole(
         self,
@@ -2407,12 +2433,17 @@ class AltiumSchLib(JsonApplyMixin):
         *,
         sync_pin_text_data: bool,
         minimal: bool,
+        serialized_record_counts: dict[str, int] | None,
     ) -> None:
         file_header = self.file_header or self._synthesize_file_header(minimal=minimal)
         if not file_header:
             return
         if sync_pin_text_data:
             self._sync_file_header_font_table()
+        if self._weight_policy == "serialized_data_records":
+            file_header["Weight"] = str(
+                self._calculate_serialized_data_records_weight(serialized_record_counts)
+            )
         serialized = create_stream_from_records([file_header])
         ole_writer.editEntry("FileHeader", data=serialized)
 
@@ -2457,8 +2488,9 @@ class AltiumSchLib(JsonApplyMixin):
                 sync_pin_text_data=sync_pin_text_data,
             )
 
+            serialized_record_counts: dict[str, int] = {}
             for symbol in self.symbols:
-                self._write_symbol_to_ole(
+                serialized_record_counts[symbol.name] = self._write_symbol_to_ole(
                     ole_writer,
                     symbol,
                     original_pintextdata_streams,
@@ -2470,6 +2502,7 @@ class AltiumSchLib(JsonApplyMixin):
                 ole_writer,
                 sync_pin_text_data=sync_pin_text_data,
                 minimal=minimal,
+                serialized_record_counts=serialized_record_counts,
             )
             self._write_embedded_images_to_ole(ole_writer)
             ole_writer.write(str(filepath))
@@ -2592,6 +2625,7 @@ class AltiumSchLib(JsonApplyMixin):
             try:
                 single = AltiumSchLib()
                 single.font_manager = self.font_manager
+                single._weight_policy = "serialized_data_records"
 
                 new_sym = single.add_symbol(
                     symbol.name,

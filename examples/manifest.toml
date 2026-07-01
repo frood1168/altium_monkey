@@ -371,9 +371,30 @@ requires_extra = []
 tags = ["pcbdoc", "layer-stack", "generation", "stackup", "canonical-empty"]
 
 [[examples]]
+id = "pcbdoc_create_from_stackup_files"
+title = "Create PcbDocs from stackup files"
+summary = "Load .stackup and .stackupx layer-stack exports, apply each to a fresh PcbDocBuilder, save native PcbDocs, and verify readback semantics."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_from_stackup_files/pcbdoc_create_from_stackup_files.py"
+doc = "pcbdoc_create_from_stackup_files/README.md"
+inputs = [
+  "pcbdoc_create_from_stackup_files/input/rigid_source.stackup",
+  "pcbdoc_create_from_stackup_files/input/rigid_source.stackupx",
+]
+assets = []
+outputs = [
+  "pcbdoc_create_from_stackup_files/output/from_stackup.PcbDoc",
+  "pcbdoc_create_from_stackup_files/output/from_stackupx.PcbDoc",
+  "pcbdoc_create_from_stackup_files/output/from_stackup_files_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "stackup", "stackupx"]
+
+[[examples]]
 id = "pcbdoc_create_custom_rigid_stack"
 title = "Create a custom rigid PcbDoc layer stack"
-summary = "Author a custom four-layer rigid stack through AltiumLayerStackDocument.from_rigid_stack, save a PcbDoc, reparse it, and write a semantic comparison manifest."
+summary = "Author a custom four-layer rigid stack through explicit AltiumLayerStackDocument.from_rigid_layer_rows rows, save PcbDoc/.stackup/.stackupx outputs, and write a semantic comparison manifest."
 areas = ["pcbdoc"]
 status = "ready"
 entrypoint = "pcbdoc_create_custom_rigid_stack/pcbdoc_create_custom_rigid_stack.py"
@@ -382,10 +403,31 @@ inputs = []
 assets = []
 outputs = [
   "pcbdoc_create_custom_rigid_stack/output/pcbdoc_create_custom_rigid_stack.PcbDoc",
+  "pcbdoc_create_custom_rigid_stack/output/pcbdoc_create_custom_rigid_stack.stackup",
+  "pcbdoc_create_custom_rigid_stack/output/pcbdoc_create_custom_rigid_stack.stackupx",
   "pcbdoc_create_custom_rigid_stack/output/custom_rigid_stack_manifest.json",
 ]
 requires_extra = []
 tags = ["pcbdoc", "layer-stack", "generation", "rigid-stack", "custom-stack"]
+
+[[examples]]
+id = "pcbdoc_create_jlcpcb_rigid_stack"
+title = "Create a JLCPCB 8-layer rigid PcbDoc stack"
+summary = "Programmatically author a JLCPCB JLC081211-1080 eight-layer rigid stack through semantic layer-row, material, and stackup setting objects, save PcbDoc/.stackup/.stackupx outputs, and compare all readbacks."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_create_jlcpcb_rigid_stack/pcbdoc_create_jlcpcb_rigid_stack.py"
+doc = "pcbdoc_create_jlcpcb_rigid_stack/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_create_jlcpcb_rigid_stack/output/pcbdoc_create_jlcpcb_rigid_stack.PcbDoc",
+  "pcbdoc_create_jlcpcb_rigid_stack/output/pcbdoc_create_jlcpcb_rigid_stack.stackup",
+  "pcbdoc_create_jlcpcb_rigid_stack/output/pcbdoc_create_jlcpcb_rigid_stack.stackupx",
+  "pcbdoc_create_jlcpcb_rigid_stack/output/jlcpcb_rigid_stack_manifest.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "rigid-stack", "jlcpcb", "stackupx"]
 
 [[examples]]
 id = "pcbdoc_create_impedance_rigid_stack"

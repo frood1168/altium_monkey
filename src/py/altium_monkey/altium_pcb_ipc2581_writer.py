@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal
+from typing import Any, Literal, SupportsIndex, SupportsInt
 
 from .altium_api_markers import public_api
 from .altium_embedded_font_helpers import safe_embedded_font_filename_component
@@ -26,6 +26,11 @@ from .altium_pcb_mask_paste_rules import (
     get_via_mask_expansion_iu,
     has_pad_paste_opening,
     is_pad_solder_mask_only,
+)
+from .altium_pcb_enums import (
+    PcbIpc4761ViaType,
+    PcbViaStructureFeatureSide,
+    PcbViaStructureFeatureType,
 )
 from .altium_pcb_rule import AltiumPlaneClearanceRule, AltiumPlaneConnectRule
 from .altium_record_types import PcbLayer
@@ -81,6 +86,75 @@ _MIL_TO_MM = 0.0254
 _COPPER_LAYER_IDS = frozenset(range(1, 33)) | {PcbLayer.MULTI_LAYER.value}
 _EmbeddedFontResolver = Callable[[str, bool, bool], str | None]
 _EMBEDDED_FONT_RESOLVER_CACHE: dict[str, _EmbeddedFontResolver | None] = {}
+
+_IPC4761_FEATURE_TENTING = int(PcbViaStructureFeatureType.TENTING)
+_IPC4761_FEATURE_COVERING = int(PcbViaStructureFeatureType.COVERING)
+_IPC4761_FEATURE_PLUGGING = int(PcbViaStructureFeatureType.PLUGGING)
+_IPC4761_FEATURE_FILLING = int(PcbViaStructureFeatureType.FILLING)
+_IPC4761_FEATURE_CAPPING = int(PcbViaStructureFeatureType.CAPPING)
+_IPC4761_SIDE_TOP = int(PcbViaStructureFeatureSide.TOP)
+_IPC4761_SIDE_BOTTOM = int(PcbViaStructureFeatureSide.BOTTOM)
+_IPC4761_SIDE_BOTH = int(PcbViaStructureFeatureSide.BOTH)
+
+_IPC4761_ACTIVE_FEATURES_BY_TYPE: dict[int, tuple[int, ...]] = {
+    int(PcbIpc4761ViaType.TYPE_1A_TENTING): (_IPC4761_FEATURE_TENTING,),
+    int(PcbIpc4761ViaType.TYPE_1B_TENTING): (_IPC4761_FEATURE_TENTING,),
+    int(PcbIpc4761ViaType.TYPE_2A_TENTING_AND_COVERING): (
+        _IPC4761_FEATURE_TENTING,
+        _IPC4761_FEATURE_COVERING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_2B_TENTING_AND_COVERING): (
+        _IPC4761_FEATURE_TENTING,
+        _IPC4761_FEATURE_COVERING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_3A_PLUGGING): (_IPC4761_FEATURE_PLUGGING,),
+    int(PcbIpc4761ViaType.TYPE_3B_PLUGGING): (_IPC4761_FEATURE_PLUGGING,),
+    int(PcbIpc4761ViaType.TYPE_4A_PLUGGING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_PLUGGING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_4B_PLUGGING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_PLUGGING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_5_FILLING): (_IPC4761_FEATURE_FILLING,),
+    int(PcbIpc4761ViaType.TYPE_6A_FILLING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_FILLING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_6B_FILLING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_FILLING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_7_FILLING_AND_CAPPING): (
+        _IPC4761_FEATURE_FILLING,
+        _IPC4761_FEATURE_CAPPING,
+    ),
+}
+_IPC4761_DEFAULT_FEATURE_SIDES_BY_TYPE: dict[int, dict[int, int]] = {
+    int(PcbIpc4761ViaType.TYPE_1A_TENTING): {
+        _IPC4761_FEATURE_TENTING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_2A_TENTING_AND_COVERING): {
+        _IPC4761_FEATURE_TENTING: _IPC4761_SIDE_TOP,
+        _IPC4761_FEATURE_COVERING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_3A_PLUGGING): {
+        _IPC4761_FEATURE_PLUGGING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_4A_PLUGGING_AND_COVERING): {
+        _IPC4761_FEATURE_COVERING: _IPC4761_SIDE_TOP,
+        _IPC4761_FEATURE_PLUGGING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_6A_FILLING_AND_COVERING): {
+        _IPC4761_FEATURE_COVERING: _IPC4761_SIDE_TOP,
+    },
+}
+_IPC4761_SURFACE_FEATURE_NAMES = {
+    _IPC4761_FEATURE_TENTING: "Tenting",
+    _IPC4761_FEATURE_COVERING: "Covering",
+    _IPC4761_FEATURE_PLUGGING: "Plugging",
+}
 
 # IPC copper artwork uses a different native stroke cursor table than
 # document/value layers. Keep this calibration generic to Sans Serif style 2;
@@ -2105,6 +2179,70 @@ def _plane_layerpad_location_mm(
     ):
         return (0.0, 0.0)
     return (x_mm, y_mm)
+
+
+def _safe_int(
+    value: str | bytes | bytearray | SupportsIndex | SupportsInt | None,
+    default: int = 0,
+) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ipc4761_feature_side(via: object, via_type: int, feature_type: int) -> int:
+    structure = getattr(via, "via_structure", None)
+    for feature in getattr(structure, "features", ()) or ():
+        if _safe_int(getattr(feature, "feature_type", None), -1) == feature_type:
+            return _safe_int(getattr(feature, "side", None), _IPC4761_SIDE_BOTH)
+    return _IPC4761_DEFAULT_FEATURE_SIDES_BY_TYPE.get(via_type, {}).get(
+        feature_type,
+        _IPC4761_SIDE_BOTH,
+    )
+
+
+def _ipc4761_feature_layer_refs(feature_type: int, side: int) -> tuple[str, ...]:
+    if feature_type == _IPC4761_FEATURE_FILLING:
+        return ("Filling",)
+    if feature_type == _IPC4761_FEATURE_CAPPING:
+        return ("Capping",)
+
+    feature_name = _IPC4761_SURFACE_FEATURE_NAMES.get(feature_type)
+    if feature_name is None:
+        return ()
+    if side == _IPC4761_SIDE_TOP:
+        return (f"Top {feature_name}",)
+    if side == _IPC4761_SIDE_BOTTOM:
+        return (f"Bottom {feature_name}",)
+    return (f"Top {feature_name}", f"Bottom {feature_name}")
+
+
+def _ipc4761_feature_diameter_iu(via: object, feature_type: int) -> int:
+    if feature_type == _IPC4761_FEATURE_FILLING:
+        return max(0, _safe_int(getattr(via, "hole_size", 0)))
+    if feature_type == _IPC4761_FEATURE_PLUGGING:
+        return max(0, int(round(_safe_int(getattr(via, "diameter", 0)) / 2.0)))
+    return max(0, _safe_int(getattr(via, "diameter", 0)))
+
+
+def _ipc4761_via_feature_layer_shapes(via: object) -> tuple[tuple[str, int], ...]:
+    via_type = _safe_int(getattr(via, "ipc4761_via_type", 0))
+    feature_types = _IPC4761_ACTIVE_FEATURES_BY_TYPE.get(via_type, ())
+    if not feature_types:
+        return ()
+
+    layer_shapes: list[tuple[str, int]] = []
+    for feature_type in feature_types:
+        diameter_iu = _ipc4761_feature_diameter_iu(via, feature_type)
+        if diameter_iu <= 0:
+            continue
+        side = _ipc4761_feature_side(via, via_type, feature_type)
+        for layer_ref in _ipc4761_feature_layer_refs(feature_type, side):
+            layer_shapes.append((layer_ref, diameter_iu))
+    return tuple(layer_shapes)
 
 
 # ------------------------------------------------------------------ #
@@ -4449,9 +4587,41 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             layers_info, [name for name, _plane_net in ctx.plane_layers], pad, ms
         )
 
+    def _is_free_zero_width_npth_pad(pad: object) -> bool:
+        net_index = getattr(pad, "net_index", None)
+        component_index = getattr(pad, "component_index", None)
+        zero_body_attrs = (
+            "width",
+            "height",
+            "top_width",
+            "top_height",
+            "mid_width",
+            "mid_height",
+            "bot_width",
+            "bot_height",
+        )
+        return (
+            int(getattr(pad, "hole_size", 0) or 0) > 0
+            and not bool(getattr(pad, "is_plated", False))
+            and net_index in (None, -1, 0xFFFF, 65535)
+            and component_index in (None, -1, 0xFFFF, 65535)
+            and all(int(getattr(pad, attr, 0) or 0) == 0 for attr in zero_body_attrs)
+        )
+
+    def _suppress_free_zero_width_npth_layerpads() -> bool:
+        pads = list(getattr(ctx.pcbdoc, "pads", []) or [])
+        if not pads:
+            return False
+        if getattr(ctx.pcbdoc, "components", None):
+            return False
+        if getattr(ctx.pcbdoc, "nets", None):
+            return False
+        return all(_is_free_zero_width_npth_pad(pad) for pad in pads)
+
     def _build_zero_width_th_layers_info(
-        pad: Any,
+        pad: object,
         *,
+        suppress_free_npth_layerpads: bool,
         mask_exp: int,
         ts: int,
         bs: int,
@@ -4462,6 +4632,9 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         is_tent_top: bool,
         is_tent_bottom: bool,
     ) -> list[tuple]:
+        if suppress_free_npth_layerpads and _is_free_zero_width_npth_pad(pad):
+            return []
+
         layers_info: list[tuple] = []
         if not is_tent_top:
             if top_solder_size is not None:
@@ -4503,7 +4676,7 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         for plane_name, _plane_net in ctx.plane_layers:
             shape_id = _register_plane_antipad_shape(
                 ctx,
-                pad.hole_size,
+                int(getattr(pad, "hole_size", 0) or 0),
                 int(getattr(pad, "hole_shape", 0) or 0),
                 int(getattr(pad, "slot_size", 0) or 0),
                 plane_clearance_iu,
@@ -4700,6 +4873,7 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         if tw == 0 and th == 0:
             return _build_zero_width_th_layers_info(
                 pad,
+                suppress_free_npth_layerpads=_suppress_free_zero_width_npth_layerpads(),
                 mask_exp=mask_exp,
                 ts=ts,
                 bs=bs,
@@ -5102,6 +5276,20 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             _sub(lp, "Location", {"x": _fmt(x_mm), "y": _fmt(y_mm)})
             if bottom_mask_id:
                 _sub(lp, "StandardPrimitiveRef", {"id": bottom_mask_id})
+
+        for layer_ref, feature_diameter in _ipc4761_via_feature_layer_shapes(via):
+            shape_id = _register_pad_shape_by_dims(
+                ctx,
+                feature_diameter,
+                feature_diameter,
+                1,
+            )
+            padstack = _sub(step, "PadStack")
+            lp = _sub(padstack, "LayerPad", {"layerRef": layer_ref})
+            _sub(lp, "Xform")
+            _sub(lp, "Location", {"x": _fmt(x_mm), "y": _fmt(y_mm)})
+            if shape_id:
+                _sub(lp, "StandardPrimitiveRef", {"id": shape_id})
 
     for pad_idx, pad in ordered_pad_items:
         _emit_pad_padstack(pad_idx, pad)

@@ -657,6 +657,7 @@ class AltiumStackupXDocument:
             ),
             stackup_attributes=self.stackup_attributes,
             source=AltiumLayerStackSourceMap(
+                origin="stackupx",
                 board_record=(
                     ("STACKUPX_DOCUMENT_ID", self.id),
                     ("STACKUPX_REVISION_ID", self.revision_id),
@@ -979,6 +980,7 @@ def _to_stack_layer(
         source_family="stackupx",
         source_record_id=layer.id,
         legacy_layer_id=_legacy_layer_id_from_stackupx_token(layer_token),
+        stackupx_type_id=layer.type_id,
         copper_thickness_mils=thickness_mils if model_family == "copper" else None,
         dielectric_constant=dielectric_constant,
         dielectric_loss_tangent=loss_tangent,
@@ -1945,6 +1947,8 @@ def _property_type_name(name: str, type_name: str) -> str:
         return "DimensionlessValue"
     if normalized == "WEIGHT":
         return "MassOunceValue"
+    if normalized == "COMPONENTPLACEMENT":
+        return _COMPONENT_PLACEMENT_TYPE
     if normalized == "PROCESS":
         return "EntityReference"
     if normalized == "MATERIAL.COLOR":
@@ -2621,20 +2625,15 @@ def _normalized_guid_key(value: object) -> str:
 
 
 def _default_stackup_attributes() -> tuple[tuple[str, str], ...]:
-    return (
-        ("Type", "Standard"),
-        ("RoughnessType", "NoRoughness"),
-        ("RoughnessFactorSR", "0um"),
-        ("RoughnessFactorRF", "1%"),
-        ("RealisticRatio", "True"),
-        ("CopperResistance", "17.24nohm"),
-        ("ViaPlatingThickness", "0.6mil"),
-        ("AmbientTemperature", "20C"),
-        ("TemperatureRise", "50C"),
-    )
+    from .altium_layer_stack_document import AltiumStackupSettings
+
+    return AltiumStackupSettings.default().to_stackup_attributes()
 
 
 def _type_id_for_layer(layer: object) -> str:
+    stackupx_type_id = _normalized_guid_key(getattr(layer, "stackupx_type_id", ""))
+    if stackupx_type_id:
+        return stackupx_type_id
     family = str(getattr(layer, "family", "")).strip().lower()
     if getattr(layer, "is_stiffener", None) is True:
         return _STIFFENER_TYPE_ID

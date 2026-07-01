@@ -155,12 +155,36 @@ refs with or without braces. Use `substack_by_source_ref(...)`,
 `layers_for_board_region(...)`, and `branches_for_stack_ref(...)` for read-only
 topology queries. Display names remain labels and are not unique ids.
 
-External `.stackup`, `.stackupx`, `.csv`, and `.esx` files are currently
-interchange artifacts, not the native writer contract. `.stackup` and
-`.stackupx` exports are useful for Layer Stack Manager inspection and branch
-interchange, but rigid-flex samples gate correctness on generated PcbDoc
-readback because the interchange views normalize rows differently from native
-PcbDoc `Board6/Data` plus `BoardRegions/Data`.
+External `.stackup` and `.stackupx` files can be parsed into
+`AltiumLayerStackDocument` and applied to a fresh `PcbDocBuilder` for simple
+rigid-board authoring. The writer regenerates native `Board6/Data` stack rows
+from the semantic model and preserves copper, dielectric, solder-mask,
+overlay, layer-pair, and supported material/thickness fields on generated
+PcbDoc readback. `.csv` and `.esx` remain inspection/export artifacts rather
+than native writer inputs.
+
+Programmatic rigid-board authoring uses the same document model. Use
+`AltiumLayerStackDocument.from_rigid_layer_rows(...)` with ordered
+`AltiumRigidStackRowSpec` rows when the exact physical sequence matters.
+Normal public authoring should use semantic constructors such as
+`AltiumRigidStackRowSpec.copper(...)`, `.prepreg(...)`, `.core(...)`,
+`.solder_mask(...)`, and `.overlay(...)` with `AltiumCopperMaterialSpec`,
+`AltiumDielectricMaterialSpec`, `AltiumComponentPlacement`, and
+`AltiumLayerPair`. Stackup-wide electrical settings such as roughness model,
+copper resistance, via plating thickness, realistic ratio, and temperatures
+use `AltiumStackupSettings`, `AltiumStackupType`, and
+`AltiumStackupRoughnessModel`. Raw StackupX type IDs, property tuples, and
+serialized stackup attributes are compatibility escape hatches for unsupported
+source metadata, not the preferred API. This supports code-authored `.stackup`
+/ `.stackupx` export and fresh PcbDoc creation, but does not imply arbitrary
+in-place mutation of an existing populated board.
+
+Rigid-flex correctness is still gated on generated PcbDoc readback because
+interchange views normalize rows differently from native PcbDoc `Board6/Data`
+plus `BoardRegions/Data`, and `.stackup`/`.stackupx` do not carry board-region
+outline and bend-line geometry. For rigid-flex authoring, use typed
+`AltiumLayerStackDocument` region/substack/branch inputs or a native PcbDoc
+source model backed by fixture evidence.
 
 `ResolvedLayerStack` remains the public convenience view for read-only
 consumer reports, layer display names, and enabled-layer checks. It must not be

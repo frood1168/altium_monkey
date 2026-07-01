@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .altium_record_pcb__via import AltiumPcbVia
 
-VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU = 40000
+VIA_TENTING_DEFAULT_SOLDER_MASK_EXPANSION_IU = 40000
 
 
 def mil_to_internal_units(value_mil: float) -> int:
@@ -30,8 +30,8 @@ def apply_authored_via_surface_policy(
 
     if via.is_tent_top or via.is_tent_bottom:
         via.solder_mask_expansion_mode = 2
-        via.soldermask_expansion_front = VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU
-        via.soldermask_expansion_back = VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU
+        via.soldermask_expansion_front = VIA_TENTING_DEFAULT_SOLDER_MASK_EXPANSION_IU
+        via.soldermask_expansion_back = VIA_TENTING_DEFAULT_SOLDER_MASK_EXPANSION_IU
         via._has_soldermask_expansion_front = True
         via._has_soldermask_expansion_back = True
 

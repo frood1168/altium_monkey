@@ -1757,6 +1757,56 @@ def test_pcbdoc_layer_stack_examples_write_semantic_manifests(
         for layer in manifest["readback"]["physical_stacks"][0]["layers"]
     ]
 
+    stackup_files_example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_from_stackup_files"
+    )
+    stackup_files_result = _run_example_entrypoint(
+        stackup_files_example,
+        check_examples_root,
+    )
+    assert stackup_files_result.returncode == 0, stackup_files_result.stderr
+    assert "Semantic matches: True" in stackup_files_result.stdout
+    stackup_files_manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_from_stackup_files"
+        / "output"
+        / "from_stackup_files_manifest.json"
+    )
+    stackup_files_manifest = json.loads(
+        stackup_files_manifest_path.read_text(encoding="utf-8")
+    )
+    assert stackup_files_manifest["all_semantic_matches"] is True
+    cases_by_kind = {
+        case["source_kind"]: case for case in stackup_files_manifest["cases"]
+    }
+    assert set(cases_by_kind) == {"stackup", "stackupx"}
+    assert cases_by_kind["stackup"]["source_origin"] == "stackup"
+    assert cases_by_kind["stackupx"]["source_origin"] == "stackupx"
+    assert cases_by_kind["stackup"]["output_pcbdoc"] == (
+        "pcbdoc_create_from_stackup_files/output/from_stackup.PcbDoc"
+    )
+    assert cases_by_kind["stackupx"]["output_pcbdoc"] == (
+        "pcbdoc_create_from_stackup_files/output/from_stackupx.PcbDoc"
+    )
+    for case in cases_by_kind.values():
+        assert case["semantic_match"] is True
+        assert case["families"].count("solder_mask") == 2
+        assert [layer["display_name"] for layer in case["readback"]] == [
+            "Top Overlay",
+            "Top Solder",
+            "Top Layer",
+            "Dielectric 1",
+            "GND",
+            "Dielectric 2",
+            "PWR",
+            "Dielectric 3",
+            "Bottom Layer",
+            "Bottom Solder",
+            "Bottom Overlay",
+        ]
+
     custom_example = next(
         item
         for item in _load_examples()
@@ -1779,6 +1829,20 @@ def test_pcbdoc_layer_stack_examples_write_semantic_manifests(
         "pcbdoc_create_custom_rigid_stack/output/"
         "pcbdoc_create_custom_rigid_stack.PcbDoc"
     )
+    assert custom_manifest["output_stackup"] == (
+        "pcbdoc_create_custom_rigid_stack/output/"
+        "pcbdoc_create_custom_rigid_stack.stackup"
+    )
+    assert custom_manifest["output_stackupx"] == (
+        "pcbdoc_create_custom_rigid_stack/output/"
+        "pcbdoc_create_custom_rigid_stack.stackupx"
+    )
+    assert (
+        custom_manifest["authored"]
+        == custom_manifest["readback"]
+        == custom_manifest["stackup_readback"]
+        == custom_manifest["stackupx_readback"]
+    )
     custom_layers = custom_manifest["readback"]["physical_stacks"][0]["layers"]
     assert [
         layer["display_name"] for layer in custom_layers if layer["family"] == "copper"
@@ -1787,7 +1851,7 @@ def test_pcbdoc_layer_stack_examples_write_semantic_manifests(
         layer["dielectric_material"]
         for layer in custom_layers
         if layer["family"] == "dielectric"
-    ] == ["PP-TEST", "FR4-TEST", "PP-TEST"]
+    ] == ["PP-TEST", "PP-TEST", "FR4-TEST", "PP-TEST", "PP-TEST"]
     assert custom_manifest["resolved"]["inner_signal_layers"] == [
         "L2_GND",
         "L3_PWR",
@@ -1803,10 +1867,130 @@ def test_pcbdoc_layer_stack_examples_write_semantic_manifests(
         AltiumPcbDoc.from_file(custom_pcbdoc)
     )
     assert _semantic_physical_layer_names(custom_stack)[:4] == [
-        "Top Paste",
         "Top Overlay",
         "Top Solder",
         "TOP_SIG",
+        "PP_TOP_1080",
+    ]
+
+    jlcpcb_example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_jlcpcb_rigid_stack"
+    )
+    jlcpcb_source = (
+        check_examples_root
+        / "pcbdoc_create_jlcpcb_rigid_stack"
+        / "pcbdoc_create_jlcpcb_rigid_stack.py"
+    ).read_text(encoding="utf-8")
+    assert "LayerSchema.ComponentPlacement" not in jlcpcb_source
+    assert "stackupx_type_id" not in jlcpcb_source
+    assert "legacy_layer_id" not in jlcpcb_source
+    assert "STACKUP_ATTRIBUTES" not in jlcpcb_source
+    assert "stackup_attributes=" not in jlcpcb_source
+    assert "AltiumStackupSettings" in jlcpcb_source
+    assert "c7ef040e-8d00-490b-b00c-a7e7823ff174" not in jlcpcb_source.lower()
+    assert "f4eccd87-2cfb-4f37-be50-4f3a272b4d01" not in jlcpcb_source.lower()
+
+    jlcpcb_result = _run_example_entrypoint(jlcpcb_example, check_examples_root)
+    assert jlcpcb_result.returncode == 0, jlcpcb_result.stderr
+    assert "Semantic match: True" in jlcpcb_result.stdout
+    assert (
+        "Copper layers: Top Layer, Inner Layer 1, Inner Layer 2, Inner Layer 3, "
+        "Inner Layer 4, Inner Layer 5, Inner Layer 6, Bottom Layer"
+    ) in jlcpcb_result.stdout
+    assert "Dielectric rows: 9" in jlcpcb_result.stdout
+
+    jlcpcb_manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_jlcpcb_rigid_stack"
+        / "output"
+        / "jlcpcb_rigid_stack_manifest.json"
+    )
+    jlcpcb_manifest = json.loads(jlcpcb_manifest_path.read_text(encoding="utf-8"))
+    assert jlcpcb_manifest["source_reference"] == (
+        "JLCPCB JLC081211-1080 8-layer 1.2mm stackup"
+    )
+    assert jlcpcb_manifest["semantic_match"] is True
+    assert jlcpcb_manifest["output_pcbdoc"] == (
+        "pcbdoc_create_jlcpcb_rigid_stack/output/"
+        "pcbdoc_create_jlcpcb_rigid_stack.PcbDoc"
+    )
+    assert jlcpcb_manifest["output_stackup"] == (
+        "pcbdoc_create_jlcpcb_rigid_stack/output/"
+        "pcbdoc_create_jlcpcb_rigid_stack.stackup"
+    )
+    assert jlcpcb_manifest["output_stackupx"] == (
+        "pcbdoc_create_jlcpcb_rigid_stack/output/"
+        "pcbdoc_create_jlcpcb_rigid_stack.stackupx"
+    )
+    assert (
+        jlcpcb_manifest["authored"]
+        == jlcpcb_manifest["pcbdoc_readback"]
+        == jlcpcb_manifest["stackup_readback"]
+        == jlcpcb_manifest["stackupx_readback"]
+    )
+    assert jlcpcb_manifest["copper_layers"] == [
+        "Top Layer",
+        "Inner Layer 1",
+        "Inner Layer 2",
+        "Inner Layer 3",
+        "Inner Layer 4",
+        "Inner Layer 5",
+        "Inner Layer 6",
+        "Bottom Layer",
+    ]
+    assert jlcpcb_manifest["dielectric_layers"] == [
+        "Dielectric 1",
+        "Dielectric 2",
+        "Dielectric 3",
+        "Dielectric 4",
+        "Dielectric 5",
+        "Dielectric 6",
+        "Dielectric 7",
+        "Dielectric 8",
+        "Dielectric 9",
+    ]
+    assert (
+        jlcpcb_manifest["stackup_attributes"]["authored"]["ViaPlatingThickness"]
+        == "18um"
+    )
+    assert (
+        jlcpcb_manifest["stackup_attributes"]["stackupx_readback"]["Type"] == "Standard"
+    )
+    assert jlcpcb_manifest["stackup_attributes"]["pcbdoc_readback"] == {}
+    assert jlcpcb_manifest["stack_names"]["stackup_readback"] == "Master layer stack"
+    assert jlcpcb_manifest["pcbdoc_readback"]["layers"][7]["display_name"] == (
+        "Dielectric 3"
+    )
+    assert jlcpcb_manifest["pcbdoc_readback"]["layers"][8]["display_name"] == (
+        "Dielectric 4"
+    )
+    assert jlcpcb_manifest["pcbdoc_readback"]["layer_pairs"] == [
+        {
+            "pair_index": 0,
+            "low_layer_token": "TOP",
+            "high_layer_token": "BOTTOM",
+            "drill_pair_type_raw": 0,
+            "is_backdrill": False,
+        }
+    ]
+
+    jlcpcb_pcbdoc = (
+        check_examples_root
+        / "pcbdoc_create_jlcpcb_rigid_stack"
+        / "output"
+        / "pcbdoc_create_jlcpcb_rigid_stack.PcbDoc"
+    )
+    jlcpcb_stack = AltiumLayerStackDocument.from_pcbdoc(
+        AltiumPcbDoc.from_file(jlcpcb_pcbdoc)
+    )
+    assert _semantic_physical_layer_names(jlcpcb_stack)[:5] == [
+        "Top Overlay",
+        "Top Solder",
+        "Top Layer",
+        "Dielectric 1",
+        "Inner Layer 1",
     ]
 
     impedance_example = next(
