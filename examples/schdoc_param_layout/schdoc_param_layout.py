@@ -62,6 +62,11 @@ def _is_dnp(component: object) -> bool:
     for param in getattr(component, "parameters", []):
         if not isinstance(param, AltiumSchParameter):
             continue
+        # The sch_layout_dnp control parameter is the explicit DNP marker.
+        if param.name == _LAYOUT_DNP_PARAM:
+            if (param.text or "").strip().upper() == "DNP":
+                return True
+            continue
         if param.name and param.name.lower() in _DNP_PARAM_NAMES:
             if (param.text or "").strip().upper() == "DNP":
                 return True
@@ -338,6 +343,22 @@ def _take_history_snapshot(output_dir: Path, output_paths: list[Path]) -> Path |
     return snap_dir
 
 
+def _snapshot_touched_schdocs(schdoc_paths: list[Path], history_root: Path) -> Path:
+    """Copy every SchDoc the script will modify into ``History/<timestamp>/``.
+
+    Runs before any in-place edit so the pre-run state of every touched file is
+    recoverable. Writes into Altium's History folder with a timestamped
+    subdirectory matching Altium's own naming.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    snap_dir = history_root / timestamp
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    for src in schdoc_paths:
+        if src.exists():
+            shutil.copy2(src, snap_dir / src.name)
+    return snap_dir
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -351,9 +372,10 @@ def _parse_args() -> argparse.Namespace:
         nargs="?",
         metavar="PROJECT.PrjPcb",
         help=(
-            "Path to the .PrjPcb file. "
-            "Reads <project_dir>/clean/param_layout.toml and writes to <project_dir>/clean/. "
-            "Defaults to the bundled hydroscope example project."
+            "Path to the .PrjPcb file. Reads <project_dir>/param_layout.toml, "
+            "snapshots every touched SchDoc into <project_dir>/History/<timestamp>/, "
+            "then rewrites the project's SchDocs in place. "
+            "Omit to run the bundled hydroscope example (writes to output/)."
         ),
     )
     return parser.parse_args()
@@ -364,13 +386,14 @@ def main() -> None:
 
     if args.project:
         prjpcb_path = Path(args.project).resolve()
-        clean_dir = prjpcb_path.parent / "clean"
-        layout_toml = clean_dir / "param_layout.toml"
-        output_dir = clean_dir
+        project_dir = prjpcb_path.parent
+        layout_toml = project_dir / "param_layout.toml"
+        in_place = True
     else:
         prjpcb_path = _DEFAULT_PRJPCB
+        project_dir = SAMPLE_DIR / "output" / "hydroscope_param"
         layout_toml = _DEFAULT_LAYOUT_TOML
-        output_dir = SAMPLE_DIR / "output" / "hydroscope_param"
+        in_place = False
 
     if not layout_toml.exists():
         print(
@@ -381,35 +404,56 @@ def main() -> None:
         sys.exit(1)
 
     layout = tomllib.loads(layout_toml.read_text(encoding="utf-8"))
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     project = AltiumPrjPcb(prjpcb_path)
     schdoc_paths = project.get_reachable_schdoc_paths()
     if not schdoc_paths:
         raise RuntimeError(f"No SchDoc files found in project: {prjpcb_path}")
 
-    output_prjpcb = output_dir / prjpcb_path.name
-    output_paths = [output_dir / p.name for p in schdoc_paths]
-    snapshot_dir = _take_history_snapshot(output_dir, output_paths)
-
-    documents = [
-        apply_layout_to_schdoc(p, output_dir / p.name, layout)
-        for p in schdoc_paths
-    ]
-
-    if not output_prjpcb.exists() or not files_equal(prjpcb_path, output_prjpcb, shallow=False):
-        shutil.copy2(prjpcb_path, output_prjpcb)
+    if in_place:
+        # Snapshot every SchDoc we are about to modify into the Altium History
+        # folder, then rewrite each one atomically in place (write to a temp
+        # file and replace, so the original is never left half-written).
+        snapshot_dir = _snapshot_touched_schdocs(
+            schdoc_paths, project_dir / "History"
+        )
+        artifacts_dir = snapshot_dir
+        documents = []
+        for src in schdoc_paths:
+            tmp = src.parent / (src.name + ".tmp")
+            result = apply_layout_to_schdoc(src, tmp, layout)
+            tmp.replace(src)
+            result["output"] = str(src)
+            documents.append(result)
+    else:
+        # Bundled example: copy the read-only assets into output/ so the
+        # committed test assets stay untouched.
+        output_dir = project_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_dir = _take_history_snapshot(
+            output_dir, [output_dir / p.name for p in schdoc_paths]
+        )
+        artifacts_dir = output_dir
+        documents = [
+            apply_layout_to_schdoc(p, output_dir / p.name, layout)
+            for p in schdoc_paths
+        ]
+        output_prjpcb = output_dir / prjpcb_path.name
+        if not output_prjpcb.exists() or not files_equal(
+            prjpcb_path, output_prjpcb, shallow=False
+        ):
+            shutil.copy2(prjpcb_path, output_prjpcb)
 
     manifest = {
         "source_project": str(prjpcb_path),
-        "output_project": str(output_prjpcb),
         "layout_config": str(layout_toml),
+        "in_place": in_place,
         "document_count": len(documents),
         "documents": documents,
     }
     manifest_text = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
 
-    manifest_paths = [output_dir / "schdoc_param_layout_manifest.json"]
+    manifest_paths = [artifacts_dir / "schdoc_param_layout_manifest.json"]
     if not args.project:
         manifest_paths.append(SAMPLE_DIR / "output" / "schdoc_param_layout_manifest.json")
 
@@ -440,7 +484,7 @@ def main() -> None:
         [(lr, len(des), ", ".join(des)) for lr, des in all_unmatched.items()],
         key=lambda x: (-x[1], x[0].lower()),
     )
-    unmatched_path = output_dir / "unmatched_symbols.csv"
+    unmatched_path = artifacts_dir / "unmatched_symbols.csv"
     with unmatched_path.open("w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.writer(fh)
         writer.writerow(["LibRef", "InstanceCount", "Designators"])
@@ -467,7 +511,10 @@ def main() -> None:
         )
     if snapshot_dir:
         print(f"History snapshot: {snapshot_dir}")
-    print(f"Wrote SchDocs: {output_dir}")
+    if in_place:
+        print(f"Updated SchDocs in place: {project_dir}")
+    else:
+        print(f"Wrote SchDocs: {artifacts_dir}")
     print(f"Wrote manifest: {manifest_paths[0]}")
     print(f"Wrote unmatched: {unmatched_path}")
 
