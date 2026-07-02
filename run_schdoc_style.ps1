@@ -13,17 +13,19 @@ if (-not $prjFile) {
 
 $stylePath = Join-Path $PSScriptRoot "examples\assets\style.toml"
 if (-not (Test-Path $stylePath)) {
-    Write-Error "style.toml not found at $stylePath`nRun schdoc_style_extract.py first to generate it."
+    Write-Error "style.toml not found at $stylePath"
     exit 1
 }
 
 $cleanDir = Join-Path $ProjectDir "clean"
 
-Write-Host "Applying style to $($prjFile.Name) ..."
+# Stage styled SchDocs to clean/; we also copy them back in place below.
+Write-Host "Applying style.toml to $($prjFile.Name) ..."
 uv run python examples/schdoc_style/schdoc_style.py "$($prjFile.FullName)"
 
 $manifest = Get-Content (Join-Path $cleanDir "schdoc_style_manifest.json") | ConvertFrom-Json
 
+# Back up the original SchDocs before overwriting them in place.
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $historyDir = Join-Path $ProjectDir "history\$timestamp"
 New-Item -ItemType Directory -Path $historyDir | Out-Null
@@ -34,6 +36,7 @@ foreach ($doc in $manifest.documents) {
     Write-Host "  $($doc.source) -> $destPath"
 }
 
+# Apply the styled documents over the originals.
 Write-Host "Copying styled .SchDoc files back to their original locations..."
 foreach ($doc in $manifest.documents) {
     Copy-Item $doc.output $doc.source -Force

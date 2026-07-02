@@ -22,7 +22,7 @@ color = "#800000"
 
 [port]
 font_name = "Consolas"
-font_size = 8
+font_size = 7
 bold = true
 color = "#666666"
 area_color = "#FFFF80"
@@ -94,12 +94,36 @@ bold = true
 
 [component.parameter]
 font_name = "Consolas"
+font_size = 7
+bold = false
+color = "#000080"
+
+
+# Named parameter overrides. Each applies only to the parameter of that name;
+# any property omitted here falls back to [component.parameter] above.
+[component.parameter.Resistance]
+font_name = "Consolas"
 font_size = 9
 bold = false
 color = "#000080"
-# Conflicts found:
-# font_size = 10
-# font_size = 8
+
+[component.parameter.Capacitance]
+font_name = "Consolas"
+font_size = 9
+bold = false
+color = "#000080"
+
+[component.parameter.Inductance]
+font_name = "Consolas"
+font_size = 9
+bold = false
+color = "#000080"
+
+[component.parameter.PartNumber]
+font_name = "Consolas"
+font_size = 7
+bold = true
+color = "#000080"
 
 [component.graphics]
 color = "#0000FF"

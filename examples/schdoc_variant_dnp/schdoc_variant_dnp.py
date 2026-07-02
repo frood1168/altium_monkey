@@ -14,6 +14,8 @@ from altium_monkey import (
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 
 
+_LAYOUT_DNP_PARAM = "sch_layout_dnp"
+
 _DNP_PARAM_NAMES: frozenset[str] = frozenset({
     "value", "resistance", "inductance", "capacitance",
     "voltage", "current", "power", "tolerance",
@@ -23,6 +25,11 @@ _DNP_PARAM_NAMES: frozenset[str] = frozenset({
 def _is_dnp(component: object) -> bool:
     for param in getattr(component, "parameters", []):
         if not isinstance(param, AltiumSchParameter):
+            continue
+        # The sch_layout_dnp control parameter is the explicit DNP marker.
+        if param.name == _LAYOUT_DNP_PARAM:
+            if (param.text or "").strip().upper() == "DNP":
+                return True
             continue
         if param.name and param.name.lower() in _DNP_PARAM_NAMES:
             if (param.text or "").strip().upper() == "DNP":
@@ -235,10 +242,11 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Set Not Fitted variant flags from DNP parameter values. "
-            "Scans all SchDocs for components with a value parameter (Value, "
-            "Resistance, Capacitance, etc.) equal to 'DNP', then updates the "
-            "named variant in the .PrjPcb file. Components previously marked "
-            "Not Fitted that no longer have DNP are cleared."
+            "Scans all SchDocs for components marked DNP -- either the "
+            "sch_layout_dnp control parameter equals 'DNP', or a value "
+            "parameter (Value, Resistance, Capacitance, etc.) equals 'DNP' "
+            "-- then updates the named variant in the .PrjPcb file. Components "
+            "previously marked Not Fitted that no longer have DNP are cleared."
         )
     )
     parser.add_argument(

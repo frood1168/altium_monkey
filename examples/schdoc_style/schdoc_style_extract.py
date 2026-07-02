@@ -42,6 +42,10 @@ _NO_ERC_SYMBOL_NAME: dict[int, str] = {
     int(NoErcSymbol.TRIANGLE): "TRIANGLE",
 }
 
+_NAMED_PARAMETER_SECTIONS: frozenset[str] = frozenset(
+    {"Resistance", "Capacitance", "Inductance", "PartNumber"}
+)
+
 _ALIGNMENT_NAME: dict[int, str] = {
     SchHorizontalAlign.CENTER.value: "CENTER",
     SchHorizontalAlign.LEFT.value: "LEFT",
@@ -80,6 +84,10 @@ _SECTION_ORDER = [
     "sheet_entry",
     "component.designator",
     "component.parameter",
+    "component.parameter.Resistance",
+    "component.parameter.Capacitance",
+    "component.parameter.Inductance",
+    "component.parameter.PartNumber",
     "component.graphics",
 ]
 
@@ -281,7 +289,10 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
                 c.record_color("component.designator", parameter, "color", "color")
             elif isinstance(parameter, AltiumSchParameter) and not parameter.is_hidden:
                 param_name = parameter.name or ""
-                section = f"component.parameter.{param_name}" if param_name else "component.parameter"
+                if param_name in _NAMED_PARAMETER_SECTIONS:
+                    section = f"component.parameter.{param_name}"
+                else:
+                    section = "component.parameter"
                 c.record_font(section, parameter)
                 c.record_color(section, parameter, "color", "color")
 
