@@ -7,7 +7,6 @@ import shutil
 import sys
 import tomllib
 from collections import Counter
-from filecmp import cmp as files_equal
 from pathlib import Path
 from typing import TypeVar
 
@@ -417,7 +416,11 @@ def main() -> None:
         for p in schdoc_paths
     ]
 
-    if not output_prjpcb.exists() or not files_equal(prjpcb_path, output_prjpcb, shallow=False):
+    # Only seed the project file when the output has none. The style script
+    # styles SchDocs and must not rewrite the .PrjPcb: overwriting it would wipe
+    # variant Not-Fitted / DNP entries written into clean/ by schdoc_variant_dnp
+    # (or any manual variant edits).
+    if not output_prjpcb.exists():
         shutil.copy2(prjpcb_path, output_prjpcb)
 
     manifest = {
