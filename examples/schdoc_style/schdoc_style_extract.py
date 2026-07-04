@@ -46,6 +46,17 @@ _NAMED_PARAMETER_SECTIONS: frozenset[str] = frozenset(
     {"Resistance", "Capacitance", "Inductance", "PartNumber"}
 )
 
+# Testpoint components are recognized by a designator that begins with this prefix
+# (e.g. TP200, TP-V3.3). They are styled separately from ordinary components.
+_TESTPOINT_PREFIX = "TP"
+
+# Parameter sets are classified by a name prefix, the same way testpoints use a
+# designator prefix. Each maps to its own style section.
+_PARAMETER_SET_SECTIONS: dict[str, str] = {
+    "CC_": "parameter_set.component_class",  # Component Class
+    "NC_": "parameter_set.net_class",  # Net Class
+}
+
 _ALIGNMENT_NAME: dict[int, str] = {
     SchHorizontalAlign.CENTER.value: "CENTER",
     SchHorizontalAlign.LEFT.value: "LEFT",
@@ -76,6 +87,8 @@ _SECTION_ORDER = [
     "note",
     "text_string",
     "no_erc",
+    "parameter_set.component_class",
+    "parameter_set.net_class",
     "signal_harness",
     "harness_connector",
     "harness_entry",
@@ -89,6 +102,9 @@ _SECTION_ORDER = [
     "component.parameter.Inductance",
     "component.parameter.PartNumber",
     "component.graphics",
+    "component.testpoint.designator",
+    "component.testpoint.parameter",
+    "component.testpoint.graphics",
 ]
 
 
@@ -194,6 +210,57 @@ class StyleCollector:
         return "\n".join(lines)
 
 
+def _designator_text(component: object) -> str:
+    for parameter in getattr(component, "parameters", []):
+        if isinstance(parameter, AltiumSchDesignator):
+            return parameter.text or ""
+    return ""
+
+
+def _extract_component(component: object, c: StyleCollector, base: str) -> None:
+    """Record designator/parameter/graphics style under the given section base.
+
+    ``base`` is ``"component"`` for ordinary parts or ``"component.testpoint"``
+    for testpoints (designator starting with ``TP_``).
+    """
+    for parameter in getattr(component, "parameters", []):
+        if isinstance(parameter, AltiumSchDesignator):
+            c.record_font(f"{base}.designator", parameter)
+            c.record_color(f"{base}.designator", parameter, "color", "color")
+        elif isinstance(parameter, AltiumSchParameter) and not parameter.is_hidden:
+            param_name = parameter.name or ""
+            if base == "component" and param_name in _NAMED_PARAMETER_SECTIONS:
+                section = f"{base}.parameter.{param_name}"
+            else:
+                section = f"{base}.parameter"
+            c.record_font(section, parameter)
+            c.record_color(section, parameter, "color", "color")
+
+    for graphic in getattr(component, "graphics", []):
+        if isinstance(graphic, AltiumSchRectangle):
+            bounds = graphic.bounds_mils
+            if bounds.width_mils > 100 or bounds.height_mils > 100:
+                c.record_color(f"{base}.graphics", graphic, "color", "color")
+                c.record_color(f"{base}.graphics", graphic, "area_color", "area_color")
+                c.record_line_width(f"{base}.graphics", graphic)
+                c.record_line_style(f"{base}.graphics", graphic)
+        elif isinstance(graphic, AltiumSchLine | AltiumSchArc | AltiumSchPolyline):
+            c.record_color(f"{base}.graphics", graphic, "color", "color")
+
+
+def _extract_parameter_set(parameter_set: object, c: StyleCollector, section: str) -> None:
+    """Record a Component Class / Net Class parameter set's style.
+
+    The directive's own line/circle color is captured as ``color``; its visible
+    child parameters carry the label font and (as ``text_color``) the text color.
+    """
+    c.record_color(section, parameter_set, "color", "color")
+    for param in getattr(parameter_set, "parameters", []):
+        if isinstance(param, AltiumSchParameter) and not param.is_hidden:
+            c.record_font(section, param)
+            c.record_color(section, param, "color", "text_color")
+
+
 def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
     if schdoc.sheet is not None:
         c.record_color("document", schdoc.sheet, "area_color", "background_color")
@@ -283,29 +350,17 @@ def _extract_from_schdoc(schdoc: AltiumSchDoc, c: StyleCollector) -> None:
                 c.record("sheet_entry", "arrow_kind", ak)
 
     for component in schdoc.components:
-        for parameter in getattr(component, "parameters", []):
-            if isinstance(parameter, AltiumSchDesignator):
-                c.record_font("component.designator", parameter)
-                c.record_color("component.designator", parameter, "color", "color")
-            elif isinstance(parameter, AltiumSchParameter) and not parameter.is_hidden:
-                param_name = parameter.name or ""
-                if param_name in _NAMED_PARAMETER_SECTIONS:
-                    section = f"component.parameter.{param_name}"
-                else:
-                    section = "component.parameter"
-                c.record_font(section, parameter)
-                c.record_color(section, parameter, "color", "color")
+        if _designator_text(component).startswith(_TESTPOINT_PREFIX):
+            _extract_component(component, c, "component.testpoint")
+        else:
+            _extract_component(component, c, "component")
 
-        for graphic in getattr(component, "graphics", []):
-            if isinstance(graphic, AltiumSchRectangle):
-                bounds = graphic.bounds_mils
-                if bounds.width_mils > 100 or bounds.height_mils > 100:
-                    c.record_color("component.graphics", graphic, "color", "color")
-                    c.record_color("component.graphics", graphic, "area_color", "area_color")
-                    c.record_line_width("component.graphics", graphic)
-                    c.record_line_style("component.graphics", graphic)
-            elif isinstance(graphic, AltiumSchLine | AltiumSchArc | AltiumSchPolyline):
-                c.record_color("component.graphics", graphic, "color", "color")
+    for parameter_set in schdoc.parameter_sets:
+        name = getattr(parameter_set, "name", "") or ""
+        for prefix, section in _PARAMETER_SET_SECTIONS.items():
+            if name.startswith(prefix):
+                _extract_parameter_set(parameter_set, c, section)
+                break
 
 
 def _parse_args() -> argparse.Namespace:

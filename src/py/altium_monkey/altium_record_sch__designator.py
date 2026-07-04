@@ -195,14 +195,18 @@ class AltiumSchDesignator(SingleFontBindableRecordMixin, SchPrimitive):
         else:
             s.remove_field(record, Fields.FONT_ID)
         if self._has_orientation or self.orientation != TextOrientation.DEGREES_0:
-            s.write_int(record, Fields.ORIENTATION, self.orientation.value, raw)
+            s.write_int(
+                record, Fields.ORIENTATION, self.orientation.value, raw, force=True
+            )
         else:
             s.remove_field(record, Fields.ORIENTATION)
         if (
             self._has_justification
             or self.justification != TextJustification.BOTTOM_LEFT
         ):
-            s.write_int(record, Fields.JUSTIFICATION, self.justification.value, raw)
+            s.write_int(
+                record, Fields.JUSTIFICATION, self.justification.value, raw, force=True
+            )
         else:
             s.remove_field(record, Fields.JUSTIFICATION)
 

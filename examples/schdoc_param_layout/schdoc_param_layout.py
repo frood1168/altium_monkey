@@ -137,15 +137,48 @@ def _get_layout_opt(component: object) -> int | None:
     return None
 
 
+def _record_adjustment(
+    adjustments: list[dict],
+    ctx: dict,
+    param_name: str,
+    action: str,
+    was_hidden: bool,
+    entry: dict | None = None,
+) -> None:
+    """Append one parameter adjustment row for the run report.
+
+    ``action`` is "shown" or "hidden"; ``entry`` (when present) carries the
+    applied offset/orientation/justification so the report shows the position.
+    """
+    adjustments.append(
+        {
+            "schdoc": ctx["schdoc"],
+            "designator": ctx["designator"],
+            "lib_ref": ctx["lib_ref"],
+            "match": ctx["match"],
+            "parameter": param_name,
+            "action": action,
+            "was_hidden": was_hidden,
+            "offset_x": "" if entry is None else entry.get("offset_x", ""),
+            "offset_y": "" if entry is None else entry.get("offset_y", ""),
+            "orientation": "" if entry is None else entry.get("orientation", ""),
+            "justification": "" if entry is None else entry.get("justification", ""),
+        }
+    )
+
+
 def _apply_matched_component(
     component: object,
     rot_layout: dict,
     counts: Counter,
+    adjustments: list[dict],
+    ctx: dict,
 ) -> None:
     """Apply a full TOML rotation entry to a component.
 
     Parameters present in rot_layout get their position applied and are made
-    visible. Parameters absent from rot_layout are hidden.
+    visible. Parameters absent from rot_layout are hidden. Each action is
+    recorded into ``adjustments`` for the run report.
     """
     comp_x = component.location.x_mils
     comp_y = component.location.y_mils
@@ -158,6 +191,7 @@ def _apply_matched_component(
         if name in (_LAYOUT_OPT_PARAM, _LAYOUT_DNP_PARAM):
             continue  # control parameters — handled separately
 
+        was_hidden = bool(param.is_hidden)
         if name in rot_layout:
             entry = rot_layout[name]
             param.location = CoordPoint.from_mils(
@@ -174,9 +208,11 @@ def _apply_matched_component(
             param.is_hidden = False
             param.auto_position = False
             counts[name] += 1
+            _record_adjustment(adjustments, ctx, name, "shown", was_hidden, entry)
         else:
             # Not listed in the template for this component → hide
             param.is_hidden = True
+            _record_adjustment(adjustments, ctx, name, "hidden", was_hidden)
 
     pin_vis = rot_layout.get(_PINS_KEY)
     if pin_vis:
@@ -193,6 +229,8 @@ def _apply_default_visibility(
     component: object,
     default_vis: dict,
     counts: Counter,
+    adjustments: list[dict],
+    ctx: dict,
 ) -> None:
     """Apply [default] visibility rules to an unmatched component.
 
@@ -202,11 +240,24 @@ def _apply_default_visibility(
         name = _param_name(param)
         if name is None or name not in default_vis:
             continue
+        was_hidden = bool(param.is_hidden)
         param.is_hidden = not bool(default_vis[name])
         counts[f"default.{name}"] += 1
+        _record_adjustment(
+            adjustments,
+            ctx,
+            name,
+            "hidden" if param.is_hidden else "shown",
+            was_hidden,
+        )
 
 
-def _apply_dnp_swap(component: object, counts: Counter) -> None:
+def _apply_dnp_swap(
+    component: object,
+    counts: Counter,
+    adjustments: list[dict],
+    ctx: dict,
+) -> None:
     """
     Handle sch_layout_dnp visual swap for one component.
 
@@ -247,11 +298,16 @@ def _apply_dnp_swap(component: object, counts: Counter) -> None:
             dnp_param.justification = value_param.justification
             dnp_param.font_id = value_param.font_id
             value_param.is_hidden = True
+            _record_adjustment(adjustments, ctx, value_param.name, "hidden", False)
 
+        dnp_was_hidden = bool(dnp_param.is_hidden)
         dnp_param.color = _DNP_LABEL_COLOR
         dnp_param.is_hidden = False
         dnp_param.auto_position = False
         counts["sch_layout_dnp_shown"] += 1
+        _record_adjustment(
+            adjustments, ctx, _LAYOUT_DNP_PARAM, "shown", dnp_was_hidden
+        )
     else:
         dnp_param.is_hidden = True
 
@@ -271,39 +327,74 @@ def apply_layout_to_schdoc(
     dnp_set = 0
     dnp_reset = 0
     unmatched: dict[str, list[str]] = {}  # lib_ref → [designators]
+    adjustments: list[dict] = []
+    schdoc_name = input_path.name
 
     for component in schdoc.components:
         lib_ref = component.lib_reference
         if not lib_ref:
             continue
 
+        des = _component_designator(component)
+
         if lib_ref in layout:
             lib_layout = layout[lib_ref]
             rot_layout = None
+            matched_key = None
             for candidate in _rot_key_candidates(component):
                 rot_layout = lib_layout.get(candidate)
                 if rot_layout is not None:
+                    matched_key = candidate
                     break
 
             if rot_layout is None:
                 # lib_ref is in the template but no matching rotation entry found.
                 # Hide all parameters — the template is the authority for this lib_ref.
+                ctx = {
+                    "schdoc": schdoc_name,
+                    "designator": des,
+                    "lib_ref": lib_ref,
+                    "match": "rotation_missing",
+                }
                 for param in getattr(component, "parameters", []):
                     name = _param_name(param)
                     if name is not None and name not in (_LAYOUT_OPT_PARAM, _LAYOUT_DNP_PARAM):
+                        was_hidden = bool(param.is_hidden)
                         param.is_hidden = True
+                        _record_adjustment(adjustments, ctx, name, "hidden", was_hidden)
                 rot_missing += 1
             else:
-                _apply_matched_component(component, rot_layout, counts)
+                ctx = {
+                    "schdoc": schdoc_name,
+                    "designator": des,
+                    "lib_ref": lib_ref,
+                    "match": matched_key,
+                }
+                _apply_matched_component(
+                    component, rot_layout, counts, adjustments, ctx
+                )
                 matched += 1
         else:
-            des = _component_designator(component)
             unmatched.setdefault(lib_ref, []).append(des or "?")
             if default_vis:
-                _apply_default_visibility(component, default_vis, counts)
+                ctx = {
+                    "schdoc": schdoc_name,
+                    "designator": des,
+                    "lib_ref": lib_ref,
+                    "match": "default",
+                }
+                _apply_default_visibility(
+                    component, default_vis, counts, adjustments, ctx
+                )
                 defaulted += 1
 
-        _apply_dnp_swap(component, counts)
+        dnp_ctx = {
+            "schdoc": schdoc_name,
+            "designator": des,
+            "lib_ref": lib_ref,
+            "match": "dnp_swap",
+        }
+        _apply_dnp_swap(component, counts, adjustments, dnp_ctx)
 
         if _is_dnp(component):
             if component.component_kind != ComponentKind.STANDARD_NO_BOM:
@@ -327,6 +418,7 @@ def apply_layout_to_schdoc(
         "sch_layout_dnp_shown": counts["sch_layout_dnp_shown"],
         "parameter_placements": dict(sorted(counts.items())),
         "unmatched_lib_refs": {lr: sorted(des) for lr, des in unmatched.items()},
+        "adjustments": adjustments,
     }
 
 
@@ -444,6 +536,14 @@ def main() -> None:
         ):
             shutil.copy2(prjpcb_path, output_prjpcb)
 
+    # Pull the per-parameter adjustments out of each document for the report,
+    # then keep only a count in the manifest so the JSON stays compact.
+    all_adjustments: list[dict] = []
+    for doc in documents:
+        doc_adjustments = doc.pop("adjustments", [])
+        all_adjustments.extend(doc_adjustments)
+        doc["adjustment_count"] = len(doc_adjustments)
+
     manifest = {
         "source_project": str(prjpcb_path),
         "layout_config": str(layout_toml),
@@ -490,6 +590,46 @@ def main() -> None:
         writer.writerow(["LibRef", "InstanceCount", "Designators"])
         writer.writerows(unmatched_rows)
 
+    # Per-parameter adjustment report: every show/hide and applied position,
+    # dropped alongside unmatched_symbols.csv in the History snapshot folder.
+    adjustments_path = artifacts_dir / "parameter_adjustments.csv"
+    with adjustments_path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(
+            [
+                "SchDoc",
+                "Designator",
+                "LibRef",
+                "Match",
+                "Parameter",
+                "Action",
+                "WasHidden",
+                "OffsetX",
+                "OffsetY",
+                "Orientation",
+                "Justification",
+            ]
+        )
+        for a in sorted(
+            all_adjustments,
+            key=lambda r: (r["schdoc"], r["designator"], r["parameter"]),
+        ):
+            writer.writerow(
+                [
+                    a["schdoc"],
+                    a["designator"],
+                    a["lib_ref"],
+                    a["match"],
+                    a["parameter"],
+                    a["action"],
+                    a["was_hidden"],
+                    a["offset_x"],
+                    a["offset_y"],
+                    a["orientation"],
+                    a["justification"],
+                ]
+            )
+
     print(f"Loaded project: {prjpcb_path}")
     print(f"Layout config: {layout_toml}")
     print(f"Processed SchDocs: {len(documents)}")
@@ -517,6 +657,7 @@ def main() -> None:
         print(f"Wrote SchDocs: {artifacts_dir}")
     print(f"Wrote manifest: {manifest_paths[0]}")
     print(f"Wrote unmatched: {unmatched_path}")
+    print(f"Wrote adjustments report: {adjustments_path}  ({len(all_adjustments)} rows)")
 
 
 if __name__ == "__main__":

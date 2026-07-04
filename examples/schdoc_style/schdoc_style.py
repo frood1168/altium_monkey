@@ -88,6 +88,17 @@ _JUSTIFICATION_MAP: dict[str, int] = {
 }
 
 
+# Testpoint components are recognized by a designator that begins with this prefix
+# (e.g. TP200, TP-V3.3).
+_TESTPOINT_PREFIX = "TP"
+
+# Parameter sets are classified by a name prefix, each mapping to its own style key.
+_PARAMETER_SET_SECTIONS: dict[str, str] = {
+    "CC_": "component_class",  # Component Class
+    "NC_": "net_class",  # Net Class
+}
+
+
 def _color(hex_str: str) -> int:
     return ColorValue.from_hex(hex_str).win32
 
@@ -137,6 +148,7 @@ def _apply_component_style(
     parameter_cfg: dict,
     graphics_cfg: dict,
     counts: Counter[str],
+    count_prefix: str = "component",
 ) -> None:
     for parameter in getattr(component, "parameters", []):
         if isinstance(parameter, AltiumSchDesignator):
@@ -144,7 +156,7 @@ def _apply_component_style(
                 parameter.font = _resolve_font(parameter, designator_cfg)
             if "color" in designator_cfg:
                 parameter.color = _color(designator_cfg["color"])
-            counts["component_designators"] += 1
+            counts[f"{count_prefix}_designators"] += 1
         elif isinstance(parameter, AltiumSchParameter) and not parameter.is_hidden:
             param_name = parameter.name or ""
             named_cfg = parameter_cfg.get(param_name) if param_name else None
@@ -155,7 +167,7 @@ def _apply_component_style(
                 parameter.font = _resolve_font(parameter, font_cfg)
             if "color" in color_cfg:
                 parameter.color = _color(color_cfg["color"])
-            counts["component_parameters"] += 1
+            counts[f"{count_prefix}_parameters"] += 1
 
     for graphic in getattr(component, "graphics", []):
         if isinstance(graphic, AltiumSchRectangle):
@@ -175,19 +187,42 @@ def _apply_component_style(
                     ls = _LINE_STYLE_MAP.get(graphics_cfg["line_style"].upper())
                     if ls is not None:
                         graphic.line_style = ls
-                counts["component_body_rectangles"] += 1
+                counts[f"{count_prefix}_body_rectangles"] += 1
         elif isinstance(graphic, AltiumSchLine | AltiumSchPolyline | AltiumSchArc):
             if "color" in graphics_cfg:
                 graphic.color = _color(graphics_cfg["color"])
-            counts["component_graphics"] += 1
+            counts[f"{count_prefix}_graphics"] += 1
         elif isinstance(graphic, AltiumSchPolygon):
             if "color" in graphics_cfg:
                 graphic.color = _color(graphics_cfg["color"])
-            counts["component_graphics"] += 1
+            counts[f"{count_prefix}_graphics"] += 1
         elif isinstance(graphic, AltiumSchEllipse):
             if "color" in graphics_cfg:
                 graphic.color = _color(graphics_cfg["color"])
-            counts["component_graphics"] += 1
+            counts[f"{count_prefix}_graphics"] += 1
+
+
+def _designator_text(component: object) -> str:
+    for parameter in getattr(component, "parameters", []):
+        if isinstance(parameter, AltiumSchDesignator):
+            return parameter.text or ""
+    return ""
+
+
+def _apply_parameter_set_style(parameter_set: object, cfg: dict) -> None:
+    """Apply a Component Class / Net Class parameter set's style.
+
+    ``color`` styles the directive's own line/circle; the visible child
+    parameters take the label font and ``text_color``.
+    """
+    if "color" in cfg:
+        parameter_set.color = _color(cfg["color"])
+    for param in getattr(parameter_set, "parameters", []):
+        if isinstance(param, AltiumSchParameter) and not param.is_hidden:
+            if _has_font_keys(cfg):
+                param.font = _resolve_font(param, cfg)
+            if "text_color" in cfg:
+                param.color = _color(cfg["text_color"])
 
 
 def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, object]:
@@ -340,13 +375,39 @@ def style_schdoc(input_path: Path, output_path: Path, style: dict) -> dict[str, 
                     entry.arrow_kind = ak
             counts["sheet_entries"] += 1
 
+    parameter_set_cfg = style.get("parameter_set", {})
+    for parameter_set in schdoc.parameter_sets:
+        name = getattr(parameter_set, "name", "") or ""
+        for prefix, key in _PARAMETER_SET_SECTIONS.items():
+            if name.startswith(prefix):
+                cfg = parameter_set_cfg.get(key, {})
+                if cfg:
+                    _apply_parameter_set_style(parameter_set, cfg)
+                counts[f"parameter_set_{key}"] += 1
+                break
+
     component_cfg = style.get("component", {})
     designator_cfg = component_cfg.get("designator", {})
     parameter_cfg = component_cfg.get("parameter", {})
     graphics_cfg = component_cfg.get("graphics", {})
+    testpoint_cfg = component_cfg.get("testpoint", {})
+    tp_designator_cfg = testpoint_cfg.get("designator", {})
+    tp_parameter_cfg = testpoint_cfg.get("parameter", {})
+    tp_graphics_cfg = testpoint_cfg.get("graphics", {})
     for component in schdoc.components:
-        _apply_component_style(component, designator_cfg, parameter_cfg, graphics_cfg, counts)
-        counts["components"] += 1
+        if _designator_text(component).startswith(_TESTPOINT_PREFIX):
+            _apply_component_style(
+                component,
+                tp_designator_cfg,
+                tp_parameter_cfg,
+                tp_graphics_cfg,
+                counts,
+                count_prefix="testpoint",
+            )
+            counts["testpoints"] += 1
+        else:
+            _apply_component_style(component, designator_cfg, parameter_cfg, graphics_cfg, counts)
+            counts["components"] += 1
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     schdoc.save(output_path)

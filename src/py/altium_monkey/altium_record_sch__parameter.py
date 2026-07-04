@@ -290,14 +290,22 @@ class AltiumSchParameter(SingleFontBindableRecordMixin, SchPrimitive):
             )
         if self._has_orientation or self.orientation != TextOrientation.DEGREES_0:
             serializer.write_int(
-                record, Fields.ORIENTATION, self.orientation.value, raw_record
+                record,
+                Fields.ORIENTATION,
+                self.orientation.value,
+                raw_record,
+                force=True,
             )
         if (
             self._has_justification
             or self.justification != TextJustification.BOTTOM_LEFT
         ):
             serializer.write_int(
-                record, Fields.JUSTIFICATION, self.justification.value, raw_record
+                record,
+                Fields.JUSTIFICATION,
+                self.justification.value,
+                raw_record,
+                force=True,
             )
 
         if self.color is not None:
