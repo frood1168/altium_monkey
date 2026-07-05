@@ -1720,6 +1720,16 @@ class AltiumSchComponent(SchGraphicalObject):
         )
 
         for child_kind, child in component_children:
+            # Harness/sheet entries are parent-bound primitives that require
+            # parent_* kwargs and are drawn by the dedicated harness/sheet-symbol
+            # passes. On some projects a harness entry's owner_index resolves to
+            # a component, landing it in this child list; rendering it here would
+            # call its to_geometry() without the parent_* kwargs and crash.
+            if type(child).__name__ in (
+                "AltiumSchHarnessEntry",
+                "AltiumSchSheetEntry",
+            ):
+                continue
             owner_part = getattr(child, "owner_part_id", None)
             if (
                 owner_part is not None
