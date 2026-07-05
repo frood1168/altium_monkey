@@ -3325,6 +3325,13 @@ class AltiumSchDoc(JsonApplyMixin):
         ):
             if is_component_owned(obj) or is_template_owned(obj):
                 continue
+            # Parent-bound primitives (harness entries, sheet entries) are
+            # positioned relative to a parent connector/symbol and require
+            # parent_* kwargs the generic dispatch cannot supply. They are
+            # rendered by the dedicated harness/sheet-symbol passes, so skip
+            # them here (mirrors the template-child guard below).
+            if isinstance(obj, (AltiumSchHarnessEntry, AltiumSchSheetEntry)):
+                continue
             geometry_record = obj.to_geometry(
                 geometry_ctx,
                 document_id=document_id,
@@ -3350,6 +3357,11 @@ class AltiumSchDoc(JsonApplyMixin):
             objects, key=lambda item: str(getattr(item, "unique_id", ""))
         ):
             if should_skip(obj):
+                continue
+            # Parent-bound primitives (harness entries, sheet entries) require
+            # parent_* kwargs the generic dispatch cannot supply; they are drawn
+            # by the dedicated harness/sheet-symbol passes. Skip defensively.
+            if isinstance(obj, (AltiumSchHarnessEntry, AltiumSchSheetEntry)):
                 continue
             to_geometry = getattr(obj, "to_geometry", None)
             if not callable(to_geometry):
@@ -3847,6 +3859,15 @@ class AltiumSchDoc(JsonApplyMixin):
             getattr(comp, "graphics", []),
             key=lambda obj: str(getattr(obj, "unique_id", "")),
         ):
+            # Harness/sheet entries are parent-bound primitives drawn by the
+            # dedicated harness/sheet-symbol passes; if one is mis-owned by a
+            # component it lands in comp.graphics, and rendering it here would
+            # call to_geometry() without the required parent_* kwargs.
+            if type(graphic).__name__ in (
+                "AltiumSchHarnessEntry",
+                "AltiumSchSheetEntry",
+            ):
+                continue
             if not record_belongs_to_display_mode(graphic, component_display_mode):
                 continue
             owner_part = getattr(graphic, "owner_part_id", None)
