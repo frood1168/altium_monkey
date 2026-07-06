@@ -5,12 +5,17 @@ Each source IntLib's embedded SchLib and PcbLib streams are extracted to a
 temporary directory, merged using the SchLib/PcbLib merge APIs, and repacked
 into a new OLE-format IntLib with compressed source streams.
 
+Run arg-free, it recursively discovers and merges every .IntLib bundled under
+the shared assets/projects/ sample projects (rt_super_c1 + loz-old-man) and
+writes the result to output/merged.IntLib. Pass INPUT_DIR to merge a different
+directory of .IntLib files.
+
 Usage:
-    uv run python examples/intlib_merge/intlib_merge.py <INPUT_DIR> [options]
+    uv run python examples/intlib_merge/intlib_merge.py [INPUT_DIR] [options]
 
 Options:
     --recurse / -r         Also search subdirectories for .IntLib files
-    --output / -o PATH     Output file (default: <INPUT_DIR>/merged.IntLib)
+    --output / -o PATH     Output file (default: examples/intlib_merge/output/merged.IntLib)
     --name / -n NAME       Base name used for stream filenames inside the output
                            IntLib (default: merged)
     --conflicts MODE       How to handle duplicate symbol/footprint names:
@@ -26,6 +31,13 @@ from pathlib import Path
 
 from altium_monkey import AltiumIntLib, AltiumOleWriter, AltiumPcbLib, AltiumSchLib
 
+
+SAMPLE_DIR = Path(__file__).resolve().parent
+EXAMPLES_DIR = SAMPLE_DIR.parent
+# Arg-free demo merges every .IntLib bundled under the shared sample projects
+# (rt_super_c1 + loz-old-man) — discovered recursively, no duplicated fixtures.
+DEFAULT_INPUT_DIR = EXAMPLES_DIR / "assets" / "projects"
+DEFAULT_OUTPUT_PATH = SAMPLE_DIR / "output" / "merged.IntLib"
 
 _COMPRESSED_PREFIX = 0x02
 
@@ -108,27 +120,39 @@ def main() -> None:
             "Duplicate symbol/footprint names are renamed by default."
         ),
     )
-    parser.add_argument("input_dir", metavar="INPUT_DIR",
-                        help="Directory containing .IntLib files to merge.")
+    parser.add_argument("input_dir", metavar="INPUT_DIR", nargs="?",
+                        help="Directory containing .IntLib files to merge "
+                             "(default: the bundled assets/projects/, searched "
+                             "recursively).")
     parser.add_argument("--recurse", "-r", action="store_true",
                         help="Recurse into subdirectories.")
     parser.add_argument("--output", "-o", metavar="OUTPUT.IntLib",
-                        help="Output path (default: <INPUT_DIR>/merged.IntLib).")
+                        help="Output path (default: examples/intlib_merge/output/merged.IntLib).")
     parser.add_argument("--name", "-n", default="merged", metavar="NAME",
                         help="Base name for embedded stream files (default: merged).")
     parser.add_argument("--conflicts", choices=("rename", "skip"), default="rename",
                         help="Duplicate name handling: rename (default) or skip.")
     args = parser.parse_args()
 
-    input_dir = Path(args.input_dir).resolve()
+    input_dir = Path(args.input_dir).resolve() if args.input_dir else DEFAULT_INPUT_DIR
     if not input_dir.is_dir():
         print(f"Not a directory: {input_dir}", file=sys.stderr)
         sys.exit(1)
 
-    output_path = Path(args.output).resolve() if args.output else input_dir / "merged.IntLib"
+    if args.output:
+        output_path = Path(args.output).resolve()
+    elif args.input_dir:
+        # Explicit input dir without --output keeps the historical default.
+        output_path = input_dir / "merged.IntLib"
+    else:
+        # Arg-free demo: never write into the committed fixture dir.
+        output_path = DEFAULT_OUTPUT_PATH
     base_name = args.name
 
-    intlib_files = _discover_intlibs(input_dir, args.recurse)
+    # The arg-free demo recurses so it finds the IntLibs nested under each
+    # sample project; an explicit INPUT_DIR honors the --recurse flag as given.
+    recurse = args.recurse or args.input_dir is None
+    intlib_files = _discover_intlibs(input_dir, recurse)
     if not intlib_files:
         print(f"No .IntLib files found in: {input_dir}", file=sys.stderr)
         sys.exit(1)

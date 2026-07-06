@@ -5,13 +5,28 @@ reference schematic. Parameter offsets are stored in the component's local
 coordinate frame, so they apply correctly regardless of how the component is
 rotated or mirrored in the target project.
 
+## Quick start (bundled demo)
+
+Run with no arguments to apply the committed `param_layout.toml` to the bundled
+hydroscope project:
+
+```powershell
+uv run python examples/schdoc_param_layout/schdoc_param_layout.py
+```
+
+The read-only project under `examples/assets/projects/hydroscope/` is copied into
+`output/hydroscope_param/` and its four SchDocs are rewritten there (the assets
+are never modified). A run manifest is written to
+`output/schdoc_param_layout_manifest.json`. The committed template was extracted
+from the hydroscope SchDocs themselves, so every component is matched.
+
 ## Workflow
 
 ```
-reference.SchDoc  ──extract──▶  clean/param_layout.toml
+reference.SchDoc  ──extract──▶  <reference_dir>/clean/param_layout.toml
                                         │
                                         ▼
-project.PrjPcb    ──apply───▶  clean/<schematic>.SchDoc
+project.PrjPcb    ──apply───▶  <project_dir>/<schematic>.SchDoc (in place)
 ```
 
 ### Step 1 — Create a reference schematic
@@ -36,8 +51,10 @@ needed — each section is `[LibraryReference.ParameterName]`.
 uv run python examples/schdoc_param_layout/schdoc_param_layout.py project.PrjPcb
 ```
 
-Reads `<project_dir>/clean/param_layout.toml` and writes positioned copies of
-all project SchDocs to `<project_dir>/clean/`.
+Reads `<project_dir>/param_layout.toml`, snapshots every touched SchDoc into
+`<project_dir>/History/<timestamp>/`, then rewrites the project's SchDocs in
+place. (With no argument the script instead runs the bundled hydroscope demo and
+writes to `output/` — see Quick start above.)
 
 ## Template format (`param_layout.toml`)
 

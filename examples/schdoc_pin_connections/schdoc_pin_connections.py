@@ -10,6 +10,15 @@ from altium_monkey import AltiumDesign, AltiumSchDesignator, AltiumSchDoc
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 
 
+# Arg-free demo defaults: a bundled project and a designator verified to have
+# pins in that project (U1 resolves to 176 pins in RT_SUPER_C1).
+_HERE = Path(__file__).resolve().parent
+_DEFAULT_PROJECT = (
+    _HERE.parent / "assets" / "projects" / "rt_super_c1" / "RT_SUPER_C1.PrjPcb"
+)
+_DEFAULT_DESIGNATOR = "U1"
+
+
 def _natural_sort_key(s: str) -> list:
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", s)]
 
@@ -109,19 +118,29 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "project",
         metavar="PROJECT.PrjPcb",
-        help="Path to the .PrjPcb file.",
+        nargs="?",
+        default=str(_DEFAULT_PROJECT),
+        help=(
+            "Path to the .PrjPcb file. Defaults to the bundled "
+            "RT_SUPER_C1 sample project."
+        ),
     )
     parser.add_argument(
         "designator",
         metavar="DESIGNATOR",
-        help="Component designator (e.g. U1, R5). Case-insensitive.",
+        nargs="?",
+        default=_DEFAULT_DESIGNATOR,
+        help=(
+            "Component designator (e.g. U1, R5). Case-insensitive. "
+            f"Defaults to {_DEFAULT_DESIGNATOR}."
+        ),
     )
     parser.add_argument(
         "-o", "--output",
         metavar="FILE.csv",
         help=(
-            "Output CSV path. Defaults to <DESIGNATOR>_connections.csv "
-            "in the current directory."
+            "Output CSV path. Defaults to output/<DESIGNATOR>_connections.csv "
+            "next to this script."
         ),
     )
     parser.add_argument(
@@ -165,7 +184,7 @@ def main() -> None:
 
     output_path = (
         Path(args.output) if args.output
-        else Path(f"{args.designator}_connections.csv")
+        else _HERE / "output" / f"{args.designator}_connections.csv"
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

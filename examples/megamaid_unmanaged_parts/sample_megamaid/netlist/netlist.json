@@ -1,0 +1,63 @@
+{
+  "components": [
+    {
+      "svg_id": "AAAA1111",
+      "designator": "R1",
+      "library_ref": "Resistor",
+      "footprint": "0402",
+      "description": "Chip Resistor 10k 1%",
+      "parameters": {
+        "PartNumber": "RC0402FR-0710KL",
+        "Manufacturer": "Yageo",
+        "Comment": "10k"
+      }
+    },
+    {
+      "svg_id": "AAAA2222",
+      "designator": "R2",
+      "library_ref": "Resistor",
+      "footprint": "0402",
+      "description": "Chip Resistor 10k 1%",
+      "parameters": {
+        "PartNumber": "RC0402FR-0710KL",
+        "Manufacturer": "Yageo",
+        "Comment": "10k"
+      }
+    },
+    {
+      "svg_id": "BBBB4444",
+      "designator": "L1",
+      "library_ref": "Inductor",
+      "footprint": "0603-L",
+      "description": "Wirewound Inductor 10nH",
+      "parameters": {
+        "PartNumber": "LQW18AN10NJ00D",
+        "Manufacturer": "Murata",
+        "Comment": "10nH"
+      }
+    },
+    {
+      "svg_id": "DDDD5555",
+      "designator": "U1",
+      "library_ref": "MyMCU",
+      "footprint": "QFN-48",
+      "description": "ARM Cortex-M4 MCU",
+      "parameters": {
+        "Manufacturer": "STMicroelectronics",
+        "Value": "STM32F401"
+      }
+    },
+    {
+      "svg_id": "CCCC3333",
+      "designator": "C1",
+      "library_ref": "Cap-Managed",
+      "footprint": "0402",
+      "description": "Managed vault capacitor 10uF",
+      "parameters": {
+        "PartNumber": "GRM155R60J106ME47D",
+        "Manufacturer": "Murata",
+        "Comment": "10uF"
+      }
+    }
+  ]
+}

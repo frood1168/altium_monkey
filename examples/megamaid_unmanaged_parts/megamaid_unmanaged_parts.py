@@ -7,6 +7,11 @@ import sys
 from pathlib import Path
 
 
+SAMPLE_DIR = Path(__file__).resolve().parent
+_DEFAULT_MEGAMAID_DIR = SAMPLE_DIR / "sample_megamaid"
+_DEFAULT_OUTPUT = SAMPLE_DIR / "output" / "unmanaged_parts_report.json"
+
+
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -83,16 +88,28 @@ def main() -> None:
     parser.add_argument(
         "megamaid_dir",
         metavar="MEGAMAID_DIR",
-        help="Path to the MegaMaid project output directory (e.g. MegaMaid/Rfboard/).",
+        nargs="?",
+        default=None,
+        help=(
+            "Path to the MegaMaid project output directory (e.g. MegaMaid/Rfboard/). "
+            "Defaults to the bundled sample_megamaid/ fixture."
+        ),
     )
     parser.add_argument(
         "--output", "-o",
         metavar="FILE",
-        help="Write JSON report to FILE (default: <MEGAMAID_DIR>/unmanaged_parts.json).",
+        help=(
+            "Write JSON report to FILE "
+            "(default: <example>/output/unmanaged_parts_report.json)."
+        ),
     )
     args = parser.parse_args()
 
-    maid_dir = Path(args.megamaid_dir).resolve()
+    maid_dir = (
+        Path(args.megamaid_dir).resolve()
+        if args.megamaid_dir
+        else _DEFAULT_MEGAMAID_DIR
+    )
     if not maid_dir.is_dir():
         print(f"Directory not found: {maid_dir}", file=sys.stderr)
         sys.exit(1)
@@ -203,7 +220,8 @@ def main() -> None:
         "parts": report_parts,
     }
 
-    output_path = Path(args.output).resolve() if args.output else maid_dir / "unmanaged_parts.json"
+    output_path = Path(args.output).resolve() if args.output else _DEFAULT_OUTPUT
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     csv_path = output_path.with_suffix(".csv")

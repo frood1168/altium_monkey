@@ -19,7 +19,7 @@ Usage:
     # Project only — auto-finds the most recent snapshot in output/:
     uv run python examples/pcb_orientation_sync/pcb_orientation_sync.py PROJECT.PrjPcb
 
-    # Defaults (uses output/snapshot_*.json and rt_super_c1 project):
+    # Defaults (uses output/snapshot.json and rt_super_c1 project):
     uv run python examples/pcb_orientation_sync/pcb_orientation_sync.py
 """
 
@@ -201,7 +201,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "JSON snapshot taken before schematic changes "
             "(from pcb_orientation_snapshot.py). "
-            "Defaults to the most recent snapshot_*.json in output/."
+            "Defaults to the most recent snapshot*.json in output/."
         ),
     )
     parser.add_argument(
@@ -213,7 +213,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _find_latest_snapshot(output_dir: Path) -> Path | None:
-    snapshots = sorted(output_dir.glob("snapshot_*.json"), reverse=True)
+    snapshots = sorted(output_dir.glob("snapshot*.json"), reverse=True)
     return snapshots[0] if snapshots else None
 
 

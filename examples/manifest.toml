@@ -1831,7 +1831,7 @@ assets = [
   "assets/projects/rt_super_c1/RT_SUPER_C1.PCBdoc",
 ]
 outputs = [
-  "pcb_orientation_sync/output/snapshot_<timestamp>.json",
+  "pcb_orientation_sync/output/snapshot.json",
 ]
 requires_extra = []
 tags = ["schdoc", "pcbdoc", "orientation", "snapshot", "designator", "font"]
@@ -1904,9 +1904,13 @@ status = "ready"
 entrypoint = "schdoc_variant_dnp/schdoc_variant_dnp.py"
 doc = "schdoc_variant_dnp/README.md"
 inputs = []
-assets = []
+assets = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PrjPcb",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.SchDoc",
+]
 outputs = [
   "schdoc_variant_dnp/output/schdoc_variant_dnp_manifest.json",
+  "schdoc_variant_dnp/output/RT_SUPER_C1.PrjPcb",
 ]
 requires_extra = []
 tags = ["schdoc", "prjpcb", "variant", "dnp", "not-fitted", "bom", "mutation"]
@@ -1920,8 +1924,20 @@ status = "ready"
 entrypoint = "megamaid_unmanaged_parts/megamaid_unmanaged_parts.py"
 doc = "megamaid_unmanaged_parts/README.md"
 inputs = []
-assets = []
-outputs = []
+assets = [
+  "megamaid_unmanaged_parts/sample_megamaid/json/schdoc/Power.json",
+  "megamaid_unmanaged_parts/sample_megamaid/json/schdoc/MCU.json",
+  "megamaid_unmanaged_parts/sample_megamaid/netlist/netlist.json",
+  "megamaid_unmanaged_parts/sample_megamaid/schlib/split/Resistor.SchLib",
+  "megamaid_unmanaged_parts/sample_megamaid/schlib/split/Inductor.SchLib",
+  "megamaid_unmanaged_parts/sample_megamaid/schlib/split/MyMCU.SchLib",
+  "megamaid_unmanaged_parts/sample_megamaid/pcblib/split/0402.PcbLib",
+  "megamaid_unmanaged_parts/sample_megamaid/pcblib/split/QFN-48.PcbLib",
+]
+outputs = [
+  "megamaid_unmanaged_parts/output/unmanaged_parts_report.json",
+  "megamaid_unmanaged_parts/output/unmanaged_parts_report.csv",
+]
 requires_extra = []
 tags = ["schdoc", "reporting", "megamaid", "unmanaged", "schlib", "pcblib", "bom"]
 
@@ -1953,6 +1969,7 @@ entrypoint = "schdoc_param_layout/schdoc_param_layout.py"
 doc = "schdoc_param_layout/README.md"
 inputs = []
 assets = [
+  "assets/projects/hydroscope/Hydroscope.PrjPcb",
   "assets/projects/hydroscope/CPU.SchDoc",
   "assets/projects/hydroscope/POWER_SUPPLY.SchDoc",
   "assets/projects/hydroscope/TOP_LEVEL.SchDoc",
@@ -1979,8 +1996,13 @@ status = "ready"
 entrypoint = "schdoc_pin_connections/schdoc_pin_connections.py"
 doc = "schdoc_pin_connections/README.md"
 inputs = []
-assets = []
-outputs = []
+assets = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PrjPcb",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.SchDoc",
+]
+outputs = [
+  "schdoc_pin_connections/output/U1_connections.csv",
+]
 requires_extra = []
 tags = ["schdoc", "netlist", "pin", "connections", "csv", "report", "multi-part"]
 
@@ -2037,8 +2059,14 @@ summary = "Discover all .IntLib files in a directory (optionally recursive), ext
 areas = ["intlib", "schlib", "pcblib"]
 status = "ready"
 entrypoint = "intlib_merge/intlib_merge.py"
+doc = "intlib_merge/README.md"
 inputs = []
-assets = []
-outputs = []
+assets = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.IntLib",
+  "assets/projects/loz-old-man/loz-old-man.IntLib",
+]
+outputs = [
+  "intlib_merge/output/merged.IntLib",
+]
 requires_extra = []
 tags = ["intlib", "schlib", "pcblib", "merge", "library-management"]

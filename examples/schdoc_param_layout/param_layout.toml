@@ -1,0 +1,887 @@
+# Parameter-layout template for the bundled hydroscope example.
+# Extracted (and merged) from the project's own SchDocs via
+# schdoc_param_layout_extract.py, so re-applying it repositions every
+# component's parameters exactly as placed in the source project.
+#
+# Sections: [LibraryReference.Rotation.ParameterName]
+# offset_x/y: world-frame mils from component origin.
+# orientation: DEGREES_0/90/180/270; justification: BOTTOM/CENTER/TOP _ LEFT/CENTER/RIGHT.
+# Presence = visible; absence = hidden when applied to a matched component.
+
+[1909763-1.DEG_0_MIRROR.Designator]
+offset_x = 9300.0
+offset_y = -6800.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[1909763-1.DEG_0_MIRROR.Comment]
+offset_x = 9300.0
+offset_y = -7300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["ABM3-12.000MHZ-B2-T".DEG_90.Designator]
+offset_x = 100.0
+offset_y = 0.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["ABM3-12.000MHZ-B2-T".DEG_90.Comment]
+offset_x = 80.0
+offset_y = -100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["ABM3-12.000MHZ-B2-T".DEG_90.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+
+["ABM3-25.000MHZ-B4Y-T".DEG_90.Designator]
+offset_x = 6500.0
+offset_y = -9400.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["ABM3-25.000MHZ-B4Y-T".DEG_90.Comment]
+offset_x = 6300.0
+offset_y = -9500.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["ABM3-25.000MHZ-B4Y-T".DEG_90.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+
+[APT1608CGCK.DEG_0.Designator]
+offset_x = -80.0
+offset_y = 80.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[APT1608CGCK.DEG_0.__pins__]
+A = {show_name = false, show_designator = false}
+C = {show_name = false, show_designator = false}
+
+["BAV99,215".DEG_0.Designator]
+offset_x = 180.0
+offset_y = -110.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["BAV99,215".DEG_0.Comment]
+offset_x = 180.0
+offset_y = -210.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["BAV99,215".DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+
+[BAV99T-7-F.DEG_0.Designator]
+offset_x = 240.0
+offset_y = -170.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[BAV99T-7-F.DEG_0.Comment]
+offset_x = 240.0
+offset_y = -270.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[BAV99T-7-F.DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+
+[BKP2125HS600-T.DEG_0_MIRROR.Designator]
+offset_x = -50.0
+offset_y = 80.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[BKP2125HS600-T.DEG_0_MIRROR.Comment]
+offset_x = -320.0
+offset_y = -140.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[BKP2125HS600-T.DEG_0_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[CL10C301JB8NNNC.DEG_0_MIRROR.Designator]
+offset_x = -110.0
+offset_y = 60.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_0_MIRROR.Comment]
+offset_x = -110.0
+offset_y = -160.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_0_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[CL10C301JB8NNNC.DEG_90_MIRROR.Designator]
+offset_x = 60.0
+offset_y = -10.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_90_MIRROR.Comment]
+offset_x = 60.0
+offset_y = -110.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_90_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[CL10C301JB8NNNC.DEG_180_MIRROR.Designator]
+offset_x = -10.0
+offset_y = 60.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_180_MIRROR.Comment]
+offset_x = -10.0
+offset_y = -160.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_180_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[CL10C301JB8NNNC.DEG_270_MIRROR.Designator]
+offset_x = 60.0
+offset_y = -110.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_270_MIRROR.Comment]
+offset_x = 60.0
+offset_y = -210.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CL10C301JB8NNNC.DEG_270_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[CORTEX-DEBUG.DEG_0_MIRROR.Designator]
+offset_x = -800.0
+offset_y = 100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[CORTEX-DEBUG.DEG_0_MIRROR.Comment]
+offset_x = -800.0
+offset_y = -600.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_0.Designator]
+offset_x = 90.0
+offset_y = 80.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_0.Comment]
+offset_x = 90.0
+offset_y = -180.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_0.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[C_2P_NP.DEG_90.Designator]
+offset_x = 80.0
+offset_y = 100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_90.Comment]
+offset_x = 80.0
+offset_y = 0.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_90."Voltage - Rated"]
+offset_x = 50.0
+offset_y = 0.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_90.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[C_2P_NP.DEG_90_MIRROR.Designator]
+offset_x = -300.0
+offset_y = 100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_90_MIRROR.Comment]
+offset_x = -300.0
+offset_y = 0.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_90_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[C_2P_NP.DEG_270.Designator]
+offset_x = 80.0
+offset_y = -210.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_270.Comment]
+offset_x = 80.0
+offset_y = -310.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_NP.DEG_270.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[C_2P_P.DEG_270.Designator]
+offset_x = 90.0
+offset_y = -260.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_P.DEG_270.Comment]
+offset_x = 90.0
+offset_y = -360.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[C_2P_P.DEG_270.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[DS_1A_2C.DEG_0.Designator]
+offset_x = 90.0
+offset_y = -40.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[DS_1A_2C.DEG_0.Comment]
+offset_x = 90.0
+offset_y = -260.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[DS_1A_2C.DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+
+[DS_1A_2C.DEG_180.Designator]
+offset_x = -230.0
+offset_y = 160.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[DS_1A_2C.DEG_180.Comment]
+offset_x = -230.0
+offset_y = -60.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[DS_1A_2C.DEG_180.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+
+[FMMT491TA.DEG_0.Designator]
+offset_x = -9270.0
+offset_y = -6800.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[FMMT491TA.DEG_0.Comment]
+offset_x = -9270.0
+offset_y = -6900.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[FMMT491TA.DEG_0.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+3 = {show_name = false, show_designator = false}
+
+["FOX924B-16.000".DEG_0.Designator]
+offset_x = -9800.0
+offset_y = -6700.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["FOX924B-16.000".DEG_0.Comment]
+offset_x = -9800.0
+offset_y = -7100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[Fiducial.DEG_0.Designator]
+offset_x = -50.0
+offset_y = 120.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[Fiducial.DEG_0.Comment]
+offset_x = -100.0
+offset_y = -230.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[ISL3176EIUZ-T.DEG_90.Designator]
+offset_x = -9700.0
+offset_y = -6200.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[ISL3176EIUZ-T.DEG_90.Comment]
+offset_x = -9700.0
+offset_y = -7400.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[JST_SH_CABLE_ASSEMBLY_NOTES.DEG_0.Designator]
+offset_x = -400.0
+offset_y = 750.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[JST_SH_CABLE_ASSEMBLY_NOTES.DEG_0.Comment]
+offset_x = -400.0
+offset_y = -3900.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[LPC54606J512BD100E.DEG_0.Designator]
+offset_x = -2300.0
+offset_y = 1400.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[LPC54606J512BD100E.DEG_0.Comment]
+offset_x = -2300.0
+offset_y = -5400.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["LT3570EFE#PBF".DEG_0.Designator]
+offset_x = -9800.0
+offset_y = -6500.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["LT3570EFE#PBF".DEG_0.Comment]
+offset_x = -9800.0
+offset_y = -9100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[L_2P.DEG_0.Designator]
+offset_x = 100.0
+offset_y = 50.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[L_2P.DEG_0.Comment]
+offset_x = 100.0
+offset_y = -130.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[L_2P.DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+
+["MCP4725A0T-E/CH".DEG_0.Designator]
+offset_x = -9500.0
+offset_y = -6700.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["MCP4725A0T-E/CH".DEG_0.Comment]
+offset_x = -9500.0
+offset_y = -7600.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[MD0100N8-G.DEG_0_MIRROR.Designator]
+offset_x = 8800.0
+offset_y = -6700.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[MD0100N8-G.DEG_0_MIRROR.Comment]
+offset_x = 8800.0
+offset_y = -7100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[MD1213K6-G.DEG_0.Designator]
+offset_x = -9400.0
+offset_y = -6300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[MD1213K6-G.DEG_0.Comment]
+offset_x = -9400.0
+offset_y = -7700.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[MIC803-30D2VM3-TR.DEG_0.Designator]
+offset_x = -9500.0
+offset_y = -6600.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[MIC803-30D2VM3-TR.DEG_0.Comment]
+offset_x = -9500.0
+offset_y = -7100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[OPA348AIDBVR.DEG_0.Designator]
+offset_x = 120.0
+offset_y = 220.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[OPA348AIDBVR.DEG_0.Comment]
+offset_x = 110.0
+offset_y = 120.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[OPA348AIDBVR.DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = false, show_designator = true}
+
+[OPA348AIDBVR.DEG_0_MIRROR.Designator]
+offset_x = 150.0
+offset_y = 450.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[OPA348AIDBVR.DEG_0_MIRROR.Comment]
+offset_x = 150.0
+offset_y = 350.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[OPA348AIDBVR.DEG_0_MIRROR.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = false, show_designator = true}
+
+["OPA353NA/250".DEG_0_MIRROR_P1.Designator]
+offset_x = -400.0
+offset_y = 450.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["OPA353NA/250".DEG_0_MIRROR_P1.Comment]
+offset_x = -400.0
+offset_y = 360.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["OPA353NA/250".DEG_0_MIRROR_P1.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = true, show_designator = true}
+3 = {show_name = true, show_designator = true}
+4 = {show_name = true, show_designator = true}
+5 = {show_name = true, show_designator = true}
+
+["OPA353NA/250".DEG_0_MIRROR_P2.Designator]
+offset_x = 0.0
+offset_y = 300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["OPA353NA/250".DEG_0_MIRROR_P2.Comment]
+offset_x = -310.0
+offset_y = -410.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["OPA353NA/250".DEG_0_MIRROR_P2.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = true, show_designator = true}
+3 = {show_name = true, show_designator = true}
+4 = {show_name = true, show_designator = true}
+5 = {show_name = true, show_designator = true}
+
+[PKMCS0909E4000-R1.DEG_0.Designator]
+offset_x = -9310.0
+offset_y = -6690.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[PKMCS0909E4000-R1.DEG_0.Comment]
+offset_x = -9290.0
+offset_y = -7110.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[PKMCS0909E4000-R1.DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+
+[R_2P.DEG_0.Designator]
+offset_x = 110.0
+offset_y = 130.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_0.Comment]
+offset_x = 120.0
+offset_y = 30.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_0.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[R_2P.DEG_0_MIRROR.Designator]
+offset_x = -280.0
+offset_y = 50.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_0_MIRROR.Comment]
+offset_x = -270.0
+offset_y = -150.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_0_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[R_2P.DEG_90.Designator]
+offset_x = 30.0
+offset_y = 200.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_90.Comment]
+offset_x = 30.0
+offset_y = 100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_90.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[R_2P.DEG_90_MIRROR.Designator]
+offset_x = 30.0
+offset_y = 200.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_90_MIRROR.Comment]
+offset_x = 30.0
+offset_y = 100.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_90_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[R_2P.DEG_180.Designator]
+offset_x = -310.0
+offset_y = 30.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_180.Comment]
+offset_x = -310.0
+offset_y = -130.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_180.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[R_2P.DEG_270_MIRROR.Designator]
+offset_x = 30.0
+offset_y = -200.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_270_MIRROR.Comment]
+offset_x = 30.0
+offset_y = -300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[R_2P.DEG_270_MIRROR.__pins__]
+1 = {show_name = false, show_designator = false}
+2 = {show_name = false, show_designator = false}
+
+[S8111-46R.DEG_0.Designator]
+offset_x = -500.0
+offset_y = 330.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[S8111-46R.DEG_0.Comment]
+offset_x = -130.0
+offset_y = -420.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[S8111-46R.DEG_0.__pins__]
+1 = {show_name = false, show_designator = false}
+
+[SI5351A-B-GTR.DEG_0.Designator]
+offset_x = -9700.0
+offset_y = -6500.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SI5351A-B-GTR.DEG_0.Comment]
+offset_x = -9740.0
+offset_y = -7530.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM04B-SRSS-TB(LF)(SN)".DEG_0_MIRROR.Designator]
+offset_x = -100.0
+offset_y = 300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM04B-SRSS-TB(LF)(SN)".DEG_0_MIRROR.Comment]
+offset_x = -100.0
+offset_y = -300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM04B-SRSS-TB(LF)(SN)".DEG_0_MIRROR.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+4 = {show_name = false, show_designator = true}
+M1 = {show_name = false, show_designator = true}
+M2 = {show_name = false, show_designator = true}
+
+["SM06B-SRSS-TB(LF)(SN)".DEG_0_MIRROR.Designator]
+offset_x = 0.0
+offset_y = 300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM06B-SRSS-TB(LF)(SN)".DEG_0_MIRROR.Comment]
+offset_x = -350.0
+offset_y = -550.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM06B-SRSS-TB(LF)(SN)".DEG_0_MIRROR.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = false, show_designator = true}
+6 = {show_name = false, show_designator = true}
+M1 = {show_name = false, show_designator = true}
+M2 = {show_name = false, show_designator = true}
+
+["SM08B-SRSS-TB(LF)(SN)".DEG_0.Designator]
+offset_x = -100.0
+offset_y = 700.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM08B-SRSS-TB(LF)(SN)".DEG_0.Comment]
+offset_x = -100.0
+offset_y = -300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["SM08B-SRSS-TB(LF)(SN)".DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = false, show_designator = true}
+6 = {show_name = false, show_designator = true}
+7 = {show_name = false, show_designator = true}
+8 = {show_name = false, show_designator = true}
+M1 = {show_name = false, show_designator = true}
+M2 = {show_name = false, show_designator = true}
+
+[SMT_TEST.DEG_90.Designator]
+offset_x = -35.0
+offset_y = -275.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SMT_TEST.DEG_90.__pins__]
+1 = {show_name = false, show_designator = false}
+
+[SMT_TEST.DEG_180.Designator]
+offset_x = 50.0
+offset_y = -60.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SMT_TEST.DEG_180.__pins__]
+1 = {show_name = false, show_designator = false}
+
+[SN74AHC1G08DBVR.DEG_0_P2.Designator]
+offset_x = -200.0
+offset_y = 200.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SN74AHC1G08DBVR.DEG_0_P2.Comment]
+offset_x = -500.0
+offset_y = -500.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SN74AHC1G08DBVR.DEG_0_P2.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = true, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = true, show_designator = true}
+
+[SN74AHC1G08DBVR.DEG_0_MIRROR_P1.Designator]
+offset_x = -201.0
+offset_y = 150.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SN74AHC1G08DBVR.DEG_0_MIRROR_P1.Comment]
+offset_x = -201.0
+offset_y = -250.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[SN74AHC1G08DBVR.DEG_0_MIRROR_P1.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = true, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = true, show_designator = true}
+
+[TC2030-CTL-NL.DEG_0.Designator]
+offset_x = -500.0
+offset_y = 300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TC2030-CTL-NL.DEG_0.Comment]
+offset_x = -500.0
+offset_y = -520.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TC6320TG-G.DEG_0.Designator]
+offset_x = 80.0
+offset_y = 350.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TC6320TG-G.DEG_0.Comment]
+offset_x = 80.0
+offset_y = -1200.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TC6320TG-G.DEG_0.__pins__]
+1 = {show_name = false, show_designator = true}
+2 = {show_name = false, show_designator = true}
+3 = {show_name = false, show_designator = true}
+4 = {show_name = false, show_designator = true}
+5 = {show_name = false, show_designator = true}
+6 = {show_name = false, show_designator = true}
+7 = {show_name = false, show_designator = true}
+8 = {show_name = false, show_designator = true}
+
+[TDC1000PW.DEG_0_MIRROR.Designator]
+offset_x = -800.0
+offset_y = 1500.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TDC1000PW.DEG_0_MIRROR.Comment]
+offset_x = -800.0
+offset_y = -1320.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TDC7200PWR.DEG_0_MIRROR.Designator]
+offset_x = 8900.0
+offset_y = -6300.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[TDC7200PWR.DEG_0_MIRROR.Comment]
+offset_x = 8900.0
+offset_y = -7400.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["TZ-SB-0001-PCB-[A]".DEG_0.Designator]
+offset_x = -1100.0
+offset_y = 220.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+["TZ-SB-0001-PCB-[A]".DEG_0.Comment]
+offset_x = -1100.0
+offset_y = -420.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[W25Q64JVSSIQ.DEG_0_MIRROR.Designator]
+offset_x = 8800.0
+offset_y = -6500.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[W25Q64JVSSIQ.DEG_0_MIRROR.Comment]
+offset_x = 8790.0
+offset_y = -7320.0
+orientation = "DEGREES_0"
+justification = "BOTTOM_LEFT"
+
+[default]
+# Visibility for parameters on components not matched above.
+# true = visible on schematic, false = hidden.
+# No position is applied for default entries.
+Comment = false
+Value = true
+PartNumber = true

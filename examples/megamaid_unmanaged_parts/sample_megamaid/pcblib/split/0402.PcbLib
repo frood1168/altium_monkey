@@ -1,0 +1,1 @@
+Placeholder split PcbLib fixture (not a real OLE file). The megamaid_unmanaged_parts demo only checks that this file exists and reads its name; it never parses the contents.

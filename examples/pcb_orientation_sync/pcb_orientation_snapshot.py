@@ -169,7 +169,8 @@ def _parse_args() -> argparse.Namespace:
         metavar="SNAPSHOT.json",
         help=(
             "Output JSON path. "
-            "Defaults to output/snapshot_<timestamp>.json next to this script."
+            "Defaults to output/snapshot.json next to this script "
+            "(the capture time is recorded inside the JSON)."
         ),
     )
     return parser.parse_args()
@@ -223,7 +224,7 @@ def main() -> None:
     else:
         output_dir = SAMPLE_DIR / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"snapshot_{timestamp}.json"
+        output_path = output_dir / "snapshot.json"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

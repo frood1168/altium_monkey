@@ -38,7 +38,7 @@ uv run python tools\generate_docs.py
 | Example | Areas | Summary | Tags |
 | --- | --- | --- | --- |
 | [`intlib_extract_sources`](../../examples/intlib_extract_sources/README.md)<br>Extract source libraries from an IntLib | intlib, schlib, pcblib | Open an Altium integrated library, extract its embedded SchLib and PcbLib source files, and write an extraction manifest. | intlib, library, source-extraction, schlib, pcblib |
-| `intlib_merge`<br>Merge multiple IntLib files into one | intlib, schlib, pcblib | Discover all .IntLib files in a directory (optionally recursive), extract their embedded SchLib and PcbLib source streams, merge symbols and footprints, and repack into a single combined IntLib. | intlib, schlib, pcblib, merge, library-management |
+| [`intlib_merge`](../../examples/intlib_merge/README.md)<br>Merge multiple IntLib files into one | intlib, schlib, pcblib | Discover all .IntLib files in a directory (optionally recursive), extract their embedded SchLib and PcbLib source streams, merge symbols and footprints, and repack into a single combined IntLib. | intlib, schlib, pcblib, merge, library-management |
 
 ### `outjob`
 
@@ -294,4 +294,4 @@ uv run python tools\generate_docs.py
 | [`schdoc_pin_connections`](../../examples/schdoc_pin_connections/README.md)<br>Generate a pin-connection table for a component | schdoc, design, netlist | Given a project file and component designator, compile the netlist, walk all SchDocs for matching pins, and write a CSV of Pin, Pin Name, and connected Net. | schdoc, netlist, pin, connections, csv, report |
 | [`schdoc_svg`](../../examples/schdoc_svg/README.md)<br>Render project schematics to SVG | schdoc, svg, prjpcb | Open the Hydroscope PrjPcb, pass project parameters into the schematic SVG renderer, and write one SVG per schematic page. | schdoc, svg, rendering, project, parameters |
 | [`schlib_svg`](../../examples/schlib_svg/README.md)<br>Extract and render SchLib symbols to SVG | schdoc, schlib, svg | Extract a combined SchLib from the RT Super C1 schematic, iterate every symbol and symbol part, render each part to SVG, and write a manifest of generated symbol artwork. | schdoc, schlib, svg, rendering, symbol-extraction, multipart |
-| `intlib_merge`<br>Merge multiple IntLib files into one | intlib, schlib, pcblib | Discover all .IntLib files in a directory (optionally recursive), extract their embedded SchLib and PcbLib source streams, merge symbols and footprints, and repack into a single combined IntLib. | intlib, schlib, pcblib, merge, library-management |
+| [`intlib_merge`](../../examples/intlib_merge/README.md)<br>Merge multiple IntLib files into one | intlib, schlib, pcblib | Discover all .IntLib files in a directory (optionally recursive), extract their embedded SchLib and PcbLib source streams, merge symbols and footprints, and repack into a single combined IntLib. | intlib, schlib, pcblib, merge, library-management |

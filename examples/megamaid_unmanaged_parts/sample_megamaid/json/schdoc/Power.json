@@ -1,0 +1,27 @@
+{
+  "document": {
+    "FileName": "Power.SchDoc",
+    "Objects": [
+      {
+        "ObjectType": "Component",
+        "UniqueID": "AAAA1111",
+        "LibReference": "Resistor",
+        "DesignItemId": "Resistor",
+        "VaultGUID": "",
+        "SourceLibraryName": "LocalPassives.SchLib"
+      },
+      {
+        "ObjectType": "Component",
+        "UniqueID": "CCCC3333",
+        "LibReference": "Cap-Managed",
+        "DesignItemId": "CAP-0402-10uF",
+        "VaultGUID": "{6F3A2C10-4B7E-4D21-9F0A-8C1D2E3F4A5B}",
+        "SourceLibraryName": ""
+      },
+      {
+        "ObjectType": "Wire",
+        "UniqueID": "WIRE0001"
+      }
+    ]
+  }
+}

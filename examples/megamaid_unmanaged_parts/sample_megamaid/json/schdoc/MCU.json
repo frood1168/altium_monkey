@@ -1,0 +1,31 @@
+{
+  "document": {
+    "FileName": "MCU.SchDoc",
+    "Objects": [
+      {
+        "ObjectType": "Component",
+        "UniqueID": "AAAA2222",
+        "LibReference": "Resistor",
+        "DesignItemId": "Resistor",
+        "VaultGUID": "",
+        "SourceLibraryName": "LocalPassives.SchLib"
+      },
+      {
+        "ObjectType": "Component",
+        "UniqueID": "BBBB4444",
+        "LibReference": "Inductor",
+        "DesignItemId": "Inductor",
+        "VaultGUID": "",
+        "SourceLibraryName": "LocalPassives.SchLib"
+      },
+      {
+        "ObjectType": "Component",
+        "UniqueID": "DDDD5555",
+        "LibReference": "MyMCU",
+        "DesignItemId": "STM32F401",
+        "VaultGUID": "",
+        "SourceLibraryName": "LocalMCU.SchLib"
+      }
+    ]
+  }
+}

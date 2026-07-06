@@ -14,6 +14,14 @@ from altium_monkey import (
 from altium_monkey.altium_prjpcb import AltiumPrjPcb
 
 
+SAMPLE_DIR = Path(__file__).resolve().parent
+EXAMPLES_DIR = SAMPLE_DIR.parent
+ASSETS_DIR = EXAMPLES_DIR / "assets"
+DEFAULT_PROJECT = ASSETS_DIR / "projects" / "rt_super_c1" / "RT_SUPER_C1.PrjPcb"
+DEFAULT_VARIANT = "1v8-2x3USON"
+OUTPUT_DIR = SAMPLE_DIR / "output"
+
+
 _LAYOUT_DNP_PARAM = "sch_layout_dnp"
 
 _DNP_PARAM_NAMES: frozenset[str] = frozenset({
@@ -252,12 +260,22 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "project",
         metavar="PROJECT.PrjPcb",
-        help="Path to the .PrjPcb project file.",
+        nargs="?",
+        default=None,
+        help=(
+            "Path to the .PrjPcb project file. Defaults to the bundled "
+            "RT_SUPER_C1 sample project."
+        ),
     )
     parser.add_argument(
         "variant",
         metavar="VARIANT_NAME",
-        help="Exact name of the variant to update (e.g. 'Initial Design').",
+        nargs="?",
+        default=None,
+        help=(
+            "Exact name of the variant to update (e.g. 'Initial Design'). "
+            f"Defaults to '{DEFAULT_VARIANT}'."
+        ),
     )
     return parser.parse_args()
 
@@ -265,8 +283,10 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    prjpcb_path = Path(args.project).resolve()
-    variant_name = args.variant
+    prjpcb_path = (
+        Path(args.project).resolve() if args.project else DEFAULT_PROJECT.resolve()
+    )
+    variant_name = args.variant if args.variant else DEFAULT_VARIANT
 
     if not prjpcb_path.exists():
         print(f"Project file not found: {prjpcb_path}", file=sys.stderr)
@@ -293,9 +313,8 @@ def main() -> None:
 
     set_count, reset_count = _update_variant_not_fitted(project, variant_name, dnp)
 
-    clean_dir = prjpcb_path.parent / "clean"
-    clean_dir.mkdir(parents=True, exist_ok=True)
-    output_path = clean_dir / prjpcb_path.name
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = OUTPUT_DIR / prjpcb_path.name
     project.save(output_path)
 
     summary = {
@@ -306,7 +325,7 @@ def main() -> None:
         "not_fitted_set": set_count,
         "not_fitted_reset": reset_count,
     }
-    manifest_path = clean_dir / "schdoc_variant_dnp_manifest.json"
+    manifest_path = OUTPUT_DIR / "schdoc_variant_dnp_manifest.json"
     manifest_path.write_text(
         json.dumps(summary, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
