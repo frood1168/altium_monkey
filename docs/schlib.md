@@ -19,6 +19,9 @@ Symbol properties such as `symbol.pins`, `symbol.parameters`,
 
 Add symbol records with `symbol.add_object(...)` or symbol helper methods. Keep
 visual ordering in mind: body graphics should usually be behind pins and text.
+That order is preserved when a symbol is inserted into a SchDoc through
+`AltiumSchDoc.add_component_from_library(...)` and when placed symbols are
+extracted back to SchLib.
 
 ## Units
 
@@ -36,6 +39,15 @@ symbol = schlib.add_symbol("MY_SYMBOL")
 symbol.add_object(make_sch_pin(...))
 schlib.save("my_symbols.SchLib")
 ```
+
+Pass `show_comments_designators=True` when creating a library if Altium should
+open the SchLib editor with symbol comments and designators visible:
+
+```python
+schlib = AltiumSchLib(show_comments_designators=True)
+```
+
+You can also set `schlib.show_comments_designators = True` before saving.
 
 For parsed libraries, prefer `AltiumSchLib.get_symbol(...)` and symbol views
 over scanning raw streams.

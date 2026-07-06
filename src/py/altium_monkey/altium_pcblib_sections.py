@@ -14,6 +14,7 @@ from .altium_pcb_stream_helpers import (
 from .altium_pcb_stream_helpers import (
     extract_length_prefixed_ascii as _extract_length_prefixed_ascii,
 )
+from .altium_pcb_layer_kind_mapping import PcbLayerKindMapping
 
 
 def _parse_pipe_properties(body: str) -> dict[str, str]:
@@ -191,26 +192,8 @@ class PcbLibPadViaLibrary:
 
 
 @dataclass(frozen=True)
-class PcbLibLayerKindMapping:
-    format_version: str = "1.0"
-    reserved_tail: bytes = b"\x00" * 8
-
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "PcbLibLayerKindMapping":
-        if len(data) < 4:
-            raise ValueError("Invalid LayerKindMapping stream")
-        text_len = struct.unpack("<I", data[:4])[0]
-        if len(data) < 4 + text_len:
-            raise ValueError("Invalid LayerKindMapping stream")
-        text = data[4 : 4 + text_len].decode("utf-16le").rstrip("\x00")
-        return cls(
-            format_version=text,
-            reserved_tail=data[4 + text_len :],
-        )
-
-    def to_bytes(self) -> bytes:
-        text_bytes = (self.format_version + "\x00").encode("utf-16le")
-        return struct.pack("<I", len(text_bytes)) + text_bytes + self.reserved_tail
+class PcbLibLayerKindMapping(PcbLayerKindMapping):
+    """PcbLib wrapper for the shared layer-kind mapping codec."""
 
 
 @dataclass(frozen=True)

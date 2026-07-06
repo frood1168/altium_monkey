@@ -16,8 +16,7 @@ from .altium_record_types import (
 from .altium_serializer import AltiumSerializer, Fields
 from .altium_sch_image_payload import (
     SchEmbeddedImageFormat,
-    bmp_alpha_extrema,
-    decode_32bit_bmp_rgba,
+    decode_bmp_rgba,
     decode_sch_embedded_image_payload,
     detect_image_format,
     image_size_px_from_data,
@@ -507,11 +506,7 @@ class AltiumSchImage(CornerMilsMixin, SchGraphicalObject):
         if image_format == SchEmbeddedImageFormat.PNG:
             return source_data
         if image_format == SchEmbeddedImageFormat.BMP:
-            alpha_extrema = bmp_alpha_extrema(source_data)
-            if alpha_extrema is not None and alpha_extrema != (255, 255):
-                rgba_bmp = decode_32bit_bmp_rgba(source_data)
-            else:
-                rgba_bmp = None
+            rgba_bmp = decode_bmp_rgba(source_data)
             if rgba_bmp is not None:
                 width, height, rgba_pixels = rgba_bmp
                 return _encode_rgba_png_pillow_style(rgba_pixels, width, height)
@@ -631,7 +626,7 @@ class AltiumSchImage(CornerMilsMixin, SchGraphicalObject):
         """
         if not self.image_data:
             return None
-        return decode_sch_embedded_image_payload(self.image_data).preferred_size_px
+        return decode_sch_embedded_image_payload(self.image_data).altium_source_size_px
 
     def _get_image_size_px_from_data(self, data: bytes) -> tuple[int, int] | None:
         """

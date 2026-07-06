@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Callable, Protocol, TypeAlias
 from .altium_netlist_options import NetlistOptions
 from .altium_netlist_common import (
     CHASSIS_GND_MAPPINGS,
+    PinGroup,
     POWER_PIN_NAMES,
     _altium_net_total_sort_key,
     _emit_auto_named_nets,
@@ -53,14 +54,14 @@ log = logging.getLogger(__name__)
 
 
 RootPoint: TypeAlias = tuple[int, int]
-PinGroupsByRoot: TypeAlias = dict[RootPoint, list["SchPinInfo"]]
+PinGroupsByRoot: TypeAlias = dict[RootPoint, PinGroup]
 
 
 class _CreateNetFn(Protocol):
     def __call__(
         self,
         name: str,
-        pins: list["SchPinInfo"],
+        pins: PinGroup,
         root: RootPoint,
         is_auto_named: bool = False,
     ) -> Net: ...
@@ -86,7 +87,9 @@ class AltiumNetlistSingleSheetCompiler:
 
         Args:
             schdoc: Parsed AltiumSchDoc object
-            tolerance: Connection tolerance in internal units (default: 0 = exact)
+            tolerance: Optional connection tolerance in parsed coordinate units.
+                The default is exact connectivity, matching Altium wire-list
+                output for off-grid wire crossings without explicit junctions.
             strict: If True, normalize special chars to ASCII (default: True)
             options: Netlist generation options (default: free document defaults)
         """
@@ -94,12 +97,7 @@ class AltiumNetlistSingleSheetCompiler:
         self.strict = strict
         self.options = options or NetlistOptions()
 
-        # Get tolerance from sheet's hotspot grid if not explicitly provided
-        if tolerance == 0 and schdoc.sheet:
-            sheet_tolerance = getattr(schdoc.sheet, "hot_spot_grid_size", 0)
-            self.tolerance = sheet_tolerance if sheet_tolerance else 0
-        else:
-            self.tolerance = tolerance
+        self.tolerance = tolerance
 
         # Internal storage
         self._components: dict[str, SchComponentInfo] = {}
@@ -240,10 +238,10 @@ class AltiumNetlistSingleSheetCompiler:
         Extract pins using clean SchDoc API.
 
                 Pins from components inside compile masks are excluded.
-                Pins from alternate display modes are excluded (only primary mode pins included).
+                Display-mode filtering is handled by the SchDoc pin API, which
+                only yields pins for each component's active display mode.
         """
         masked_count = 0
-        display_mode_count = 0
         for pin in self.schdoc.get_all_pins():
             # Check if the parent component is inside a compile mask
             comp = pin.component
@@ -256,27 +254,10 @@ class AltiumNetlistSingleSheetCompiler:
                     masked_count += 1
                     continue
 
-            # Exclude pins from alternate display modes (only include primary mode)
-            # Primary mode is owner_part_display_mode = None or 0
-            # Alternate modes (1, 2, etc.) are for different symbol representations
-            raw_pin = pin.pin
-            display_mode = getattr(raw_pin, "owner_part_display_mode", None)
-            if display_mode is not None and display_mode != 0:
-                log.debug(
-                    f"Pin {pin.component_designator}.{pin.designator} excluded "
-                    f"(display_mode={display_mode})"
-                )
-                display_mode_count += 1
-                continue
-
             self._pins.append(pin)
         if masked_count > 0:
             log.debug(
                 f"Excluded {masked_count} pins from components inside compile masks"
-            )
-        if display_mode_count > 0:
-            log.debug(
-                f"Excluded {display_mode_count} pins from alternate display modes"
             )
 
     def _extract_wires(self) -> None:
@@ -979,7 +960,7 @@ class AltiumNetlistSingleSheetCompiler:
     def _create_net_from_pins(
         self,
         name: str,
-        pins: list,
+        pins: PinGroup,
         root: tuple[int, int],
         final_wire_ids: dict,
         final_nl_ids: dict,
@@ -1204,7 +1185,7 @@ class AltiumNetlistSingleSheetCompiler:
         # Shorthand for create_net with all the final maps
         def create_net(
             name: str,
-            pins: list[SchPinInfo],
+            pins: PinGroup,
             root: RootPoint,
             is_auto_named: bool = False,
         ) -> Net:

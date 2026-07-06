@@ -299,6 +299,7 @@ class AltiumSchWire(SchGraphicalObject):
                     f"{x_key}_Frac",
                     point.x_frac,
                     [f"{x_key}_Frac", f"{x_key}_FRAC"],
+                    force=True,
                 )
             else:
                 self._remove_field(record, [f"{x_key}_Frac", f"{x_key}_FRAC"])
@@ -309,6 +310,7 @@ class AltiumSchWire(SchGraphicalObject):
                     f"{y_key}_Frac",
                     point.y_frac,
                     [f"{y_key}_Frac", f"{y_key}_FRAC"],
+                    force=True,
                 )
             else:
                 self._remove_field(record, [f"{y_key}_Frac", f"{y_key}_FRAC"])

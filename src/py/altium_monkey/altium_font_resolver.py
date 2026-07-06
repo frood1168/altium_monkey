@@ -62,6 +62,25 @@ class FontRequest:
 
 
 @dataclass(frozen=True)
+class FontReplacementRule:
+    """
+    Explicit logical family replacement for portable rendering.
+    """
+
+    requested_name: str
+    effective_name: str
+
+    def to_dict(self) -> dict[str, str]:
+        """
+        Return the JSON-compatible replacement-rule shape used by WASM callers.
+        """
+        return {
+            "requested_name": self.requested_name,
+            "effective_name": self.effective_name,
+        }
+
+
+@dataclass(frozen=True)
 class FontResolverConfig:
     """
     Optional overrides for the shared font resolver.
@@ -236,6 +255,21 @@ TEST_FONT_FILE_MAP: dict[str, Path] = {
     "Old Stamper": TEST_FONTS_DIR / "old_stamper.ttf",
 }
 
+_PORTABLE_FONT_REPLACEMENT_RULES: tuple[FontReplacementRule, ...] = (
+    FontReplacementRule("Arial", "Arimo"),
+    FontReplacementRule("Arial Black", "Archivo Black"),
+    FontReplacementRule("Helvetica", "Arimo"),
+    FontReplacementRule("Microsoft Sans Serif", "Arimo"),
+    FontReplacementRule("Times", "Tinos"),
+    FontReplacementRule("Times New Roman", "Tinos"),
+    FontReplacementRule("Courier", "Cousine"),
+    FontReplacementRule("Courier New", "Cousine"),
+)
+
+ALTIUM_PORTABLE_FONT_REPLACEMENTS: tuple[dict[str, str], ...] = tuple(
+    rule.to_dict() for rule in _PORTABLE_FONT_REPLACEMENT_RULES
+)
+
 DEFAULT_FAMILY_SUBSTITUTIONS: dict[str, tuple[str, ...]] = {
     "Arial": ("Arimo", "Liberation Sans", "DejaVu Sans"),
     "Times New Roman": ("Tinos", "Liberation Serif", "DejaVu Serif"),
@@ -408,6 +442,13 @@ def build_default_font_resolver_config(
         generic_serif_fallbacks=DEFAULT_SERIF_FALLBACKS,
         generic_mono_fallbacks=DEFAULT_MONO_FALLBACKS,
     )
+
+
+def portable_font_replacements() -> tuple[FontReplacementRule, ...]:
+    """
+    Return the default portable family replacements used by Altium WASM rendering.
+    """
+    return _PORTABLE_FONT_REPLACEMENT_RULES
 
 
 def set_default_font_resolver_config(config: FontResolverConfig | None) -> None:

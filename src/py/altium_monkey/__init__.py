@@ -13,10 +13,73 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .altium_api_markers import public_api
 from ._version import __version__, __version_info__
+
+if TYPE_CHECKING:
+    from .altium_design import AltiumDesign
+    from .altium_draftsman import (
+        AltiumDraftsmanDocument,
+        AltiumDraftsmanDocumentOptions,
+        AltiumDraftsmanItem,
+        AltiumDraftsmanNote,
+        AltiumDraftsmanNoteElement,
+        AltiumDraftsmanPage,
+        AltiumDraftsmanPicture,
+        AltiumDraftsmanText,
+        DraftsmanColor,
+        DraftsmanFontDecoration,
+        DraftsmanFontStyle,
+        DraftsmanHorizontalAlignment,
+        DraftsmanMargin,
+        DraftsmanNoteBorderStyle,
+        DraftsmanPoint,
+        DraftsmanRect,
+        DraftsmanSize,
+        DraftsmanStandardSheetSize,
+        DraftsmanVerticalAlignment,
+    )
+    from .altium_pcbdoc import AltiumPcbDoc
+    from .altium_pcbdoc_builder import PcbCustomPadLayerShapeSpec, PcbDocBuilder
+    from .altium_pcblib import (
+        AltiumPcbFootprint,
+        AltiumPcbLib,
+        AltiumPcbLibPrimitiveParameterGroup,
+    )
+    from .altium_layer_stack_document import (
+        AltiumComponentPlacement,
+        AltiumCopperMaterialSpec,
+        AltiumDielectricLayerKind,
+        AltiumDielectricMaterialSpec,
+        AltiumImpedanceProfileSpec,
+        AltiumLayerPair,
+        AltiumLayerStackDocument,
+        AltiumRigidCopperLayerSpec,
+        AltiumRigidDielectricLayerSpec,
+        AltiumRigidStackRowSpec,
+        AltiumStackupRoughnessModel,
+        AltiumStackupSettings,
+        AltiumStackupType,
+        AltiumTransmissionLineSpec,
+    )
+    from .altium_schdoc import AltiumSchDoc
+    from .altium_schlib import AltiumSchLib
+    from .altium_stackup import AltiumStackupDocument, StackupTextFeature
+    from .altium_stackupx import (
+        AltiumStackupXDocument,
+        StackupXBranch,
+        StackupXBranchSection,
+        StackupXBranchSectionStack,
+        StackupXFeature,
+        StackupXImpedanceProfile,
+        StackupXLayer,
+        StackupXProperty,
+        StackupXSpan,
+        StackupXStack,
+        StackupXTransmissionLine,
+    )
 
 _ALTIUM_REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -154,6 +217,11 @@ from .altium_record_sch__sheet_symbol import (
     SchSheetSymbolType,
 )
 from .altium_record_sch__signal_harness import AltiumSchSignalHarness
+from .altium_font_resolver import (
+    ALTIUM_PORTABLE_FONT_REPLACEMENTS,
+    FontReplacementRule,
+    portable_font_replacements,
+)
 from .altium_font_manager import FontIDManager
 from .altium_prjpcb_builder import (
     AltiumPrjPcbBuilder,
@@ -236,12 +304,23 @@ from .altium_board import (
 from .altium_pcb_model_checksum import compute_altium_model_checksum
 from .altium_pcb_step_bounds import PcbStepModelBounds, compute_step_model_bounds_mils
 from .altium_pcb_mask_expansion import PcbMaskExpansion, PcbMaskExpansionMode
+from .altium_pcb_keepout import (
+    PCB_KEEPOUT_RESTRICTION_ALL_MASK,
+    PCB_KEEPOUT_RESTRICTION_KNOWN_MASK,
+    PcbKeepoutRestriction,
+    decode_pcb_keepout_restrictions,
+    encode_pcb_keepout_restrictions,
+    pcb_keepout_restriction_names,
+    pcb_keepout_restriction_unknown_bits,
+)
 
 # PCB record classes
 from .altium_record_pcb__arc import AltiumPcbArc
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
 from .altium_pcb_enums import (
+    MechanicalLayerKind,
+    PadHoleShape,
     PadShape,
     PcbBarcodeKind,
     PcbBarcodeRenderMode,
@@ -440,16 +519,28 @@ __all__ = [
     "AltiumPrjPcbBuilder",
     "AltiumPrjPcbDocumentEntry",
     "AltiumPrjPcbDocumentKind",
+    "ALTIUM_PORTABLE_FONT_REPLACEMENTS",
+    "FontReplacementRule",
+    "portable_font_replacements",
     "SchHarnessConnectorSide",
     "LineWidth",
     # PCB record classes
     "PcbLayer",
     "PcbRecordType",
+    "MechanicalLayerKind",
     "AltiumPcbTrack",
     "AltiumPcbArc",
+    "PadHoleShape",
     "PadShape",
     "PcbMaskExpansion",
     "PcbMaskExpansionMode",
+    "PcbKeepoutRestriction",
+    "PCB_KEEPOUT_RESTRICTION_KNOWN_MASK",
+    "PCB_KEEPOUT_RESTRICTION_ALL_MASK",
+    "decode_pcb_keepout_restrictions",
+    "encode_pcb_keepout_restrictions",
+    "pcb_keepout_restriction_names",
+    "pcb_keepout_restriction_unknown_bits",
     "PcbTextKind",
     "PcbBarcodeKind",
     "PcbBarcodeRenderMode",
@@ -494,6 +585,7 @@ __all__ = [
     "AltiumPcbDoc",
     "AltiumPcbLib",
     "AltiumPcbFootprint",
+    "AltiumPcbLibPrimitiveParameterGroup",
     "AltiumDraftsmanDocument",
     "AltiumDraftsmanPage",
     "AltiumDraftsmanItem",
@@ -525,6 +617,34 @@ __all__ = [
     "PcbStepModelBounds",
     "compute_step_model_bounds_mils",
     "PcbDocBuilder",
+    "PcbCustomPadLayerShapeSpec",
+    "AltiumComponentPlacement",
+    "AltiumCopperMaterialSpec",
+    "AltiumDielectricLayerKind",
+    "AltiumDielectricMaterialSpec",
+    "AltiumLayerPair",
+    "AltiumLayerStackDocument",
+    "AltiumRigidCopperLayerSpec",
+    "AltiumRigidDielectricLayerSpec",
+    "AltiumRigidStackRowSpec",
+    "AltiumStackupRoughnessModel",
+    "AltiumStackupSettings",
+    "AltiumStackupType",
+    "AltiumImpedanceProfileSpec",
+    "AltiumTransmissionLineSpec",
+    "AltiumStackupDocument",
+    "StackupTextFeature",
+    "AltiumStackupXDocument",
+    "StackupXBranch",
+    "StackupXBranchSection",
+    "StackupXBranchSectionStack",
+    "StackupXFeature",
+    "StackupXImpedanceProfile",
+    "StackupXLayer",
+    "StackupXProperty",
+    "StackupXSpan",
+    "StackupXStack",
+    "StackupXTransmissionLine",
 ]
 
 _EXTRA_PUBLIC_SURFACES: dict[str, tuple[str, ...]] = {
@@ -535,6 +655,53 @@ _EXTRA_PUBLIC_SURFACES: dict[str, tuple[str, ...]] = {
     ),
     "altium_embedded_files": ("classify_embedded_model_format",),
     "altium_launcher": ("AltiumLauncher",),
+    "altium_layer_stack_document": (
+        "AltiumBoardBendLine",
+        "AltiumComponentPlacement",
+        "AltiumCopperMaterialSpec",
+        "AltiumDielectricLayerKind",
+        "AltiumDielectricMaterialSpec",
+        "AltiumImpedanceProfile",
+        "AltiumImpedanceProfileSpec",
+        "AltiumLayerPair",
+        "AltiumLayerRegistry",
+        "AltiumLayerRegistryEntry",
+        "AltiumLayerStackDocument",
+        "AltiumNativePcbDocWriteSupport",
+        "AltiumPhysicalStack",
+        "AltiumRigidCopperLayerSpec",
+        "AltiumRigidDielectricLayerSpec",
+        "AltiumRigidStackRowSpec",
+        "AltiumStackupRoughnessModel",
+        "AltiumStackupSettings",
+        "AltiumStackupType",
+        "AltiumStackBendLine",
+        "AltiumStackBranch",
+        "AltiumStackBranchSection",
+        "AltiumStackBranchStack",
+        "AltiumStackLayer",
+        "AltiumStackRegion",
+        "AltiumStackSubstack",
+        "AltiumTransmissionLine",
+        "AltiumTransmissionLineSpec",
+    ),
+    "altium_stackup": (
+        "AltiumStackupDocument",
+        "StackupTextFeature",
+    ),
+    "altium_stackupx": (
+        "AltiumStackupXDocument",
+        "StackupXBranch",
+        "StackupXBranchSection",
+        "StackupXBranchSectionStack",
+        "StackupXFeature",
+        "StackupXImpedanceProfile",
+        "StackupXLayer",
+        "StackupXProperty",
+        "StackupXSpan",
+        "StackupXStack",
+        "StackupXTransmissionLine",
+    ),
     "altium_netlist_options": ("NetlistOptions",),
     "altium_pcb_component": ("AltiumPcbComponent",),
     "altium_pcb_ipc2581_writer": ("write_ipc2581",),
@@ -572,7 +739,9 @@ _EXTRA_PUBLIC_SURFACES: dict[str, tuple[str, ...]] = {
     ),
     "altium_resolved_layer_stack": (
         "ResolvedLayer",
+        "ResolvedLayerEnvelopeRow",
         "ResolvedLayerStack",
+        "ResolvedStackEnvelope",
         "resolved_layer_stack_from_board",
         "resolved_layer_stack_from_pcbdoc",
     ),
@@ -618,141 +787,79 @@ def _mark_declared_public_surfaces() -> None:
             public_api(getattr(module, name))
 
 
+_LAZY_PUBLIC_EXPORTS = {
+    # High-level parsers
+    "AltiumDesign": "altium_design",
+    "AltiumSchLib": "altium_schlib",
+    "AltiumPcbDoc": "altium_pcbdoc",
+    "PcbDocBuilder": "altium_pcbdoc_builder",
+    "PcbCustomPadLayerShapeSpec": "altium_pcbdoc_builder",
+    "AltiumPcbLib": "altium_pcblib",
+    "AltiumPcbFootprint": "altium_pcblib",
+    "AltiumPcbLibPrimitiveParameterGroup": "altium_pcblib",
+    "AltiumSchDoc": "altium_schdoc",
+    # Draftsman
+    "AltiumDraftsmanDocument": "altium_draftsman",
+    "AltiumDraftsmanPage": "altium_draftsman",
+    "AltiumDraftsmanItem": "altium_draftsman",
+    "AltiumDraftsmanNote": "altium_draftsman",
+    "AltiumDraftsmanNoteElement": "altium_draftsman",
+    "AltiumDraftsmanPicture": "altium_draftsman",
+    "AltiumDraftsmanText": "altium_draftsman",
+    "AltiumDraftsmanDocumentOptions": "altium_draftsman",
+    "DraftsmanColor": "altium_draftsman",
+    "DraftsmanFontDecoration": "altium_draftsman",
+    "DraftsmanFontStyle": "altium_draftsman",
+    "DraftsmanHorizontalAlignment": "altium_draftsman",
+    "DraftsmanMargin": "altium_draftsman",
+    "DraftsmanNoteBorderStyle": "altium_draftsman",
+    "DraftsmanPoint": "altium_draftsman",
+    "DraftsmanRect": "altium_draftsman",
+    "DraftsmanSize": "altium_draftsman",
+    "DraftsmanStandardSheetSize": "altium_draftsman",
+    "DraftsmanVerticalAlignment": "altium_draftsman",
+    # Layer-stack authoring and interchange
+    "AltiumComponentPlacement": "altium_layer_stack_document",
+    "AltiumCopperMaterialSpec": "altium_layer_stack_document",
+    "AltiumDielectricLayerKind": "altium_layer_stack_document",
+    "AltiumDielectricMaterialSpec": "altium_layer_stack_document",
+    "AltiumLayerPair": "altium_layer_stack_document",
+    "AltiumLayerStackDocument": "altium_layer_stack_document",
+    "AltiumRigidCopperLayerSpec": "altium_layer_stack_document",
+    "AltiumRigidDielectricLayerSpec": "altium_layer_stack_document",
+    "AltiumRigidStackRowSpec": "altium_layer_stack_document",
+    "AltiumStackupRoughnessModel": "altium_layer_stack_document",
+    "AltiumStackupSettings": "altium_layer_stack_document",
+    "AltiumStackupType": "altium_layer_stack_document",
+    "AltiumImpedanceProfileSpec": "altium_layer_stack_document",
+    "AltiumTransmissionLineSpec": "altium_layer_stack_document",
+    "AltiumStackupDocument": "altium_stackup",
+    "StackupTextFeature": "altium_stackup",
+    "AltiumStackupXDocument": "altium_stackupx",
+    "StackupXBranch": "altium_stackupx",
+    "StackupXBranchSection": "altium_stackupx",
+    "StackupXBranchSectionStack": "altium_stackupx",
+    "StackupXFeature": "altium_stackupx",
+    "StackupXImpedanceProfile": "altium_stackupx",
+    "StackupXLayer": "altium_stackupx",
+    "StackupXProperty": "altium_stackupx",
+    "StackupXSpan": "altium_stackupx",
+    "StackupXStack": "altium_stackupx",
+    "StackupXTransmissionLine": "altium_stackupx",
+}
+
+
 def __getattr__(name: str) -> Any:
     """
     Lazy import for modules that cause circular imports if loaded eagerly.
     """
-    # High-level parsers
-    if name == "AltiumDesign":
-        from .altium_design import AltiumDesign
-
-        public_api(AltiumDesign)
-        return AltiumDesign
-    if name == "AltiumSchLib":
-        from .altium_schlib import AltiumSchLib
-
-        public_api(AltiumSchLib)
-        return AltiumSchLib
-    if name == "AltiumPcbDoc":
-        from .altium_pcbdoc import AltiumPcbDoc
-
-        public_api(AltiumPcbDoc)
-        return AltiumPcbDoc
-    if name == "PcbDocBuilder":
-        from .altium_pcbdoc_builder import PcbDocBuilder
-
-        public_api(PcbDocBuilder)
-        return PcbDocBuilder
-    if name == "AltiumPcbLib":
-        from .altium_pcblib import AltiumPcbLib
-
-        public_api(AltiumPcbLib)
-        return AltiumPcbLib
-    if name == "AltiumPcbFootprint":
-        from .altium_pcblib import AltiumPcbFootprint
-
-        public_api(AltiumPcbFootprint)
-        return AltiumPcbFootprint
-    if name == "AltiumSchDoc":
-        from .altium_schdoc import AltiumSchDoc
-
-        public_api(AltiumSchDoc)
-        return AltiumSchDoc
-    if name == "AltiumDraftsmanDocument":
-        from .altium_draftsman import AltiumDraftsmanDocument
-
-        public_api(AltiumDraftsmanDocument)
-        return AltiumDraftsmanDocument
-    if name == "AltiumDraftsmanPage":
-        from .altium_draftsman import AltiumDraftsmanPage
-
-        public_api(AltiumDraftsmanPage)
-        return AltiumDraftsmanPage
-    if name == "AltiumDraftsmanItem":
-        from .altium_draftsman import AltiumDraftsmanItem
-
-        public_api(AltiumDraftsmanItem)
-        return AltiumDraftsmanItem
-    if name == "AltiumDraftsmanNote":
-        from .altium_draftsman import AltiumDraftsmanNote
-
-        public_api(AltiumDraftsmanNote)
-        return AltiumDraftsmanNote
-    if name == "AltiumDraftsmanNoteElement":
-        from .altium_draftsman import AltiumDraftsmanNoteElement
-
-        public_api(AltiumDraftsmanNoteElement)
-        return AltiumDraftsmanNoteElement
-    if name == "AltiumDraftsmanPicture":
-        from .altium_draftsman import AltiumDraftsmanPicture
-
-        public_api(AltiumDraftsmanPicture)
-        return AltiumDraftsmanPicture
-    if name == "AltiumDraftsmanText":
-        from .altium_draftsman import AltiumDraftsmanText
-
-        public_api(AltiumDraftsmanText)
-        return AltiumDraftsmanText
-    if name == "AltiumDraftsmanDocumentOptions":
-        from .altium_draftsman import AltiumDraftsmanDocumentOptions
-
-        public_api(AltiumDraftsmanDocumentOptions)
-        return AltiumDraftsmanDocumentOptions
-    if name == "DraftsmanColor":
-        from .altium_draftsman import DraftsmanColor
-
-        public_api(DraftsmanColor)
-        return DraftsmanColor
-    if name == "DraftsmanFontDecoration":
-        from .altium_draftsman import DraftsmanFontDecoration
-
-        public_api(DraftsmanFontDecoration)
-        return DraftsmanFontDecoration
-    if name == "DraftsmanFontStyle":
-        from .altium_draftsman import DraftsmanFontStyle
-
-        public_api(DraftsmanFontStyle)
-        return DraftsmanFontStyle
-    if name == "DraftsmanHorizontalAlignment":
-        from .altium_draftsman import DraftsmanHorizontalAlignment
-
-        public_api(DraftsmanHorizontalAlignment)
-        return DraftsmanHorizontalAlignment
-    if name == "DraftsmanMargin":
-        from .altium_draftsman import DraftsmanMargin
-
-        public_api(DraftsmanMargin)
-        return DraftsmanMargin
-    if name == "DraftsmanNoteBorderStyle":
-        from .altium_draftsman import DraftsmanNoteBorderStyle
-
-        public_api(DraftsmanNoteBorderStyle)
-        return DraftsmanNoteBorderStyle
-    if name == "DraftsmanPoint":
-        from .altium_draftsman import DraftsmanPoint
-
-        public_api(DraftsmanPoint)
-        return DraftsmanPoint
-    if name == "DraftsmanRect":
-        from .altium_draftsman import DraftsmanRect
-
-        public_api(DraftsmanRect)
-        return DraftsmanRect
-    if name == "DraftsmanSize":
-        from .altium_draftsman import DraftsmanSize
-
-        public_api(DraftsmanSize)
-        return DraftsmanSize
-    if name == "DraftsmanStandardSheetSize":
-        from .altium_draftsman import DraftsmanStandardSheetSize
-
-        public_api(DraftsmanStandardSheetSize)
-        return DraftsmanStandardSheetSize
-    if name == "DraftsmanVerticalAlignment":
-        from .altium_draftsman import DraftsmanVerticalAlignment
-
-        public_api(DraftsmanVerticalAlignment)
-        return DraftsmanVerticalAlignment
+    module_name = _LAZY_PUBLIC_EXPORTS.get(name)
+    if module_name is not None:
+        module = importlib.import_module(f".{module_name}", __name__)
+        value = getattr(module, name)
+        public_api(value)
+        globals()[name] = value
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

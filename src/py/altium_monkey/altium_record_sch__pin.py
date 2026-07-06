@@ -75,6 +75,28 @@ def _get_case_insensitive(
     return default
 
 
+def _get_case_insensitive_str(
+    record: dict[str, object],
+    key: str,
+    default: str = "",
+) -> str:
+    value = _get_case_insensitive(record, key, default)
+    return default if value is None else str(value)
+
+
+def _get_case_insensitive_int(
+    record: dict[str, object],
+    key: str,
+    default: int = 0,
+) -> int:
+    value = _get_case_insensitive(record, key, default)
+    if value is None:
+        return default
+    if not isinstance(value, int | float | str):
+        return default
+    return int(value)
+
+
 def _has_case_insensitive(record: dict, key: str) -> bool:
     """
     Check if key exists in record with case-insensitive lookup.
@@ -1079,34 +1101,34 @@ class AltiumSchPin(SchPrimitive):
         """
         # Location - use case-insensitive lookup for LOCATION.X vs Location.X
         self.location = CoordPoint(
-            int(_get_case_insensitive(record, "Location.X", 0)),
-            int(_get_case_insensitive(record, "Location.Y", 0)),
+            _get_case_insensitive_int(record, "Location.X", 0),
+            _get_case_insensitive_int(record, "Location.Y", 0),
         )
 
         # Fractional precision (legacy Altium format, sub-10000 precision)
         # Only set if present in original record (use None = not present)
         if _has_case_insensitive(record, "Location.X_Frac"):
-            frac_val = int(_get_case_insensitive(record, "Location.X_Frac", 0))
+            frac_val = _get_case_insensitive_int(record, "Location.X_Frac", 0)
             self.location_x_frac = frac_val
             self.location.x_frac = frac_val
         if _has_case_insensitive(record, "Location.Y_Frac"):
-            frac_val = int(_get_case_insensitive(record, "Location.Y_Frac", 0))
+            frac_val = _get_case_insensitive_int(record, "Location.Y_Frac", 0)
             self.location_y_frac = frac_val
             self.location.y_frac = frac_val
         if _has_case_insensitive(record, "PinLength_Frac"):
-            self.pin_length_frac = int(
-                _get_case_insensitive(record, "PinLength_Frac", 0)
+            self.pin_length_frac = _get_case_insensitive_int(
+                record, "PinLength_Frac", 0
             )
 
         # Basic properties
         # Note: Altium omits Name/Designator fields when they're empty strings.
         # Default to empty string when parsing files, not '0' like the constructor.
-        self.designator = _get_case_insensitive(record, "Designator", "")
-        self.name = _get_case_insensitive(record, "Name", "")
-        self.description = _get_case_insensitive(record, "Description", "")
+        self.designator = _get_case_insensitive_str(record, "Designator", "")
+        self.name = _get_case_insensitive_str(record, "Name", "")
+        self.description = _get_case_insensitive_str(record, "Description", "")
 
         # Length - default to 0 because Altium omits PinLength field when length=0
-        self.length = int(_get_case_insensitive(record, "PinLength", 0))
+        self.length = _get_case_insensitive_int(record, "PinLength", 0)
 
         # Compute _length_mils at parse time from the whole and fractional fields.
         # Formula: length is in 10-mil units, pin_length_frac is in DXP units (1/10000 mil)
@@ -1118,25 +1140,25 @@ class AltiumSchPin(SchPrimitive):
         # In SchDoc text records, orientation is stored in PinConglomerate, not a separate field
         if _has_case_insensitive(record, "Orientation"):
             self.orientation = Rotation90(
-                int(_get_case_insensitive(record, "Orientation")) & 0x03
+                _get_case_insensitive_int(record, "Orientation") & 0x03
             )
         else:
             # Extract from PinConglomerate (bits 0-1)
-            pin_conglomerate = int(_get_case_insensitive(record, "PinConglomerate", 0))
+            pin_conglomerate = _get_case_insensitive_int(record, "PinConglomerate", 0)
             self.orientation = Rotation90(pin_conglomerate & 0x03)
 
         # Electrical type
         self.electrical = PinElectrical(
-            int(_get_case_insensitive(record, "Electrical", 0))
+            _get_case_insensitive_int(record, "Electrical", 0)
         )  # Default is INPUT (0)
 
         # FormalType native JSON field
         if _has_case_insensitive(record, "FormalType"):
             self.formal_type = StdLogicState(
-                int(_get_case_insensitive(record, "FormalType"))
+                _get_case_insensitive_int(record, "FormalType")
             )
 
-        pin_conglomerate = int(_get_case_insensitive(record, "PinConglomerate", 0))
+        pin_conglomerate = _get_case_insensitive_int(record, "PinConglomerate", 0)
         (
             self.is_hidden,
             self.show_name,
@@ -1145,7 +1167,7 @@ class AltiumSchPin(SchPrimitive):
         ) = _parse_pin_visibility_flags(record, pin_conglomerate)
 
         # Color
-        self.color = int(_get_case_insensitive(record, "Color", 0))
+        self.color = _get_case_insensitive_int(record, "Color", 0)
 
         (
             self.symbol_inner,
@@ -1157,7 +1179,7 @@ class AltiumSchPin(SchPrimitive):
 
         # Owner tracking
         if _has_case_insensitive(record, "OwnerIndex"):
-            self.owner_index = int(_get_case_insensitive(record, "OwnerIndex"))
+            self.owner_index = _get_case_insensitive_int(record, "OwnerIndex")
         if _has_case_insensitive(record, "OwnerIndexForSaveAdditionalList"):
             self.owner_index_additional_list = parse_bool(
                 _get_case_insensitive(record, "OwnerIndexForSaveAdditionalList")
@@ -1165,8 +1187,8 @@ class AltiumSchPin(SchPrimitive):
 
         # Swap IDs
         # SwapIdPin is for individual pin ID
-        self.swap_id_pin = _get_case_insensitive(record, "SwapIdPin", "")
-        self.swap_id_pair = _get_case_insensitive(record, "SwapIdPair", "")
+        self.swap_id_pin = _get_case_insensitive_str(record, "SwapIdPin", "")
+        self.swap_id_pair = _get_case_insensitive_str(record, "SwapIdPair", "")
         # SwapIDPart stores part/sequence mapping (e.g., "|&|" or "part|&|seq").
         # Native import reads this through MBCS processing, so escaped pipe
         # sentinels such as 0xA6 must become literal separators before binary

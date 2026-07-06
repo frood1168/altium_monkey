@@ -8,6 +8,7 @@ composition so record-level to_svg() implementations can plug in incrementally.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Sequence
 import hashlib
 import html
 import inspect
@@ -31,7 +32,8 @@ from .altium_record_types import PcbLayer
 
 if TYPE_CHECKING:
     from .altium_pcbdoc import AltiumPcbDoc
-    from .altium_board import BoardOutlineVertex
+    from .altium_board import AltiumBoardOutline, BoardOutlineVertex
+    from .altium_resolved_layer_stack import ResolvedLayerStack
 
 
 _MIL_TO_MM = 0.0254
@@ -116,6 +118,9 @@ class PcbSvgRenderOptions:
     # When true in overlay mode, render drill holes as outline-only strokes
     # so underlying copper/tracks remain visible inside hole interiors.
     drill_hole_overlay_outline: bool = False
+    # PcbLib footprint preview has no board rule context. Altium's PcbLib editor
+    # resolves rule-driven solder/paste expansion as zero in that preview.
+    footprint_rule_mask_expansion_zero: bool = False
     # Stroke width used for overlay-outline holes (mm).
     drill_hole_overlay_outline_width_mm: float = 0.10
     # Emit drill holes in a dedicated synthetic layer group (`layer-DRILLS`)
@@ -481,7 +486,9 @@ class PcbSvgRenderer:
         self._embedded_font_resolver_cache: dict[str, object | None] = {}
 
     @staticmethod
-    def _resolved_layer_stack_safe(pcbdoc: "AltiumPcbDoc") -> object | None:
+    def _resolved_layer_stack_safe(
+        pcbdoc: "AltiumPcbDoc",
+    ) -> "ResolvedLayerStack | None":
         """
         Best-effort resolved stack lookup for behavior-preserving consumers.
         """
@@ -1532,7 +1539,9 @@ class PcbSvgRenderer:
         try:
             metric_getter = getattr(component, method_name, None)
             if callable(metric_getter):
-                return float(metric_getter())
+                value = metric_getter()
+                if isinstance(value, int | float | str):
+                    return float(value)
         except Exception:
             return None
         return None
@@ -1625,6 +1634,8 @@ class PcbSvgRenderer:
             return None, None
 
     def _safe_int(self, value: object, *, default: int) -> int:
+        if not isinstance(value, int | float | str):
+            return default
         try:
             return int(value)
         except (TypeError, ValueError):
@@ -2276,7 +2287,7 @@ class PcbSvgRenderer:
     def _render_primitive_collection(
         self,
         ctx: PcbSvgRenderContext,
-        collection: list[object],
+        collection: Sequence[object],
         layer: PcbLayer,
         layer_color: str,
         **kwargs: Any,
@@ -2306,7 +2317,7 @@ class PcbSvgRenderer:
     def _render_region_collection(
         self,
         ctx: PcbSvgRenderContext,
-        collection: list[object],
+        collection: Sequence[object],
         layer: PcbLayer,
         layer_color: str,
     ) -> list[str]:
@@ -2735,10 +2746,10 @@ class PcbSvgRenderer:
     def _render_board_outline(
         self,
         ctx: PcbSvgRenderContext,
-        outline: object,
+        outline: "AltiumBoardOutline | None",
         stroke_color: str,
     ) -> list[str]:
-        if not outline or not outline.vertices:
+        if outline is None or not outline.vertices:
             return []
 
         main_path = self._path_from_vertices(ctx, outline.vertices)
@@ -2783,12 +2794,12 @@ class PcbSvgRenderer:
     def _board_outline_clip_path(
         self,
         ctx: PcbSvgRenderContext,
-        outline: object,
+        outline: "AltiumBoardOutline | None",
     ) -> str:
         """
         Build board-profile clip path (outline minus cutouts).
         """
-        if not outline or not outline.vertices:
+        if outline is None or not outline.vertices:
             return ""
 
         main_path = self._path_from_vertices(ctx, outline.vertices)
@@ -2803,7 +2814,7 @@ class PcbSvgRenderer:
         return " ".join(parts)
 
     def _path_from_vertices(
-        self, ctx: PcbSvgRenderContext, vertices: list["BoardOutlineVertex"]
+        self, ctx: PcbSvgRenderContext, vertices: Sequence["BoardOutlineVertex"]
     ) -> str:
         if not vertices:
             return ""

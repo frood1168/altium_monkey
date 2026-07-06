@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 DESIGN_JSON_SCHEMA = "altium_monkey.design.a1"
 DESIGN_JSON_GENERATOR = "altium_monkey"
 SCHEMATIC_HIERARCHY_SCHEMA = "altium_monkey.schematic_hierarchy.a1"
+_CANONICAL_DECIMAL_RE = re.compile(r"0|[1-9][0-9]*")
 
 
 def _coerce_variant_parameter_overrides(
@@ -107,6 +108,12 @@ def _sorted_parameter_overrides(
         designator: dict(sorted(parameters.items()))
         for designator, parameters in sorted(overrides.items())
     }
+
+
+def _design_json_sheet_number_value(sheet_number: str) -> int | str:
+    if _CANONICAL_DECIMAL_RE.fullmatch(sheet_number):
+        return int(sheet_number)
+    return sheet_number
 
 
 def _resolve_component_value_from_parameters(
@@ -480,18 +487,17 @@ class AltiumDesign:
         Build sheet information for JSON output.
         """
         sheet_numbers = self._resolve_sheet_numbers(options)
-        return [
-            {
-                "filename": schdoc.filepath.name if schdoc.filepath else f"sheet{idx}",
-                "sheet_number": int(
-                    sheet_numbers.get(
-                        schdoc.filepath.name if schdoc.filepath else "", "0"
-                    )
-                    or 0
-                ),
-            }
-            for idx, schdoc in enumerate(self.schdocs)
-        ]
+        sheets = []
+        for idx, schdoc in enumerate(self.schdocs):
+            filename = schdoc.filepath.name if schdoc.filepath else f"sheet{idx}"
+            sheet_number = sheet_numbers.get(filename) or str(idx + 1)
+            sheets.append(
+                {
+                    "filename": filename,
+                    "sheet_number": _design_json_sheet_number_value(sheet_number),
+                }
+            )
+        return sheets
 
     def _build_project_data(self) -> dict:
         """

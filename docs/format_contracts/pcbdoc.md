@@ -17,8 +17,23 @@
 - Read and write promoted via metadata such as IPC-4761 type, via feature
   rows, solder-mask tenting, hole tolerance, fabrication/assembly testpoint
   flags, and propagation delay.
+- Author shape-based region outlines with line/arc extended vertices through
+  `add_region(..., outline_vertices=...)`.
+- Author custom pads through the native board custom-shape contract, including
+  primary and additional per-layer custom bodies, holes, net assignment,
+  component ownership, and pad-center offsets.
+- Preserve imported PCB dimension records and re-author raw `Dimensions6/Data`
+  records through `add_dimension_record(...)`; this is not a full
+  object-oriented dimension model.
+- Author round, square, and slotted pad drill-hole shapes. Slotted holes
+  require a positive slot length; square holes require a positive drill size.
 - Inspect user-defined PCB unions through union-name records, typed smart-union
   records, and computed user-union member summaries.
+- Inspect and author semantic mechanical layer kind assignments through
+  `mechanical_layer_kinds`, `get_mechanical_layer_kind(...)`, and
+  `set_mechanical_layer_kind(...)`. The mapping is stored in
+  `LayerKindMapping/Data` and synchronized into the Board6 `MECHKIND`
+  layer-table/cache fields used by Altium.
 - Render PCB SVG and PCB layer SVGs.
 
 ## Object Model
@@ -29,6 +44,47 @@ document-owned helpers such as `add_track(...)`, `add_via(...)`,
 
 Direct record-list mutation remains an advanced escape hatch for narrow edits
 or preservation work.
+
+## Custom Pads
+
+PcbDoc custom pads are authored as an anchor pad plus one or more custom-pad
+region shapes. The board writer emits `CustomShapes/Header` and
+`CustomShapes/Data`; each `CustomShapes/Data` record uses zero-based
+`PRIMITIVEINDEX` to reference the pad record. The paired `Regions6` and
+`ShapeBasedRegions6` records carry native one-based `PADINDEX` metadata.
+
+Ordinary region authoring and PcbDoc custom-pad body authoring share the same
+outline normalization path for point lists, holes, and optional
+`PcbExtendedVertex` line/arc outlines. Custom pads remain a composed workflow:
+they add the anchor pad and native `CustomShapes/*` attachment records around
+the shared region body.
+
+`add_custom_pad(...)` takes the primary layer body through
+`outline_points_mils` and optional primary holes through `hole_points_mils`.
+Pass `outline_vertices` when the primary body needs native line/arc segment
+semantics rather than a point-only polygon. Use `PcbCustomPadLayerShapeSpec`
+entries in `layer_shapes` when a board pad needs additional layer-specific
+custom bodies and holes that share the same anchor pad; layer-shape entries can
+also carry `outline_vertices`.
+
+Custom-pad anchors may carry ordinary pad drill data through `hole_size_mils`,
+`plated`, `hole_shape`, `slot_length_mils`, `slot_rotation_degrees`, and drill
+tolerance parameters. This is for source documents where the custom copper body
+and the drill are both owned by one Altium pad record.
+
+This differs from PcbLib, where footprint custom pads use
+`ExtendedPrimitiveInformation` rather than board `CustomShapes/*`. Public
+PcbDoc and PcbLib APIs intentionally expose the same semantic
+`add_custom_pad(...)` shape while preserving the container-specific native
+storage contracts.
+
+## Dimensions
+
+Parsed PcbDoc dimensions are exposed as typed `AltiumPcbDimension` records with
+raw-payload-preserving serialization. `add_dimension_record(...)` appends one
+native Dimensions6 record from `record_type`, `record_leader`, and the raw
+payload bytes. This API is for preservation and transcode workflows; it does
+not yet define a full object-oriented semantic dimension-construction model.
 
 ## User Unions
 
@@ -43,6 +99,10 @@ Use explicit mutation helpers such as `create_user_union(...)`,
 union authoring. Typed smart unions such as drill tables, layer-stack tables,
 via stitching, via shielding, OLE/object unions, rectangles, and length tuning
 are read-only in this contract.
+
+`create_user_union(...)` auto-allocates a native union id by default. Pass
+`union_index=...` only for deterministic replay/recreation workflows that need
+to preserve an existing native union id.
 
 Passing a component to `create_user_union(...)` includes the component record
 and its authorable child primitives. Shape-based region membership is kept in
@@ -63,8 +123,72 @@ fallback is not a replacement for STEP-derived model geometry.
 ## Layer Names
 
 Stable layer keys use token names such as `TOP`, `BOTTOM`, and `TOPOVERLAY`.
+Mechanical layer display names, enabled flags, and mirror pairs are board
+registry metadata. Mechanical layer kind assignments are semantic metadata and
+do not by themselves rename or enable mechanical layers.
 Use the resolved layer stack when board-specific user-facing names are needed.
 Default display labels are fallback labels, not stable identifiers.
+`ResolvedLayerStack` is a derived read-only consumer view; new PcbDoc authoring
+uses `AltiumLayerStackDocument`.
+
+## Layer Stack And Interchange
+
+`AltiumLayerStackDocument` is the source-aware model for PcbDoc layer stacks.
+The stable contract is PcbDoc inspection, preservation during normal
+read/write flows, canonical empty-board synthesis, and controlled new
+rigid-board stack construction. New-document rigid-flex authoring is limited
+to typed `AltiumLayerStackDocument` models that explicitly provide physical
+layers, substacks, board regions, and optional branch topology through the
+public `AltiumStackLayer`, `AltiumStackSubstack`, `AltiumStackRegion`,
+`AltiumStackBendLine`, and `AltiumStackBranch*` dataclasses. The writer emits
+native `Board6/Data`, `BoardRegions/Data`, and embedded StackupX branch data,
+then callers should re-open the generated PcbDoc to verify the intended
+topology.
+
+The source-aware topology query contract uses native ids, not display names,
+for joins. `AltiumStackSubstack.source_stackup_ref` and
+`AltiumStackRegion.layerstack_id` are the stable substack/region join. Branch
+section stacks, impedance transmission lines, and via/backdrill spans can
+reference the same ids with bare GUID spelling; public lookup helpers normalize
+refs with or without braces. Use `substack_by_source_ref(...)`,
+`board_regions_for_layerstack_id(...)`, `layers_for_substack(...)`,
+`layers_for_board_region(...)`, and `branches_for_stack_ref(...)` for read-only
+topology queries. Display names remain labels and are not unique ids.
+
+External `.stackup` and `.stackupx` files can be parsed into
+`AltiumLayerStackDocument` and applied to a fresh `PcbDocBuilder` for simple
+rigid-board authoring. The writer regenerates native `Board6/Data` stack rows
+from the semantic model and preserves copper, dielectric, solder-mask,
+overlay, layer-pair, and supported material/thickness fields on generated
+PcbDoc readback. `.csv` and `.esx` remain inspection/export artifacts rather
+than native writer inputs.
+
+Programmatic rigid-board authoring uses the same document model. Use
+`AltiumLayerStackDocument.from_rigid_layer_rows(...)` with ordered
+`AltiumRigidStackRowSpec` rows when the exact physical sequence matters.
+Normal public authoring should use semantic constructors such as
+`AltiumRigidStackRowSpec.copper(...)`, `.prepreg(...)`, `.core(...)`,
+`.solder_mask(...)`, and `.overlay(...)` with `AltiumCopperMaterialSpec`,
+`AltiumDielectricMaterialSpec`, `AltiumComponentPlacement`, and
+`AltiumLayerPair`. Stackup-wide electrical settings such as roughness model,
+copper resistance, via plating thickness, realistic ratio, and temperatures
+use `AltiumStackupSettings`, `AltiumStackupType`, and
+`AltiumStackupRoughnessModel`. Raw StackupX type IDs, property tuples, and
+serialized stackup attributes are compatibility escape hatches for unsupported
+source metadata, not the preferred API. This supports code-authored `.stackup`
+/ `.stackupx` export and fresh PcbDoc creation, but does not imply arbitrary
+in-place mutation of an existing populated board.
+
+Rigid-flex correctness is still gated on generated PcbDoc readback because
+interchange views normalize rows differently from native PcbDoc `Board6/Data`
+plus `BoardRegions/Data`, and `.stackup`/`.stackupx` do not carry board-region
+outline and bend-line geometry. For rigid-flex authoring, use typed
+`AltiumLayerStackDocument` region/substack/branch inputs or a native PcbDoc
+source model backed by fixture evidence.
+
+`ResolvedLayerStack` remains the public convenience view for read-only
+consumer reports, layer display names, and enabled-layer checks. It must not be
+used as the source model for writing stack data.
 
 ## SVG
 
@@ -77,5 +201,8 @@ See [SVG](svg.md) for the shared rendering and enrichment contract.
 ## Test Gates
 
 The PcbDoc contract is covered by foundation parsing, authoring, round-trip,
-SVG, public examples, and release signoff.
+SVG, public examples, and release signoff. Promoted layer-stack writer
+features require generated native PcbDoc readback through `AltiumPcbDoc` and
+`AltiumLayerStackDocument`; `.stackup` and `.stackupx` comparisons are
+supporting evidence, not substitutes for native PcbDoc verification.
 

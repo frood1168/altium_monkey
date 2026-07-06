@@ -13,6 +13,8 @@ import re
 from .altium_pcb_property_helpers import clean_pcb_property_text as _clean_text
 from .altium_record_pcb__region import AltiumPcbRegion
 
+_ALTIUM_COORDS_PER_MIL = 10000.0
+
 
 @dataclass
 class AltiumPcbBendingLine:
@@ -28,6 +30,27 @@ class AltiumPcbBendingLine:
     x2: int | None = None
     y2: int | None = None
     raw_value: str = ""
+
+    @property
+    def radius_mils(self) -> float | None:
+        """
+        Bend radius in mils.
+
+        `radius_raw` is the exact Altium internal coordinate value stored in
+        `BENDINGLINE{N}`. Use this property for authored scripts and UI-facing
+        code; keep `radius_raw` for native format diagnostics and exact
+        round-trip comparisons.
+        """
+        if self.radius_raw is None:
+            return None
+        return float(self.radius_raw) / _ALTIUM_COORDS_PER_MIL
+
+    @radius_mils.setter
+    def radius_mils(self, value: float | int | None) -> None:
+        if value is None:
+            self.radius_raw = None
+            return
+        self.radius_raw = int(round(float(value) * _ALTIUM_COORDS_PER_MIL))
 
     @classmethod
     def from_property_value(cls, raw_value: object) -> "AltiumPcbBendingLine":
@@ -107,13 +130,16 @@ class AltiumPcbBoardRegion(AltiumPcbRegion):
 
     def __init__(self) -> None:
         super().__init__()
+        self._properties_emit_trailing_null = True
+        self._properties_include_keepout_restrictions = False
+        self._emit_extended_outline_tail = True
         self.object_kind: str = "BoardRegion"
         self.name: str = ""
         self.layerstack_id: str = ""
         self.bending_line_count: int = 0
         self.bending_lines: list[AltiumPcbBendingLine] = []
         self.locked_3d: bool = False
-        self.cavity_height: str = ""
+        self.cavity_height: int | str = ""
         self.v7_layer: str = ""
         self.layer_token: str = ""
         self.arc_resolution: str = ""
@@ -171,7 +197,7 @@ class AltiumPcbBoardRegion(AltiumPcbRegion):
         props["NAME"] = self.name
         props["LAYERSTACKID"] = self.layerstack_id
         props["LOCKED3D"] = "TRUE" if self.locked_3d else "FALSE"
-        props["CAVITYHEIGHT"] = self.cavity_height
+        props["CAVITYHEIGHT"] = str(self.cavity_height)
         props["V7_LAYER"] = self.v7_layer
         props["LAYER"] = self.layer_token
         if self.arc_resolution:
@@ -190,7 +216,7 @@ class AltiumPcbBoardRegion(AltiumPcbRegion):
         for index, bend_line in enumerate(bend_lines):
             props[f"BENDINGLINE{index}"] = bend_line.to_property_value()
 
-        self.properties = props
+        self.properties = _with_custom_coverlays_before_layerstack(props)
 
     def _typed_signature(self) -> tuple:
         return (
@@ -217,3 +243,19 @@ class AltiumPcbBoardRegion(AltiumPcbRegion):
             self.layer_token,
             self.arc_resolution,
         )
+
+
+def _with_custom_coverlays_before_layerstack(
+    props: dict[str, str],
+) -> dict[str, str]:
+    if "CUSTOMCOVERLAYS" not in props or "LAYERSTACKID" not in props:
+        return props
+    reordered: dict[str, str] = {}
+    custom_value = props["CUSTOMCOVERLAYS"]
+    for key, value in props.items():
+        if key == "CUSTOMCOVERLAYS":
+            continue
+        if key == "LAYERSTACKID":
+            reordered["CUSTOMCOVERLAYS"] = custom_value
+        reordered[key] = value
+    return reordered

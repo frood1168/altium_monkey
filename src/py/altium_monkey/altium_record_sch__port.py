@@ -326,6 +326,7 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
         width = self.width * ctx.scale
         height = self.height * ctx.scale
         arrow_depth = height / 2
+        is_vertical = self._is_vertical_style()
         harness_color = ctx.harness_port_colors.get(str(self.unique_id or ""))
         is_harness_port = bool(self.harness_type) or harness_color is not None
         effective_harness_color = (
@@ -334,7 +335,7 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
             else int(self.harness_color or 0)
         )
 
-        arrow_style = self._resolve_arrow_style(is_harness_port)
+        arrow_style = self._resolve_arrow_style(is_harness_port, ctx)
         polygon_points = self._build_polygon_points(
             x, y, width, arrow_depth, arrow_style
         )
@@ -344,7 +345,9 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
             ctx,
             units_per_px,
         )
-        connection_x, connection_y = self._connection_anchor_from_polygon(polygon_points)
+        connection_x, connection_y = self._connection_anchor_from_polygon(
+            polygon_points, x, y, width, is_vertical
+        )
         connection_point = svg_coord_to_geometry(
             connection_x,
             connection_y,
@@ -373,6 +376,8 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
                     x,
                     y,
                     width,
+                    arrow_depth,
+                    is_vertical,
                     is_harness_port,
                     units_per_px,
                     make_font_payload,
@@ -382,17 +387,26 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
             )
 
         half_height = float(self.height) / 2.0
+        if is_vertical:
+            bounds = SchGeometryBounds(
+                left=int(round((float(self.location.x) - half_height) * 100000)),
+                top=int(round((float(self.location.y) + float(self.width)) * 100000)),
+                right=int(round((float(self.location.x) + half_height) * 100000)),
+                bottom=int(round(float(self.location.y) * 100000)),
+            )
+        else:
+            bounds = SchGeometryBounds(
+                left=int(round(float(self.location.x) * 100000)),
+                top=int(round((float(self.location.y) + half_height) * 100000)),
+                right=int(round((float(self.location.x) + float(self.width)) * 100000)),
+                bottom=int(round((float(self.location.y) - half_height) * 100000)),
+            )
         return SchGeometryRecord(
             handle=f"{document_id}\\{self.unique_id}",
             unique_id=self.unique_id,
             kind="port",
             object_id="ePort",
-            bounds=SchGeometryBounds(
-                left=int(round(float(self.location.x) * 100000)),
-                top=int(round((float(self.location.y) + half_height) * 100000)),
-                right=int(round((float(self.location.x) + float(self.width)) * 100000)),
-                bottom=int(round((float(self.location.y) - half_height) * 100000)),
-            ),
+            bounds=bounds,
             operations=wrap_record_operations(
                 self.unique_id,
                 operations,
@@ -414,7 +428,16 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
     def _connection_anchor_from_polygon(
         self,
         polygon_points: list[tuple[float, float]],
+        x: float,
+        y: float,
+        width: float,
+        is_vertical: bool,
     ) -> tuple[float, float]:
+        computed_end = int(getattr(self, "_computed_connected_end", 0) or 0)
+        if is_vertical:
+            if computed_end == 2:
+                return (x, y - width)
+            return (x, y)
         if not polygon_points:
             return (float(self.location.x), float(self.location.y))
         min_x = min(point[0] for point in polygon_points)
@@ -428,31 +451,90 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
             return (min_x, center_y)
         if right_count == 1 and left_count != 1:
             return (max_x, center_y)
-        computed_end = int(getattr(self, "_computed_connected_end", 0) or 0)
         if computed_end == 1:
             return (min_x, center_y)
         if computed_end == 2:
             return (max_x, center_y)
         return (min_x, center_y)
 
-    def _resolve_arrow_style(self, is_harness_port: bool) -> int:
-        if is_harness_port:
-            return 3
+    def _is_vertical_style(self) -> bool:
+        return self.style in {
+            PortStyle.NONE_VERTICAL,
+            PortStyle.TOP,
+            PortStyle.BOTTOM,
+            PortStyle.TOP_BOTTOM,
+        }
 
-        ce = getattr(self, "_computed_connected_end", 0)
-        if self.io_type == 3:
-            return 3
-        if self.io_type == 0:
-            return 0
-        if ce == 0:
-            return 2
-        if ce == 1:
-            return 2 if self.io_type == 1 else 1
-        if ce == 2:
-            return 1 if self.io_type == 1 else 2
-        if ce == 3:
-            return 0 if self.io_type == 1 else 3
-        return 2
+    def _resolve_arrow_style(
+        self, is_harness_port: bool, ctx: "SchSvgRenderContext"
+    ) -> PortStyle:
+        if self._is_vertical_style():
+            return self._resolve_vertical_arrow_style(is_harness_port, ctx)
+        return self._resolve_horizontal_arrow_style(is_harness_port, ctx)
+
+    def _resolve_horizontal_arrow_style(
+        self, is_harness_port: bool, ctx: "SchSvgRenderContext"
+    ) -> PortStyle:
+        if is_harness_port:
+            return PortStyle.LEFT_RIGHT
+
+        ce = int(getattr(self, "_computed_connected_end", 0) or 0)
+        is_on_left = float(self.location.x) < (float(ctx.sheet_width or 0.0) / 2.0)
+        if self.io_type == PortIOType.BIDIRECTIONAL:
+            return PortStyle.LEFT_RIGHT
+        if self.io_type == PortIOType.INPUT and ce == 3:
+            return PortStyle.LEFT_RIGHT
+        if self.io_type == PortIOType.OUTPUT and ce == 1:
+            return PortStyle.RIGHT
+        if self.io_type == PortIOType.INPUT and ce == 2:
+            return PortStyle.RIGHT
+        if self.io_type == PortIOType.OUTPUT and ce == 0 and not is_on_left:
+            return PortStyle.RIGHT
+        if self.io_type == PortIOType.INPUT and ce == 0 and is_on_left:
+            return PortStyle.RIGHT
+        if self.io_type == PortIOType.INPUT and ce == 1:
+            return PortStyle.LEFT
+        if self.io_type == PortIOType.OUTPUT and ce == 2:
+            return PortStyle.LEFT
+        if self.io_type == PortIOType.INPUT and ce == 0 and not is_on_left:
+            return PortStyle.LEFT
+        if self.io_type == PortIOType.OUTPUT and ce == 0 and is_on_left:
+            return PortStyle.LEFT
+        if self.io_type == PortIOType.OUTPUT and ce == 3:
+            return PortStyle.NONE_HORIZONTAL
+        return self.style
+
+    def _resolve_vertical_arrow_style(
+        self, is_harness_port: bool, ctx: "SchSvgRenderContext"
+    ) -> PortStyle:
+        if is_harness_port:
+            return PortStyle.TOP_BOTTOM
+
+        ce = int(getattr(self, "_computed_connected_end", 0) or 0)
+        is_on_top = float(self.location.y) > (float(ctx.sheet_height or 0.0) / 2.0)
+        if self.io_type == PortIOType.BIDIRECTIONAL:
+            return PortStyle.TOP_BOTTOM
+        if self.io_type == PortIOType.INPUT and ce == 3:
+            return PortStyle.TOP_BOTTOM
+        if self.io_type == PortIOType.OUTPUT and ce == 1:
+            return PortStyle.TOP
+        if self.io_type == PortIOType.INPUT and ce == 2:
+            return PortStyle.TOP
+        if self.io_type == PortIOType.OUTPUT and ce == 0 and is_on_top:
+            return PortStyle.TOP
+        if self.io_type == PortIOType.INPUT and ce == 0 and not is_on_top:
+            return PortStyle.TOP
+        if self.io_type == PortIOType.INPUT and ce == 1:
+            return PortStyle.BOTTOM
+        if self.io_type == PortIOType.OUTPUT and ce == 2:
+            return PortStyle.BOTTOM
+        if self.io_type == PortIOType.INPUT and ce == 0 and is_on_top:
+            return PortStyle.BOTTOM
+        if self.io_type == PortIOType.OUTPUT and ce == 0 and not is_on_top:
+            return PortStyle.BOTTOM
+        if self.io_type == PortIOType.OUTPUT and ce == 3:
+            return PortStyle.NONE_VERTICAL
+        return self.style
 
     def _build_polygon_points(
         self,
@@ -460,16 +542,48 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
         y: float,
         width: float,
         arrow_depth: float,
-        arrow_style: int,
+        arrow_style: PortStyle,
     ) -> list[tuple[float, float]]:
-        if arrow_style == 0:
+        if arrow_style == PortStyle.NONE_VERTICAL:
+            return [
+                (x + arrow_depth, y),
+                (x - arrow_depth, y),
+                (x - arrow_depth, y - width),
+                (x + arrow_depth, y - width),
+            ]
+        if arrow_style == PortStyle.TOP:
+            return [
+                (x + arrow_depth, y),
+                (x - arrow_depth, y),
+                (x - arrow_depth, y - width + arrow_depth),
+                (x, y - width),
+                (x + arrow_depth, y - width + arrow_depth),
+            ]
+        if arrow_style == PortStyle.BOTTOM:
+            return [
+                (x + arrow_depth, y - arrow_depth),
+                (x, y),
+                (x - arrow_depth, y - arrow_depth),
+                (x - arrow_depth, y - width),
+                (x + arrow_depth, y - width),
+            ]
+        if arrow_style == PortStyle.TOP_BOTTOM:
+            return [
+                (x + arrow_depth, y - arrow_depth),
+                (x, y),
+                (x - arrow_depth, y - arrow_depth),
+                (x - arrow_depth, y - width + arrow_depth),
+                (x, y - width),
+                (x + arrow_depth, y - width + arrow_depth),
+            ]
+        if arrow_style == PortStyle.NONE_HORIZONTAL:
             return [
                 (x, y + arrow_depth),
                 (x, y - arrow_depth),
                 (x + width, y - arrow_depth),
                 (x + width, y + arrow_depth),
             ]
-        if arrow_style == 2:
+        if arrow_style == PortStyle.RIGHT:
             return [
                 (x, y + arrow_depth),
                 (x, y - arrow_depth),
@@ -477,7 +591,7 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
                 (x + width, y),
                 (x + width - arrow_depth, y + arrow_depth),
             ]
-        if arrow_style == 1:
+        if arrow_style == PortStyle.LEFT:
             return [
                 (x + arrow_depth, y + arrow_depth),
                 (x, y),
@@ -581,6 +695,8 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
         x: float,
         y: float,
         width: float,
+        arrow_depth: float,
+        is_vertical: bool,
         is_harness_port: bool,
         units_per_px: int,
         make_font_payload: Any,
@@ -601,16 +717,27 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
         text_width = measure_text_width(
             clean_text, font_size_for_width, font_name, bold=is_bold, italic=is_italic
         )
-        text_x = self._port_text_x(x, width, text_width, ctx.scale)
-
         font_spec = (
             ctx.font_manager.get_font_info(self.font_id) if ctx.font_manager else None
         )
+        geometry_step = float(int(font_size_px))
+        rotation_deg = -90.0 if is_vertical else 0.0
+        if is_vertical:
+            native_font_size = (
+                float(font_spec.get("size", font_size_px))
+                if font_spec
+                else font_size_px
+            )
+            text_x = x - float(int(native_font_size) // 2) + geometry_step
+            text_y = self._vertical_port_text_y(y, width, text_width, ctx.scale)
+        else:
+            text_x = self._port_text_x(x, width, text_width, ctx.scale)
+
         font_payload = make_font_payload(
             name=str(font_spec.get("name", font_name)) if font_spec else str(font_name),
             size_px=font_size_px,
             units_per_px=units_per_px,
-            rotation=0.0,
+            rotation=rotation_deg,
             underline=bool(font_spec.get("underline", is_underline))
             if font_spec
             else bool(is_underline),
@@ -632,6 +759,8 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
             italic=is_italic,
             brush_color_raw=int(self.text_color or 0),
             units_per_px=units_per_px,
+            rotation_deg=rotation_deg,
+            geometry_step_px=geometry_step,
         )
 
     def _port_text_y(
@@ -655,3 +784,13 @@ class AltiumSchPort(SingleFontBindableRecordMixin, SchGraphicalObject):
         if self.alignment == 2:
             return text_area_end - text_width - text_margin
         return (text_area_start + text_area_end) / 2 - text_width / 2
+
+    def _vertical_port_text_y(
+        self, y: float, width: float, text_width: float, scale: float
+    ) -> float:
+        text_margin = 10.0 * scale
+        if self.alignment == SchHorizontalAlign.LEFT:
+            return y - width + text_margin + text_width
+        if self.alignment == SchHorizontalAlign.RIGHT:
+            return y - text_margin
+        return y - width / 2.0 + text_width / 2.0

@@ -43,8 +43,8 @@ class AltiumPcbTrack(PcbGraphicalObject):
         solder_mask_expansion: Solder mask expansion value (int32, internal units)
         paste_mask_expansion: Paste mask expansion value (int16, always 0 in practice)
         v7_layer_id: V7 layer identifier field (uint32)
-        keepout_restrictions: Keepout bitmask (bit0=Track, bit1=Via, bit2=Copper,
-                              bit3=SmdPad, bit4=ThPad)
+        keepout_restrictions: Keepout bitmask. Use `altium_pcb_keepout` helpers
+                              for the SDK-confirmed bit names.
     """
 
     def __init__(self) -> None:

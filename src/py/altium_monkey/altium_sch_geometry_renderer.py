@@ -5,7 +5,11 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from .altium_sch_geometry_oracle import SchGeometryDocument, SchGeometryOpKind
+from .altium_sch_geometry_oracle import (
+    SchGeometryDocument,
+    SchGeometryOpKind,
+    SchGeometryRecord,
+)
 from .altium_sch_svg_renderer import (
     SchCompileMaskRenderMode,
     SchSvgRenderContext,
@@ -184,7 +188,7 @@ class SchGeometrySvgRenderer:
     def _collect_sheet_and_nested_record_ids(
         self,
         document: SchGeometryDocument,
-    ) -> tuple[object | None, set[str]]:
+    ) -> tuple[SchGeometryRecord | None, set[str]]:
         sheet_record = next(
             (record for record in document.records if record.kind == "sheet"), None
         )
@@ -210,7 +214,7 @@ class SchGeometrySvgRenderer:
         self,
         document: SchGeometryDocument,
         *,
-        sheet_record: object | None,
+        sheet_record: SchGeometryRecord | None,
         nested_record_ids: set[str],
         units_per_px: float,
         canvas_height_px: float,
@@ -382,7 +386,7 @@ class SchGeometrySvgRenderer:
 
     def _render_item_record(
         self,
-        record: object,
+        record: SchGeometryRecord,
         *,
         document: SchGeometryDocument,
         units_per_px: float,
@@ -412,7 +416,7 @@ class SchGeometrySvgRenderer:
 
     def _render_record_primitives(
         self,
-        record: object,
+        record: SchGeometryRecord,
         *,
         document: SchGeometryDocument,
         units_per_px: float,
@@ -514,7 +518,7 @@ class SchGeometrySvgRenderer:
         kind: str,
         *,
         payload: dict[str, Any],
-        record: object,
+        record: SchGeometryRecord,
         rendered_stack: list[dict[str, Any]],
         transform_stack: list[tuple[float, float, float, float, float, float]],
         units_per_px: float,
@@ -523,7 +527,14 @@ class SchGeometrySvgRenderer:
         if kind == SchGeometryOpKind.PUSH_TRANSFORM.value:
             matrix = payload.get("matrix") or []
             if len(matrix) == 6:
-                pushed = tuple(float(v) for v in matrix)
+                pushed = (
+                    float(matrix[0]),
+                    float(matrix[1]),
+                    float(matrix[2]),
+                    float(matrix[3]),
+                    float(matrix[4]),
+                    float(matrix[5]),
+                )
                 transform_stack.append(_compose_affine(transform_stack[-1], pushed))
             return True
         if kind == SchGeometryOpKind.POP_TRANSFORM.value:
@@ -706,7 +717,7 @@ class SchGeometrySvgRenderer:
 
     def _render_record_transparent_back(
         self,
-        record: object,
+        record: SchGeometryRecord,
         *,
         document: SchGeometryDocument,
         units_per_px: float,

@@ -11,6 +11,12 @@ from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 
 if TYPE_CHECKING:
     from .altium_pcb_svg_renderer import PcbSvgRenderContext
+    from .altium_text_to_polygon import (
+        BarcodeRenderer,
+        FontPathResolver,
+        StrokeTextRenderer,
+        TrueTypeTextRenderer,
+    )
 
 log = logging.getLogger(__name__)
 
@@ -657,7 +663,8 @@ class AltiumPcbText(PcbGraphicalObject):
         subrecord2_text = self.text_content or ""
         if getattr(self, "_subrecord2_pascal", False):
             str_bytes = subrecord2_text.encode("ascii", errors="replace")
-            return bytes([len(str_bytes)]) + str_bytes
+            if len(str_bytes) <= 0xFF:
+                return bytes([len(str_bytes)]) + str_bytes
         return subrecord2_text.encode("utf-8", errors="replace") + b"\x00"
 
     def serialize_to_binary(self) -> bytes:
@@ -936,10 +943,10 @@ class AltiumPcbText(PcbGraphicalObject):
         include_metadata: bool = True,
         for_layer: PcbLayer | None = None,
         text_as_polygons: bool = True,
-        truetype_renderer: object | None = None,
-        stroke_renderer: object | None = None,
-        barcode_renderer: object | None = None,
-        font_resolver: object | None = None,
+        truetype_renderer: "TrueTypeTextRenderer | None" = None,
+        stroke_renderer: "StrokeTextRenderer | None" = None,
+        barcode_renderer: "BarcodeRenderer | None" = None,
+        font_resolver: "FontPathResolver | None" = None,
     ) -> list[str]:
         """
         Render PCB text as geometry (polygon contours or stroke segments).

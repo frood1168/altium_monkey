@@ -20,9 +20,16 @@ from altium_monkey import (
 
 SAMPLE_DIR = Path(__file__).resolve().parent
 INPUT_SCHDOC = SAMPLE_DIR / "input" / "blank.SchDoc"
+REFERENCE_DIR = SAMPLE_DIR / "assets" / "reference"
 OUTPUT_DIR = SAMPLE_DIR / "output"
 OUTPUT_SCHDOC = OUTPUT_DIR / "harness_example.SchDoc"
-REFERENCE_SCHDOC = OUTPUT_DIR / "harness_example_ref.SchDoc"
+OUTPUT_HARNESS = OUTPUT_DIR / "harness_example.Harness"
+REFERENCE_SCHDOC = REFERENCE_DIR / "harness_example_ref.SchDoc"
+REFERENCE_HARNESS = REFERENCE_DIR / "harness_example_ref.Harness"
+
+
+def write_harness_sidecar(path: Path, harness_type: str, entries: list[str]) -> None:
+    path.write_text(f"{harness_type}={','.join(entries)}\r\n", encoding="ascii")
 
 
 def main() -> None:
@@ -82,6 +89,7 @@ def main() -> None:
     )
 
     schdoc.save(OUTPUT_SCHDOC)
+    write_harness_sidecar(OUTPUT_HARNESS, "I2C", ["SDA", "SCL"])
 
     reopened = AltiumSchDoc(OUTPUT_SCHDOC)
     reopened_connector = reopened.harness_connectors[0]
@@ -99,6 +107,9 @@ def main() -> None:
     print(
         "Connector match ref: "
         f"{(reopened_connector.location.x_mils, reopened_connector.location.y_mils, reopened_connector.xsize, reopened_connector.ysize) == (reference_connector.location.x_mils, reference_connector.location.y_mils, reference_connector.xsize, reference_connector.ysize)}"
+    )
+    print(
+        f"Harness sidecar match ref: {OUTPUT_HARNESS.read_text(encoding='ascii') == REFERENCE_HARNESS.read_text(encoding='ascii')}"
     )
     print(f"Wrote: {OUTPUT_SCHDOC.relative_to(SAMPLE_DIR)}")
 

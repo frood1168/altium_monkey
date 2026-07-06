@@ -20,10 +20,23 @@ Typed views are live filtered views, not independent mutable lists.
 Use symbol-owned mutation APIs such as `add_object(...)` for pins, component
 graphics, parameters, and related child records.
 
+Symbol child order is part of the visible contract because Altium draws
+overlapping symbol children in record order. SchDoc component insertion from
+SchLib preserves the source symbol order, and SchDoc symbol extraction writes
+children back in the placed component order.
+
 ## Units
 
 High-level public symbol-authoring APIs use mils. Low-level records may expose
 source storage units.
+
+## Editor Display Options
+
+`AltiumSchLib(show_comments_designators=True)` and the
+`show_comments_designators` property write `AlwaysShowCD=T` in the SchLib
+`FileHeader`. This asks Altium's library editor to show symbol comments and
+designators by default. The default remains `False`, which omits the field for
+newly authored libraries and preserves the previous output.
 
 ## SVG
 

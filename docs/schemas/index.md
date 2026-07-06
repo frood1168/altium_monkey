@@ -73,7 +73,10 @@ Important fields:
 3. `project`: project name, path-derived metadata, document paths, and project parameters.
 4. `variants`: project variant definitions, including DNP lists and parameter overrides when available.
 5. `options`: netlist and hierarchy-resolution options used to generate the payload.
-6. `sheets`: reachable schematic documents and sheet-level metadata.
+6. `sheets`: reachable schematic documents and sheet-level metadata. Canonical
+   decimal `SheetNumber` values are emitted as JSON numbers for compatibility;
+   non-canonical Altium values such as part-number strings are emitted exactly
+   as JSON strings.
 7. `components`: schematic components enriched with sheet, pin-count, parameters, and `svg_id` where available.
 8. `schematic_hierarchy`: resolved documents, sheet symbols, channels, hierarchy paths, sheet-entry links, harness bundle links, and unresolved hierarchy diagnostics.
 9. `pnp`: optional PCB-backed pick-and-place data in millimeters.

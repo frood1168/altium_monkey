@@ -11,25 +11,27 @@ class RectF(Structure):
     """
     GDI+ RectF structure.
     """
-    _fields_ = [('X', c_float), ('Y', c_float), ('Width', c_float), ('Height', c_float)]
+
+    _fields_ = [("X", c_float), ("Y", c_float), ("Width", c_float), ("Height", c_float)]
 
 
 class GdiplusStartupInput(Structure):
     """
     GDI+ startup input structure.
     """
+
     _fields_ = [
-        ('GdiplusVersion', ctypes.c_uint32),
-        ('DebugEventCallback', c_void_p),
-        ('SuppressBackgroundThread', c_int),
-        ('SuppressExternalCodecs', c_int)
+        ("GdiplusVersion", ctypes.c_uint32),
+        ("DebugEventCallback", c_void_p),
+        ("SuppressBackgroundThread", c_int),
+        ("SuppressExternalCodecs", c_int),
     ]
 
 
 class GdiplusTextMeasurer:
     """
     Wrapper for GDI+ text measurement.
-    
+
     Uses Windows GDI+ MeasureString with GenericTypographic format,
     which is what Altium uses for pin names and designators.
     """
@@ -44,7 +46,7 @@ class GdiplusTextMeasurer:
     ) -> None:
         """
         Initialize GDI+ text measurer.
-        
+
         Args:
             font_family: Font family name (default "Arial")
             font_size_px: Font size in pixels (default 8.0)
@@ -77,7 +79,9 @@ class GdiplusTextMeasurer:
             # GDI+ Startup
             self._token = ctypes.c_ulong()
             startup = GdiplusStartupInput(1, None, 0, 0)
-            status = self._gdiplus.GdiplusStartup(byref(self._token), byref(startup), None)
+            status = self._gdiplus.GdiplusStartup(
+                byref(self._token), byref(startup), None
+            )
             if status != 0:
                 log.warning("GdiplusStartup failed with status %d", status)
                 return False
@@ -85,9 +89,12 @@ class GdiplusTextMeasurer:
             # Create font family
             self._font_family = c_void_p()
             status = self._gdiplus.GdipCreateFontFamilyFromName(
-                c_wchar_p(self._font_family_name), None, byref(self._font_family))
+                c_wchar_p(self._font_family_name), None, byref(self._font_family)
+            )
             if status != 0:
-                log.warning("GdipCreateFontFamilyFromName failed with status %d", status)
+                log.warning(
+                    "GdipCreateFontFamilyFromName failed with status %d", status
+                )
                 return False
 
             # Create font (Unit 2 = UnitPixel, style bits: 1=Bold, 2=Italic)
@@ -118,9 +125,14 @@ class GdiplusTextMeasurer:
 
             # Get GenericTypographic string format
             self._string_format = c_void_p()
-            status = self._gdiplus.GdipStringFormatGetGenericTypographic(byref(self._string_format))
+            status = self._gdiplus.GdipStringFormatGetGenericTypographic(
+                byref(self._string_format)
+            )
             if status != 0:
-                log.warning("GdipStringFormatGetGenericTypographic failed with status %d", status)
+                log.warning(
+                    "GdipStringFormatGetGenericTypographic failed with status %d",
+                    status,
+                )
                 return False
 
             self._initialized = True
@@ -133,10 +145,10 @@ class GdiplusTextMeasurer:
     def measure(self, text: str) -> tuple[float, float]:
         """
         Measure text width and height using GDI+.
-        
+
         Args:
             text: Text string to measure
-        
+
         Returns:
             Tuple of (width, height) in pixels
         """
@@ -147,8 +159,11 @@ class GdiplusTextMeasurer:
         bounding_box = RectF()
         codepoints_fitted = c_int()
         lines_filled = c_int()
+        gdiplus = self._gdiplus
+        if gdiplus is None:
+            return (0.0, 0.0)
 
-        status = self._gdiplus.GdipMeasureString(
+        status = gdiplus.GdipMeasureString(
             self._graphics,
             c_wchar_p(text),
             len(text),
@@ -157,11 +172,13 @@ class GdiplusTextMeasurer:
             self._string_format,
             byref(bounding_box),
             byref(codepoints_fitted),
-            byref(lines_filled)
+            byref(lines_filled),
         )
 
         if status != 0:
-            log.warning("GdipMeasureString failed with status %d for '%s'", status, text)
+            log.warning(
+                "GdipMeasureString failed with status %d for '%s'", status, text
+            )
             return (0.0, 0.0)
 
         return (bounding_box.Width, bounding_box.Height)
@@ -208,14 +225,14 @@ def get_gdiplus_text_width(
 ) -> float:
     """
     Get text width using GDI+ MeasureString.
-    
+
     Args:
         text: Text to measure
         font_size_px: Font size in pixels (default 8.0)
         font_name: Font family name (default "Arial")
         bold: Use GDI+ bold style bit
         italic: Use GDI+ italic style bit
-    
+
     Returns:
         Text width in pixels (GDI+ raw units, not scaled for SVG)
     """
@@ -234,4 +251,3 @@ def get_gdiplus_text_width(
             italic=italic,
         )
         return measurer.measure_width(text)
-

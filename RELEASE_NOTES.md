@@ -1,3 +1,670 @@
+# altium-monkey 2026.07.01 Release Notes
+
+Package version: `2026.7.1`
+
+`2026.07.01` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.1`.
+
+This release expands PCB stackup authoring, adds named keepout restriction
+helpers, improves font portability, and tightens PcbDoc/PcbLib record
+preservation for automated board generation.
+
+## PCB Stackup Authoring
+
+PcbDoc layer-stack authoring now supports rigid `.stackup` and `.stackupx`
+files as inputs to `AltiumLayerStackDocument.from_stackup(...)` and
+`AltiumLayerStackDocument.from_stackupx(...)`, followed by
+`PcbDocBuilder.set_layer_stack_document(...)`.
+
+Generated PcbDocs preserve copper, dielectric, solder-mask, solder-paste,
+overlay, layer-pair, internal-plane ID, and layer type semantics on readback,
+and can be exported again through `to_stackup(...)` and `to_stackupx(...)`.
+The new public `pcbdoc_create_from_stackup_files` example demonstrates both
+import paths. Rigid-flex StackupX authoring still requires explicit
+board-region geometry and is not inferred from interchange files alone.
+
+Programmatic rigid stack creation is now available through
+`AltiumLayerStackDocument.from_rigid_layer_rows(...)` and
+`AltiumRigidStackRowSpec`. Semantic row constructors cover common rigid
+authoring cases through `AltiumComponentPlacement`,
+`AltiumDielectricLayerKind`, `AltiumCopperMaterialSpec`, and
+`AltiumDielectricMaterialSpec`, so callers do not need raw StackupX GUIDs or
+property type tuples for ordinary copper, prepreg, core, solder-mask, and
+overlay rows.
+
+Stackup-level electrical settings such as roughness model, roughness factors,
+copper resistance, via plating thickness, realistic ratio, and temperatures are
+modeled by `AltiumStackupSettings`, `AltiumStackupType`, and
+`AltiumStackupRoughnessModel`. `AltiumStackupDocument`,
+`AltiumStackupXDocument`, and `AltiumLayerPair` are first-class public exports.
+The `pcbdoc_create_custom_rigid_stack` example now writes PcbDoc, `.stackup`,
+and `.stackupx` outputs from the same code-authored stack model, and the new
+`pcbdoc_create_jlcpcb_rigid_stack` example demonstrates a JLCPCB-style
+eight-layer rigid stack authored through the semantic API.
+
+## PCB Keepout Restrictions
+
+PCB keepout restriction helpers are now public. Python callers can use
+`PcbKeepoutRestriction`, `decode_pcb_keepout_restrictions(...)`,
+`encode_pcb_keepout_restrictions(...)`,
+`pcb_keepout_restriction_names(...)`, and
+`pcb_keepout_restriction_unknown_bits(...)` to decode and author the confirmed
+Altium object-specific keepout mask bits: via `0x01`, track `0x02`, copper
+`0x04`, SMD pad `0x08`, and through-hole pad `0x10`.
+
+The raw `keepout_restrictions` integer remains the authoritative stored field
+so unknown future bits can still round-trip.
+
+## PCB Record Models And Preservation
+
+PcbDoc VIA records now expose the parsed `drill_layer_pair_type` field used by
+backdrill-aware board files.
+
+PcbDoc rule records now expose parsed semantic rule data, including canonical
+rule-kind aliases, semantic model names, parsed scope expressions, typed scalar
+accessors, connect-style settings, per-layer width and differential-pair
+metrics, routing-layer flags, room outlines, clearance object pairs, and
+routing-neckdown layer lengths. Raw `extra_fields` remain preserved for
+unsupported or pass-through fields.
+
+Typed Rules6 write-back is now supported through semantic field setters on
+rule objects. PcbDoc saves rewrite `Rules6/Header` and `Rules6/Data` while
+preserving parsed record leaders.
+
+Rigid-flex board-region bend-line edits, typed Dimensions6 helpers and
+write-back, board-level ExtendedPrimitiveInformation summaries and write-back,
+and read-only board-level CustomShapes summaries are now available through the
+Python API. Parsed custom pads also expose their resolved custom layer set
+through `PcbPadSummary.custom_shape_layers`.
+
+## Font And SchDoc Image Compatibility
+
+Font portability helpers now expose `FontReplacementRule`,
+`portable_font_replacements()`, and
+`ALTIUM_PORTABLE_FONT_REPLACEMENTS` from the `altium_monkey` package root and
+`altium_monkey.altium_font_resolver`. These mirror the existing portable
+replacement table while giving Python callers a typed rule API.
+
+SchDoc IR image geometry now matches Altium for wrapped `TSVGImage` payloads:
+`gotImage` source dimensions use the embedded BMP preview size while runtime
+SVG rendering still uses the SVG payload.
+
+## Compatibility Notes
+
+The internal PcbDoc VIA authoring constant
+`VIA_AD25_DEFAULT_SOLDER_MASK_EXPANSION_IU` was renamed to
+`VIA_TENTING_DEFAULT_SOLDER_MASK_EXPANSION_IU` so the API wording describes the
+tenting behavior rather than implying an AD25-only rule. The old name is not
+retained.
+
+## Validation
+
+This release was checked with focused keepout helper tests, package
+validation, public tests, wheel build and clean-install checks, private
+signoff, and the affected source quality gates.
+
+---
+
+# altium-monkey 2026.06.21 Release Notes
+
+Package version: `2026.6.21`
+
+`2026.06.21` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.21`.
+
+This release fixes focused schematic-library and PCB library/document behavior
+reported from real Altium workflows.
+
+## SchLib Comment And Designator Visibility
+
+`AltiumSchLib` now supports `show_comments_designators=True` in the constructor
+and a `show_comments_designators` property. When enabled, generated SchLib files
+write `AlwaysShowCD=T` in the FileHeader so Altium's library editor opens with
+symbol comments and designators visible.
+
+The default remains unchanged for compatibility: newly authored libraries omit
+the field unless the option is enabled. Parsed libraries hydrate the property
+from existing FileHeader data when present.
+
+The public `hello_schlib` example now opts into this setting so its generated
+comment and designator are visible in Altium without manually changing document
+options.
+
+## SchDoc Vertical Port Rendering
+
+SchDoc SVG rendering now matches Altium for vertically oriented page-level
+ports. Port bodies, connection anchors, and text labels follow the native
+on-screen geometry for vertical port styles instead of leaving port labels
+horizontal.
+
+## Legacy Rounded PcbLib Pads
+
+PcbLib footprint SVG and placed PcbDoc SVG rendering now handles legacy pads
+stored as raw Altium `TShape.eRounded` with unequal dimensions and no modern
+alternate-shape record. These pads render as native obround/capsule geometry.
+
+PcbLib footprint SVG previews now also treat rule-based solder-mask and
+paste-mask expansion as zero when no board-rule context exists, while preserving
+manual expansion values.
+
+## Pad Testpoint Flags
+
+PcbLib and PcbDoc pad testpoint flags now decode and author the observed Altium
+fields. Fabrication top pads use the Altium `flags1 0x80` bit, and assembly
+top/bottom pads use the SubRecord 5 tail bytes saved by Altium instead of
+unrelated flag bits.
+
+## Validation
+
+This release was prepared with focused SchLib FileHeader coverage, the updated
+public `hello_schlib` sample, focused SchDoc SVG checks, PcbLib/PcbDoc rounded
+pad SVG and IPC/Draftsman oracle coverage, pad testpoint flag fixtures, and the
+release validation pipeline.
+
+---
+
+# altium-monkey 2026.06.16 Release Notes
+
+Package version: `2026.6.16`
+
+`2026.06.16` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.16`.
+
+This release fixes SchLib-to-SchDoc component insertion order so schematic
+symbol draw order is preserved through placement, save/reopen, and symbol
+extraction.
+
+## SchLib Component Insertion Order
+
+`AltiumSchDoc.add_component_from_library(...)` now preserves the source
+`AltiumSymbol.objects` child order when cloning pins, body graphics,
+designators, labels, images, text frames, and parameters into a placed
+component.
+
+This matters for symbols where body graphics intentionally sit in front of or
+behind pins. Earlier insertion grouped cloned records by type, which could move
+rounded rectangles ahead of pins and change the visible Altium z-order.
+
+SchLib designator records are also preserved during insertion when the source
+symbol provides them; their text is still replaced with the requested placed
+designator.
+
+## Validation
+
+This release was checked with focused SchLib insertion tests that create a
+SchDoc, place symbols from SchLib, save and reopen the SchDoc, extract the
+placed symbol back to SchLib, and assert that source and extracted child order
+match. The corpus-backed checks cover both the original `SCTA1A0103.SchLib`
+order and the intentional inverse order in `SCTA1A0103_pin_on_top.SchLib` so
+the release proves preservation rather than forcing one preferred order.
+
+The focused public example checks and `altium_cruncher` mate tests also passed
+against the patched local `altium-monkey` source.
+
+---
+
+# altium-monkey 2026.06.14 Release Notes
+
+Package version: `2026.6.14`
+
+`2026.06.14` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.14`.
+
+This release fixes alternate display-mode schematic netlisting and adds
+first-class PcbDoc/PcbLib mechanical layer kind authoring.
+
+## SchDoc Display-Mode Netlisting
+
+SchDoc netlist extraction now follows the active symbol `DisplayMode` for
+placed components instead of assuming the primary symbol mode. Component pin
+views and WireList output now match the active display body, including the
+native single-sheet extractor path.
+
+## PcbDoc And PcbLib Mechanical Layer Kinds
+
+PcbDoc and PcbLib now expose typed mechanical layer kind assignments through
+`MechanicalLayerKind`, `mechanical_layer_kinds`,
+`get_mechanical_layer_kind(...)`, and `set_mechanical_layer_kind(...)`.
+`PcbDocBuilder.set_mechanical_layer_kind(...)` is also available for direct
+PcbDoc builder workflows.
+
+The mapping reads and writes `LayerKindMapping/Data` for PcbDoc and
+`Library/LayerKindMapping/Data` for PcbLib, including classic Mechanical 1..16
+ids and extended Mechanical 17..32 ids. Authored output also synchronizes
+Altium-visible `MECHKIND` layer-table and cache fields so assignments appear in
+Altium's layer manager after save/reopen.
+
+PcbDoc mechanical layer display-name, enabled-state, and mirror-pair authoring
+now supports Mechanical 17..32 through Board6 V9 cache fields and `MECHPAIR*`
+entries without colliding with legacy system-layer ids such as Drill Drawing.
+PcbLib has matching mechanical layer registry and mirror-pair authoring through
+`AltiumPcbLib.set_mechanical_layer(...)` and
+`AltiumPcbLib.set_mechanical_layer_pair(...)`, including Mechanical 17..32
+`LAYERV7_*` and `Library/Data` `MECHPAIR*` updates.
+
+## Public Examples
+
+Two new public examples demonstrate metadata-only mechanical layer kind
+authoring:
+
+1. `pcbdoc_create_mechanical_layer_kinds`
+2. `pcblib_create_mechanical_layer_kinds`
+
+Both examples create mechanical layer names, enabled states, component-layer
+pairs, standalone kind assignments at lower mechanical layer indices, paired
+component kind assignments at higher indices, and save/reparse JSON readback
+manifests for Altium UI verification.
+
+## Validation
+
+This release was prepared with focused SchDoc display-mode coverage, PcbDoc and
+PcbLib mechanical layer kind round-trip tests, exported mechanical-layer
+example readback checks, clean Ruff lint, and the asset test lane.
+
+---
+
+# altium-monkey 2026.06.13 Release Notes
+
+Package version: `2026.6.13`
+
+`2026.06.13` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.13`.
+
+This release tightens schematic netlist behavior and PcbDoc/PcbLib parameter
+round-tripping for downstream automation.
+
+## SchDoc Netlist Near-Crossing Behavior
+
+SchDoc WireList generation now matches Altium for off-grid and metric
+near-crossing wires: wire endpoints must exactly meet wires or explicit
+junctions for connectivity, rather than using editor grid/tolerance settings to
+merge nearby geometry.
+
+The release was checked against the full private L5 netlist corpus lane. The
+three near-crossing corpus references were regenerated to match the corrected
+Altium-style connectivity.
+
+## Design JSON Sheet Numbers
+
+`AltiumDesign.to_json()` now tolerates Altium `SheetNumber` document parameters
+that are not canonical decimal numbers, such as part-number strings. Canonical
+numeric sheet numbers remain JSON numbers for compatibility; non-canonical
+values are preserved exactly as JSON strings.
+
+## DXP Parameter-List Escaping
+
+PcbLib footprint `PrimitiveParameters` and PcbDoc component
+`PrimitiveParameters/Data` values now decode Altium's DXP parameter-list
+escapes (`{}` for `=` and `[]` for `|`) on read and apply the same encoding
+when authoring values.
+
+## Validation
+
+This release was prepared through the validation wrapper, including public
+tests, package build, artifact checks, and clean wheel install validation. The
+release also passed the full private SchDoc netlist corpus lane.
+
+---
+
+# altium-monkey 2026.06.11 Release Notes
+
+Package version: `2026.6.11`
+
+`2026.06.11` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.11`.
+
+This release refreshes the controlled `wn-geometer` runtime dependency used for
+STEP-derived component bounds.
+
+## Geometer Dependency Refresh
+
+`altium-monkey` now depends on `wn-geometer==2026.6.10`, moving STEP geometry
+workflows onto the OCCT V8-backed Geometer package while preserving the
+existing Altium Monkey API surface.
+
+## Validation
+
+This release was prepared through the validation wrapper, including public
+tests, package build, artifact checks, and clean wheel install validation.
+
+---
+
+# altium-monkey 2026.06.09 Release Notes
+
+Package version: `2026.6.9`
+
+`2026.06.09` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.9`.
+
+This release closes a focused PcbDoc authoring gap for downstream transcode and
+visualization workflows. The changes are additive and preserve existing
+documented APIs.
+
+## PcbDoc Region And Custom-Pad Authoring
+
+`AltiumPcbDoc.add_region(...)` now accepts `outline_vertices` for
+line/arc-preserving shape-based-region authoring. This allows callers to write
+native `PcbExtendedVertex` outlines when point-only polygons would lose segment
+semantics.
+
+PcbDoc custom-pad authoring now supports arc-capable extended outline vertices
+on the primary custom body and on additional per-layer bodies through
+`PcbCustomPadLayerShapeSpec(..., outline_vertices=...)`. Custom-pad anchors can
+also carry ordinary pad drill fields such as `hole_size_mils`, `plated`,
+`hole_shape`, slot fields, and drill tolerances.
+
+Ordinary region authoring and PcbDoc custom-pad body authoring now share the
+same outline normalization path for point lists, holes, and optional extended
+line/arc outlines. Custom pads remain a composed workflow around that shared
+geometry path: the API writes the anchor pad plus native `CustomShapes/*`,
+`Regions6`, and `ShapeBasedRegions6` records required for PcbDoc custom-pad
+semantics.
+
+## Dimension Preservation
+
+`AltiumPcbDoc.add_dimension_record(...)` and
+`PcbDocBuilder.add_dimension_record(...)` can append raw native
+`Dimensions6/Data` records from `record_type`, `record_leader`, and payload
+bytes. This is a preservation/transcode API for imported dimensions, not a
+high-level construction API or full object-oriented dimension model.
+
+## Public Examples
+
+The new `pcbdoc_add_custom_pad_region_outline` public example demonstrates
+`add_region(..., outline_vertices=...)`, `add_custom_pad(...,
+outline_vertices=...)`, and `PcbCustomPadLayerShapeSpec(...,
+outline_vertices=...)`. The example reparses its generated board and writes a
+JSON manifest proving arc vertices and `CustomShapes/Data` are present.
+
+## Validation
+
+This release was tested with focused PcbDoc/PcbLib authoring tests, the new
+public example, public manifest/docs checks, downstream Data Models writer
+tests, and the validation wrapper.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new region/custom-pad outline
+controls and raw dimension replay support are additive.
+
+---
+
+# altium-monkey 2026.06.08 Release Notes
+
+Package version: `2026.6.8`
+
+`2026.06.08` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.8`.
+
+This release expands PcbDoc/PcbLib writer parity for downstream board
+generation and transcode workflows. The changes are additive and preserve
+existing documented APIs.
+
+## PcbLib Via Feature Authoring
+
+PcbLib now reads, preserves, and authors footprint-level
+`PrimitiveParameters`, via IPC-4761 side tables, propagation delay,
+fabrication and assembly testpoint flags, and mixed-footprint via-structure
+links through the public `add_via(...)` API.
+
+Via-structure links in PcbLib footprints now resolve against the full native
+`Data` record order, not the via-only list. This fixes IPC-4761 feature rows
+for footprints that contain pads, tracks, arcs, text, fills, regions, or
+component bodies before linked vias. Footprints also expose a read-only
+`primitives` aggregate view in native record order for workflows that need to
+replay mixed primitive ordering.
+
+## PcbDoc And PcbLib Writer Parity
+
+PcbDoc and PcbLib pad authoring now expose matching fabrication and assembly
+testpoint flags on the clean public `add_pad(...)` APIs.
+
+PcbDoc and PcbLib via authoring now accepts explicit IPC-4761 feature rows on
+the clean public `add_via(...)` APIs, so callers can author non-default side
+and material rows without mutating returned records.
+
+PcbDoc custom-pad authoring is now available through
+`AltiumPcbDoc.add_custom_pad(...)` and `PcbDocBuilder.add_custom_pad(...)`,
+including custom bodies, custom holes, pad-center offsets, net assignment, and
+custom-pad footprint placement without duplicate region replay. Direct PcbDoc
+custom-pad authoring also accepts additional per-layer custom bodies and holes
+through Python `PcbCustomPadLayerShapeSpec` / `layer_shapes=...`.
+
+Placing PcbLib footprints into PcbDoc now preserves footprint-local via
+identity through PcbDoc-to-PcbLib extraction, including IPC-4761 feature side
+tables, feature materials, propagation delay, hole tolerances, mask and tenting
+flags, and fabrication/assembly testpoint flags.
+
+PcbDoc authoring now includes Python helpers for mechanical layer display
+names, enabled-state registry fields, and mechanical mirror pairing used by
+component side flipping.
+
+PcbDoc user-union creation now supports explicit native union-id replay in
+Python, enabling deterministic read/mutate/write recreation of named user
+unions while preserving auto-allocation for normal use.
+
+Layer-stack document authoring now includes via-span and backdrill-span
+helpers for the same `LAYERPAIR*` Board6/Data contract. Direct via-tail and
+counterhole mutation remains intentionally outside this API.
+
+## PcbDoc Long Text Fix
+
+PcbDoc text writing now emits long authored text through a wide-safe
+`Texts6/Data` fallback payload instead of the legacy one-byte Pascal-length
+payload. This fixes downstream PcbDoc transcodes that generate PCB text longer
+than 255 bytes.
+
+The release includes fixture-backed coverage for an AD-authored board with one
+ordinary PCB text object and one text-frame object containing the same
+292-byte string. The tests verify no-op preservation of Altium's legacy
+256-byte fallback payload and fresh authoring through the long-safe writer
+path.
+
+## Public Examples
+
+New and updated public examples demonstrate direct via IPC-4761 feature-row
+authoring, footprint primitive parameters, and fixture-backed PcbLib
+via-feature recreation through the public `add_footprint(...)`, `add_via(...)`,
+and primitive authoring helpers.
+
+## Validation
+
+The release diff was audited against `altium-monkey/v2026.6.7`. The
+user-facing changed surfaces are: layer-stack document authoring and
+interchange docs, PcbDoc/PcbLib writer parity, PcbLib via feature and
+`PrimitiveParameters` support, public PcbLib examples, long PcbDoc text
+serialization, generated public example docs, and the promoted writer
+controls.
+
+This release was tested with focused package authoring tests, public example
+tests, private PcbDoc/PcbLib fixture lanes, AD26 interop open/save smoke for
+the generated PcbLib samples, and strict package Pyright with zero diagnostics.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new writer controls,
+metadata-preservation paths, and text serialization fix are additive.
+
+---
+
+# altium-monkey 2026.06.07 Release Notes
+
+Package version: `2026.6.7`
+
+`2026.06.07` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.7`.
+
+This release is the first public Altium Monkey release with comprehensive
+Layer Stack Manager reading, writing, interchange, and new-board authoring
+support. The stackup work is additive and keeps existing documented APIs
+compatible.
+
+## Layer Stack Document
+
+`AltiumLayerStackDocument` is now the source-aware layer-stack model for PcbDoc
+workflows. Use it to read native PcbDoc stack data, import or export
+`.stackup` and `.stackupx`, inspect rigid-flex topology, query native substack
+and board-region joins, and author new rigid or fixture-backed rigid-flex
+boards through `PcbDocBuilder.set_layer_stack_document(...)`.
+
+`ResolvedLayerStack` remains the read-only convenience view for consumer
+reports, layer display names, enabled-layer checks, and existing examples such
+as `pcbdoc_stats`. It is intentionally derived data and is not the source model
+for writing stack data.
+
+## PcbDoc Stack Authoring
+
+The new writer surface covers canonical empty-board synthesis, two-layer and
+four-layer template compatibility, custom rigid stacks, controlled-impedance
+rigid stacks, flex/stiffener stacks, Rigid-Flex 1.0 split-line stacks,
+flex-in-cutout stacks, branch-based rigid-flex topologies, nested branch
+topologies, and impedance/backdrill evidence for the promoted fixture-backed
+rigid-flex shapes.
+
+Stackup export/import now preserves the promoted Layer Stack Manager semantics
+across native PcbDoc, `.stackup`, and `.stackupx` readbacks, including
+substack-local layer enablement, bend-line radii, branch topology, selected
+surface-finish rows, adhesive/stiffener rows, realistic-ratio display metadata,
+impedance profiles, transmission lines, via spans, and backdrill spans.
+
+## Public Examples
+
+New and updated examples show the supported authoring and inspection workflow:
+
+1. `pcbdoc_create_custom_rigid_stack`
+2. `pcbdoc_create_impedance_rigid_stack`
+3. `pcbdoc_inspect_layer_stack`
+4. `pcbdoc_flex_topology_report`
+5. `pcbdoc_create_flex_stiffener`
+6. `pcbdoc_create_rigid_flex_split_lines`
+7. `pcbdoc_create_flex_in_cutout`
+8. `pcbdoc_create_rigid_flex_branch`
+9. `pcbdoc_create_rigid_flex_branch_intrusion`
+10. `pcbdoc_create_rigid_flex_two_branch`
+11. `pcbdoc_create_rigid_flex_multibranch`
+12. `pcbdoc_create_rigid_flex_impedance_backdrill`
+13. `pcbdoc_create_cavity_placements`
+
+The rigid-board `pcbdoc_stats` example still uses `ResolvedLayerStack` and
+continues to report the packaged `loz-old-man` board statistics.
+
+## PcbDoc And PcbLib Cavity Regions
+
+PcbLib and PcbDoc region authoring now support cavity-definition regions
+through `PcbRegionKind.CAVITY_DEFINITION` and `cavity_height_mils`, mapping the
+public enum to the native cavity region kind. The public cavity examples create
+a footprint cavity and board-side cavity placements, insert the packaged
+footprint and embedded STEP payload, and verify save/reparse semantics.
+
+## Schematic SVG Fix
+
+SchDoc SVG rendering keeps pin names and designators rotated for vertical pins.
+The public proof sample creates a SchLib symbol, inserts it into a SchDoc, and
+renders SVG to verify the saved library-backed path.
+
+## Validation
+
+The release was tested through:
+
+1. public example tests that execute the stackup examples and verify native
+   PcbDoc readback with `AltiumPcbDoc` and `AltiumLayerStackDocument`
+2. `.stackup` and `.stackupx` interchange round-trip checks for the promoted
+   stack shapes
+3. a supported local corpus regeneration gate covering synthesized,
+   real-world, and canonical empty PcbDoc files
+4. focused private release signoff checks for public packaging hygiene and
+   format-contract synchronization
+5. a strict package Pyright gate with zero diagnostics for
+   `src/py/altium_monkey`
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new layer-stack, cavity, and
+SVG behaviors are additive.
+
+---
+
+# altium-monkey 2026.06.01-2 Release Notes
+
+Package version: `2026.6.1.post1`
+
+`2026.06.01-2` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.1.post1`.
+
+This second 2026.06.01 release expands public PcbDoc/PcbLib authoring parity
+for downstream board generation workflows. The changes are additive and
+preserve existing documented APIs.
+
+## PcbDoc Writer API
+
+`AltiumPcbDoc.add_via(...)` now mirrors PcbLib via surface controls by
+accepting independent signed top/front and bottom/back solder-mask expansion
+values in addition to top/bottom tenting flags.
+
+`AltiumPcbDoc.add_pad(...)` and `PcbDocBuilder.add_pad(...)` now support
+local-stack pad body geometry. Callers can provide top/mid/bottom shape and
+size overrides; the writer emits native `pad_mode=1` and preserves the parsed
+per-layer fields on round trip.
+
+`AltiumPcbDoc.add_pad(...)` now also accepts the structured
+`PcbMaskExpansion` / `PcbMaskExpansionMode` solder/paste mask-expansion
+contract while preserving existing manual mil aliases.
+
+PcbDoc region authoring exposes region kind, board-cutout, shape-based,
+keepout, and subpoly metadata.
+
+## PcbLib Writer API
+
+PcbLib track, arc, and fill authoring now accepts solder-mask and paste-mask
+expansion values.
+
+PcbLib text authoring accepts frame options for authored non-barcode text,
+matching the PcbDoc text surface where the native format supports it.
+
+## Validation
+
+Focused Python package tests and generated-public-package tests cover the
+shared primitive option cleanup, including component-body option parity and
+R082-style local stack pad geometry.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new writer controls are
+additive.
+
+---
+
+# altium-monkey 2026.06.01 Release Notes
+
+Package version: `2026.6.1`
+
+`2026.06.01` is represented in Python package metadata as the PEP 440
+canonical form `2026.6.1`.
+
+This release adds PcbLib writer controls needed by downstream footprint and
+library-generation workflows, so callers no longer need to patch native records
+after using the public authoring API.
+
+## PcbLib Writer API
+
+`AltiumPcbFootprint.add_via(...)` now accepts top/bottom tenting flags and
+independent top/bottom solder-mask expansion values.
+
+`AltiumPcbFootprint.add_custom_pad(...)` now exposes custom-pad anchor width,
+height, rotation, and shape. Generated custom-pad regions now use the authored
+anchor pad's native 1-based `PADINDEX`, including when the custom pad is not
+the first pad in a footprint.
+
+`AltiumPcbFootprint.add_pad(...)` and `AltiumPcbDoc.add_pad(...)` now expose
+the public `PadHoleShape` enum for round, square, and slotted drill holes.
+
+## Public API Compatibility
+
+Existing documented APIs remain compatible. The new writer controls are
+additive.
+
+---
+
 # altium-monkey 2026.05.29 Release Notes
 
 Package version: `2026.5.29`

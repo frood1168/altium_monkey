@@ -58,6 +58,11 @@ components.
 Use `schdoc.add_component_from_library(...)` for normal component insertion from
 SchLib.
 
+When placing a SchLib symbol, `add_component_from_library(...)` preserves the
+symbol's child record order. This keeps intentional schematic draw order intact
+for cases where pins, rounded rectangles, designators, and other visible child
+records overlap.
+
 ## Templates
 
 Use `clear_template()`, `apply_template(...)`, and `extract_template(...)` for
@@ -115,17 +120,18 @@ normal renderer profile without a root viewBox.
 Start with:
 
 1. [`hello_schdoc`](../examples/hello_schdoc/README.md)
-2. [`schdoc_add_note`](../examples/schdoc_add_note/README.md)
-3. [`schdoc_note_command`](../examples/schdoc_note_command/README.md)
-4. [`schdoc_move_note`](../examples/schdoc_move_note/README.md)
-5. [`schdoc_add_harness_connector`](../examples/schdoc_add_harness_connector/README.md)
-6. [`schdoc_mutate_harness_connector`](../examples/schdoc_mutate_harness_connector/README.md)
-7. [`schdoc_add_sheet_symbol`](../examples/schdoc_add_sheet_symbol/README.md)
-8. [`schdoc_mutate_sheet_symbol`](../examples/schdoc_mutate_sheet_symbol/README.md)
-9. [`schdoc_insert_dblib_style`](../examples/schdoc_insert_dblib_style/README.md)
-10. [`schdoc_clean`](../examples/schdoc_clean/README.md)
-11. [`schdoc_svg`](../examples/schdoc_svg/README.md)
-12. [`schdoc_apply_dynamic_template`](../examples/schdoc_apply_dynamic_template/README.md)
+2. [`schdoc_vertical_pin_svg`](../examples/schdoc_vertical_pin_svg/README.md)
+3. [`schdoc_add_note`](../examples/schdoc_add_note/README.md)
+4. [`schdoc_note_command`](../examples/schdoc_note_command/README.md)
+5. [`schdoc_move_note`](../examples/schdoc_move_note/README.md)
+6. [`schdoc_add_harness_connector`](../examples/schdoc_add_harness_connector/README.md)
+7. [`schdoc_mutate_harness_connector`](../examples/schdoc_mutate_harness_connector/README.md)
+8. [`schdoc_add_sheet_symbol`](../examples/schdoc_add_sheet_symbol/README.md)
+9. [`schdoc_mutate_sheet_symbol`](../examples/schdoc_mutate_sheet_symbol/README.md)
+10. [`schdoc_insert_dblib_style`](../examples/schdoc_insert_dblib_style/README.md)
+11. [`schdoc_clean`](../examples/schdoc_clean/README.md)
+12. [`schdoc_svg`](../examples/schdoc_svg/README.md)
+13. [`schdoc_apply_dynamic_template`](../examples/schdoc_apply_dynamic_template/README.md)
 
 See [API patterns](api_patterns/index.md) for cross-cutting mutation and
 ownership guidance.

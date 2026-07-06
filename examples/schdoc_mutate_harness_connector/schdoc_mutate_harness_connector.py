@@ -22,7 +22,13 @@ from altium_monkey import (
 SAMPLE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = SAMPLE_DIR / "output"
 BASELINE_SCHDOC = OUTPUT_DIR / "harness_mutation_input.SchDoc"
+BASELINE_HARNESS = OUTPUT_DIR / "harness_mutation_input.Harness"
 OUTPUT_SCHDOC = OUTPUT_DIR / "harness_mutation_output.SchDoc"
+OUTPUT_HARNESS = OUTPUT_DIR / "harness_mutation_output.Harness"
+
+
+def write_harness_sidecar(path: Path, harness_type: str, entries: list[str]) -> None:
+    path.write_text(f"{harness_type}={','.join(entries)}\r\n", encoding="ascii")
 
 
 def build_input_document() -> AltiumSchDoc:
@@ -88,6 +94,7 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     build_input_document().save(BASELINE_SCHDOC)
+    write_harness_sidecar(BASELINE_HARNESS, "I2C", ["SDA", "SCL"])
 
     schdoc = AltiumSchDoc(BASELINE_SCHDOC)
     for connector in schdoc.harness_connectors:
@@ -148,6 +155,7 @@ def main() -> None:
         port.harness_type = "I2C_CTRL"
 
     schdoc.save(OUTPUT_SCHDOC)
+    write_harness_sidecar(OUTPUT_HARNESS, "I2C_CTRL", ["SDA0", "SCL0"])
 
     reopened = AltiumSchDoc(OUTPUT_SCHDOC)
     reopened_connector = reopened.harness_connectors[0]

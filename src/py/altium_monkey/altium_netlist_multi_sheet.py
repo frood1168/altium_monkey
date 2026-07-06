@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from collections import defaultdict
 from dataclasses import replace
 from copy import copy
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, Optional
 from .altium_netlist_common import _altium_net_total_sort_key
 from .altium_netlist_multi_sheet_support import (
     SheetEntryLink,
+    SheetSymbolRef,
     _bridge_power_keys_by_net_labels,
     _build_child_harness_entry_map,
     _build_port_location_map,
@@ -38,7 +40,14 @@ from .altium_netlist_multi_sheet_support import (
 from .altium_netlist_single_sheet import AltiumNetlistSingleSheetCompiler
 
 if TYPE_CHECKING:
-    from .altium_netlist_model import HierarchyPath, Net, Netlist, Terminal, UnionFind
+    from .altium_netlist_model import (
+        HierarchyPath,
+        Net,
+        Netlist,
+        NetlistComponent,
+        Terminal,
+        UnionFind,
+    )
     from .altium_netlist_options import NetlistOptions
     from .altium_prjpcb import AltiumPrjPcb, NetIdentifierScope
     from .altium_schdoc import AltiumSchDoc
@@ -70,13 +79,13 @@ class AltiumNetlistMultiSheetCompiler:
         self._source_schdocs = list(schdocs)
         self._project = project
         self._options = options
-        self._channel_instances = []
-        self._channel_netlist_map = {}
+        self._channel_instances: list[ChannelInstance] = []
+        self._channel_netlist_map: dict[tuple[int, int], int] = {}
         self._compiled_to_source_sheet_idx = {
             idx: idx for idx in range(len(self._source_schdocs))
         }
-        self._effective_scope = None
-        self._sheet_paths = {}
+        self._effective_scope: NetIdentifierScope | None = None
+        self._sheet_paths: dict[int, HierarchyPath] = {}
         self._hierarchy_links: list[SheetEntryLink] = []
         self._hierarchy_unresolved: list[dict] = []
 
@@ -176,8 +185,11 @@ class AltiumNetlistMultiSheetCompiler:
         from .altium_prjpcb import NetIdentifierScope
 
         options = copy(self._options)
-        options.net_identifier_scope = self._effective_scope
         scope = self._effective_scope
+        if scope is None:
+            scope = self._resolve_automatic_scope()
+            self._effective_scope = scope
+        options.net_identifier_scope = scope
         if scope not in (
             NetIdentifierScope.HIERARCHICAL,
             NetIdentifierScope.STRICT_HIERARCHICAL,
@@ -225,7 +237,7 @@ class AltiumNetlistMultiSheetCompiler:
         """
         Detect multi-channel children.
         """
-        child_refs: dict[str, list[tuple[int, object]]] = defaultdict(list)
+        child_refs: dict[str, list[SheetSymbolRef]] = defaultdict(list)
 
         for parent_idx, schdoc in enumerate(self._schdocs):
             for sheet_sym_info in schdoc.get_sheet_symbols():
@@ -492,7 +504,7 @@ class AltiumNetlistMultiSheetCompiler:
         )
         log.debug("Built hierarchy paths for %s sheets", len(self._sheet_paths))
 
-    def _merge_components(self, sheet_netlists: list["Netlist"]) -> list[object]:
+    def _merge_components(self, sheet_netlists: list["Netlist"]) -> list["NetlistComponent"]:
         """
         Merge components across sheets with Altium-compatible deduplication.
         """
@@ -1118,7 +1130,7 @@ class AltiumNetlistMultiSheetCompiler:
             compiled_idx = self._channel_netlist_map.get(
                 (channel.child_idx, channel.instance_index)
             )
-            path = self._sheet_paths.get(compiled_idx)
+            path = self._sheet_paths.get(compiled_idx) if compiled_idx is not None else None
             room = channel.room
             channels.append(
                 {
@@ -1291,7 +1303,8 @@ class AltiumNetlistMultiSheetCompiler:
                     getattr(schdoc, "signal_harnesses", None),
                     port_location_map,
                 )
-                port_name = bundle_info.get("port_name") or ""
+                port_name_value = bundle_info.get("port_name")
+                port_name = port_name_value if isinstance(port_name_value, str) else ""
                 if not port_name:
                     continue
                 port_ids = [
@@ -1300,7 +1313,12 @@ class AltiumNetlistMultiSheetCompiler:
                     if port.name and port.name.lower() == port_name.lower()
                 ]
                 connector_id = str(getattr(connector, "unique_id", "") or "").strip()
-                signal_harness_ids = bundle_info.get("signal_harness_ids") or []
+                signal_harness_ids_value = bundle_info.get("signal_harness_ids")
+                signal_harness_ids = (
+                    [str(value) for value in signal_harness_ids_value]
+                    if isinstance(signal_harness_ids_value, list)
+                    else []
+                )
                 object_ids = self._unique_nonempty(
                     [*port_ids, *signal_harness_ids, connector_id]
                 )
@@ -1821,6 +1839,9 @@ class AltiumNetlistMultiSheetCompiler:
         other_nets = classified["other_nets"]
 
         scope = self._effective_scope
+        if scope is None:
+            scope = self._resolve_automatic_scope()
+            self._effective_scope = scope
         ports_are_global = scope in (
             NetIdentifierScope.FLAT,
             NetIdentifierScope.GLOBAL,
@@ -2324,7 +2345,7 @@ class AltiumNetlistMultiSheetCompiler:
     @staticmethod
     def _find_harness_port_name(
         connector: object,
-        signal_harnesses: list[object] | None,
+        signal_harnesses: object,
         port_location_map: dict[tuple[int, int], str],
     ) -> str | None:
         """
@@ -2335,12 +2356,13 @@ class AltiumNetlistMultiSheetCompiler:
             signal_harnesses,
             port_location_map,
         )
-        return info.get("port_name") or None
+        port_name = info.get("port_name")
+        return port_name if isinstance(port_name, str) and port_name else None
 
     @staticmethod
     def _find_harness_bundle_info(
         connector: object,
-        signal_harnesses: list[object] | None,
+        signal_harnesses: object,
         port_location_map: dict[tuple[int, int], str],
     ) -> dict[str, object]:
         """
@@ -2352,19 +2374,27 @@ class AltiumNetlistMultiSheetCompiler:
         }
         if not signal_harnesses:
             return result
+        if not isinstance(signal_harnesses, Iterable):
+            return result
 
-        harness_y = connector.location.y - connector.primary_connection_position
-        harness_x_left = connector.location.x
-        harness_x_right = connector.location.x + connector.xsize
+        connector_location = getattr(connector, "location", None)
+        if connector_location is None:
+            return result
+        harness_y = int(getattr(connector_location, "y", 0)) - int(
+            getattr(connector, "primary_connection_position", 0) or 0
+        )
+        harness_x_left = int(getattr(connector_location, "x", 0))
+        harness_x_right = harness_x_left + int(getattr(connector, "xsize", 0) or 0)
         signal_harness_ids = []
         seen_signal_harness_ids = set()
 
         for signal_harness in signal_harnesses:
-            if not signal_harness.points or len(signal_harness.points) < 2:
+            points = getattr(signal_harness, "points", None)
+            if not points or len(points) < 2:
                 continue
 
             touches_connector = False
-            for point in signal_harness.points:
+            for point in points:
                 if point.y == harness_y and (
                     point.x == harness_x_left or point.x == harness_x_right
                 ):
@@ -2380,7 +2410,7 @@ class AltiumNetlistMultiSheetCompiler:
                 seen_signal_harness_ids.add(signal_harness_id)
                 signal_harness_ids.append(signal_harness_id)
 
-            for point in signal_harness.points:
+            for point in points:
                 port_name = port_location_map.get((point.x, point.y))
                 if port_name:
                     result["port_name"] = port_name

@@ -29,8 +29,12 @@ _MECHPAIR_KEY_RE = re.compile(r"MECHPAIR(\d+)L([12])$", re.IGNORECASE)
 _MECHANICAL_LAYER_NAME_RE = re.compile(r"MECHANICAL\s*(\d+)$", re.IGNORECASE)
 
 _BASE_V7_LAYER_FLIP_MAP = {
-    legacy_layer_to_v7_save_id(PcbLayer.TOP): legacy_layer_to_v7_save_id(PcbLayer.BOTTOM),
-    legacy_layer_to_v7_save_id(PcbLayer.BOTTOM): legacy_layer_to_v7_save_id(PcbLayer.TOP),
+    legacy_layer_to_v7_save_id(PcbLayer.TOP): legacy_layer_to_v7_save_id(
+        PcbLayer.BOTTOM
+    ),
+    legacy_layer_to_v7_save_id(PcbLayer.BOTTOM): legacy_layer_to_v7_save_id(
+        PcbLayer.TOP
+    ),
     int(PcbV7SavedLayerId.TOP_OVERLAY): int(PcbV7SavedLayerId.BOTTOM_OVERLAY),
     int(PcbV7SavedLayerId.BOTTOM_OVERLAY): int(PcbV7SavedLayerId.TOP_OVERLAY),
     int(PcbV7SavedLayerId.TOP_PASTE): int(PcbV7SavedLayerId.BOTTOM_PASTE),
@@ -61,7 +65,9 @@ def _mechanical_name_to_v7_save_id(layer_name: Any) -> int | None:
     return pcb_mechanical_layer_number_to_v7_saved_layer_id(mech_number)
 
 
-def _build_component_layer_flip_map(board_raw_record: dict[str, Any] | None) -> dict[int, int]:
+def _build_component_layer_flip_map(
+    board_raw_record: dict[str, Any] | None,
+) -> dict[int, int]:
     layer_flip_map = dict(_BASE_LAYER_FLIP_MAP)
     if not isinstance(board_raw_record, dict):
         return layer_flip_map
@@ -88,7 +94,9 @@ def _build_component_layer_flip_map(board_raw_record: dict[str, Any] | None) -> 
     return layer_flip_map
 
 
-def _build_component_v7_layer_flip_map(board_raw_record: dict[str, Any] | None) -> dict[int, int]:
+def _build_component_v7_layer_flip_map(
+    board_raw_record: dict[str, Any] | None,
+) -> dict[int, int]:
     flip_map = dict(_BASE_V7_LAYER_FLIP_MAP)
     if not isinstance(board_raw_record, dict):
         return flip_map
@@ -120,7 +128,7 @@ def _flip_layer(layer: int, layer_flip_map: dict[int, int] | None = None) -> int
     return flip_map.get(layer, layer)
 
 
-def _clamp_i32(value: int) -> int:
+def _clamp_i32(value: int | float) -> int:
     return max(min(int(value), 0x7FFFFFFF), -0x80000000)
 
 
@@ -178,7 +186,7 @@ def _sync_saved_layer_id(
             return
         legacy_layer = _legacy_layer_id_from_v7_save_id(saved_layer_id)
         if legacy_layer is not None:
-            prim.layer = legacy_layer
+            setattr(prim, "layer", legacy_layer)
 
     try:
         current = getattr(prim, attr_name)
@@ -206,13 +214,15 @@ def _sync_saved_layer_id(
 def _sync_pad_saved_layer_state(
     pad: object,
     flipped: bool,
-    v7_layer_flip_map: dict[int, int],
+    v7_layer_flip_map: dict[int, int] | None = None,
 ) -> None:
     """
     Pads carry a hidden saved-layer field outside the visible legacy layer byte.
     """
     if flipped and hasattr(pad, "layer"):
-        pad.layer = _flip_layer(int(getattr(pad, "layer")), _BASE_LAYER_FLIP_MAP)
+        setattr(
+            pad, "layer", _flip_layer(int(getattr(pad, "layer")), _BASE_LAYER_FLIP_MAP)
+        )
 
     if hasattr(pad, "layer_v7_save_id"):
         _sync_saved_layer_id(
@@ -223,6 +233,10 @@ def _sync_pad_saved_layer_state(
         )
     elif hasattr(pad, "layer"):
         try:
-            pad.layer_v7_save_id = legacy_layer_to_v7_save_id(int(getattr(pad, "layer")))
+            setattr(
+                pad,
+                "layer_v7_save_id",
+                legacy_layer_to_v7_save_id(int(getattr(pad, "layer"))),
+            )
         except Exception:
             pass

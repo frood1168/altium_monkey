@@ -4,6 +4,8 @@ Shared schematic display-mode filtering helpers.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 
 _MISSING_OWNER_PART_DISPLAY_MODE = object()
 
@@ -24,4 +26,4 @@ def record_belongs_to_display_mode(record: object, display_mode: int | None) -> 
         return True
     if record_mode is None:
         record_mode = 0
-    return int(record_mode) == int(display_mode)
+    return int(cast(Any, record_mode)) == int(display_mode)

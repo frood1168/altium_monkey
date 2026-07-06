@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 from .altium_record_sch__label import AltiumSchLabel
 from .altium_record_types import SchRecordType
-from .altium_serializer import AltiumSerializer, CaseMode, Fields
+from .altium_serializer import AltiumSerializer, Fields
 from .altium_sch_record_helpers import detect_case_mode_method_from_uppercase_fields
 
 

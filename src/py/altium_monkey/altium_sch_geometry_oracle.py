@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -74,7 +75,7 @@ def _signed_int32(value: int) -> int:
 def _oracle_color_raw_from_win32(color_raw: int, *, alpha: int = 0xFF) -> int:
     """
     Convert parsed schematic Win32 color (0x00BBGGRR) to GeometryMaker color raw.
-    
+
     The geometry oracle serializes colors as signed 32-bit integers whose low
     24 bits match the rendered RGB hex form.
     """
@@ -173,7 +174,9 @@ def wrap_record_operations(
     Wrap record-local operations in the standard GeometryMaker group envelope.
     """
     return [
-        SchGeometryOp.push_transform([1, 0, 0, 1, 0, -(units_per_px * workspace_height_px)]),
+        SchGeometryOp.push_transform(
+            [1, 0, 0, 1, 0, -(units_per_px * workspace_height_px)]
+        ),
         SchGeometryOp.begin_group(),
         SchGeometryOp.begin_group("DocumentMainGroup"),
         SchGeometryOp.begin_group(unique_id),
@@ -229,7 +232,9 @@ def svg_coord_to_geometry(
     Convert a screen-space SVG coordinate to oracle geometry units.
     """
     x_units = float(x_px) * int(units_per_px)
-    y_units = (float(y_px) - float(sheet_height_px)) * int(units_per_px) + int(units_per_px) * int(workspace_height_px)
+    y_units = (float(y_px) - float(sheet_height_px)) * int(units_per_px) + int(
+        units_per_px
+    ) * int(workspace_height_px)
     return (x_units, y_units)
 
 
@@ -273,7 +278,7 @@ def make_text_with_overline_operations(
 ) -> list["SchGeometryOp"]:
     """
     Build oracle-aligned text operations, including individual overline segments.
-    
+
     GeometryMaker stores text coordinates offset from the rendered baseline by the
     truncated baseline font size. Overline segments live on that same geometry Y.
     """
@@ -284,7 +289,9 @@ def make_text_with_overline_operations(
         return []
 
     baseline_font_size = float(int(font_size_px))
-    geometry_step = float(geometry_step_px) if geometry_step_px is not None else baseline_font_size
+    geometry_step = (
+        float(geometry_step_px) if geometry_step_px is not None else baseline_font_size
+    )
     theta = 0.017453292519943295 * float(rotation_deg)
     geometry_x_px = float(baseline_x_px) + math.sin(theta) * geometry_step
     geometry_y_px = float(baseline_y_px) - math.cos(theta) * geometry_step
@@ -401,7 +408,10 @@ class SchGeometryOp:
 
     @classmethod
     def push_transform(cls, matrix: list[float] | tuple[float, ...]) -> SchGeometryOp:
-        return cls(kind=SchGeometryOpKind.PUSH_TRANSFORM, payload={"matrix": [float(v) for v in matrix]})
+        return cls(
+            kind=SchGeometryOpKind.PUSH_TRANSFORM,
+            payload={"matrix": [float(v) for v in matrix]},
+        )
 
     @classmethod
     def pop_transform(cls) -> SchGeometryOp:
@@ -409,7 +419,9 @@ class SchGeometryOp:
 
     @classmethod
     def begin_group(cls, parameters: str = "") -> SchGeometryOp:
-        return cls(kind=SchGeometryOpKind.BEGIN_GROUP, payload={"parameters": str(parameters)})
+        return cls(
+            kind=SchGeometryOpKind.BEGIN_GROUP, payload={"parameters": str(parameters)}
+        )
 
     @classmethod
     def end_group(cls) -> SchGeometryOp:
@@ -468,7 +480,7 @@ class SchGeometryOp:
     @classmethod
     def lines(
         cls,
-        points: list[list[float] | tuple[float, float]],
+        points: Sequence[Sequence[float]],
         *,
         pen: dict[str, Any] | None = None,
     ) -> SchGeometryOp:
@@ -526,7 +538,7 @@ class SchGeometryOp:
     @classmethod
     def polygons(
         cls,
-        polygons: list[list[list[float] | tuple[float, float]]],
+        polygons: Sequence[Sequence[Sequence[float]]],
         *,
         brush: dict[str, Any] | None = None,
         pen: dict[str, Any] | None = None,
@@ -576,10 +588,14 @@ class SchGeometryOp:
         )
 
     def kind_str(self) -> str:
-        return self.kind.value if isinstance(self.kind, SchGeometryOpKind) else str(self.kind)
+        return (
+            self.kind.value
+            if isinstance(self.kind, SchGeometryOpKind)
+            else str(self.kind)
+        )
 
     def to_dict(self, *, index: int | None = None) -> dict[str, Any]:
-        data = {"type": self.kind_str()}
+        data: dict[str, Any] = {"type": self.kind_str()}
         if index is not None:
             data["index"] = int(index)
         data.update(copy.deepcopy(self.payload))
@@ -612,7 +628,11 @@ class SchGeometryRecord:
             kind=str(extras.pop("kind", "")),
             object_id=str(extras.pop("object_id", "")),
             bounds=bounds,
-            operations=[SchGeometryOp.from_dict(op) for op in operations_data if isinstance(op, dict)],
+            operations=[
+                SchGeometryOp.from_dict(op)
+                for op in operations_data
+                if isinstance(op, dict)
+            ],
             extras=extras,
         )
 
@@ -626,7 +646,9 @@ class SchGeometryRecord:
         if self.bounds is not None:
             data["bounds"] = self.bounds.to_dict()
         data["operation_count"] = len(self.operations)
-        data["operations"] = [op.to_dict(index=index) for index, op in enumerate(self.operations)]
+        data["operations"] = [
+            op.to_dict(index=index) for index, op in enumerate(self.operations)
+        ]
         data.update(copy.deepcopy(self.extras))
         return data
 
@@ -680,17 +702,31 @@ class SchGeometryDocument:
 
         return cls(
             records=records,
-            source_path=str(data.get("source_path")) if data.get("source_path") is not None else None,
+            source_path=str(data.get("source_path"))
+            if data.get("source_path") is not None
+            else None,
             source_kind=str(data.get("source_kind", "SCH")),
-            include_kinds=[str(kind) for kind in (data.get("include_kinds") or ["all"])],
-            generated_utc=str(data.get("generated_utc")) if data.get("generated_utc") is not None else None,
+            include_kinds=[
+                str(kind) for kind in (data.get("include_kinds") or ["all"])
+            ],
+            generated_utc=str(data.get("generated_utc"))
+            if data.get("generated_utc") is not None
+            else None,
             failed_renders=int(data.get("failed_renders", 0) or 0),
-            coordinate_space=copy.deepcopy(coordinate_space) if isinstance(coordinate_space, dict) else None,
+            coordinate_space=copy.deepcopy(coordinate_space)
+            if isinstance(coordinate_space, dict)
+            else None,
             canvas=copy.deepcopy(canvas) if isinstance(canvas, dict) else None,
             document_id=str(document_id) if document_id is not None else None,
-            workspace_background_color=str(workspace_background_color) if workspace_background_color else None,
-            export_provenance=copy.deepcopy(export_provenance) if isinstance(export_provenance, dict) else None,
-            render_hints=copy.deepcopy(render_hints) if isinstance(render_hints, dict) else None,
+            workspace_background_color=str(workspace_background_color)
+            if workspace_background_color
+            else None,
+            export_provenance=copy.deepcopy(export_provenance)
+            if isinstance(export_provenance, dict)
+            else None,
+            render_hints=copy.deepcopy(render_hints)
+            if isinstance(render_hints, dict)
+            else None,
             extras=extras,
         )
 
@@ -789,4 +825,3 @@ class SchGeometryOracle(SchGeometryDocument):
     """
     Alias for the external oracle payload wrapper.
     """
-

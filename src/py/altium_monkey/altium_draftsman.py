@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from enum import Enum, IntEnum, IntFlag
 from importlib import resources
 from pathlib import Path
-from typing import Self
+from collections.abc import Sequence
+from typing import Self, TypeVar
 from uuid import uuid4
 
-from lxml import etree
+import lxml.etree as etree
 
 from .altium_object_collection import ObjectCollection
 from .altium_draftsman_container import (
@@ -41,6 +42,7 @@ def _format_float(value: float) -> str:
 DRAFTSMAN_POINTS_PER_INCH = 96.0
 DRAFTSMAN_MM_PER_INCH = 25.4
 DRAFTSMAN_POINTS_PER_MM = DRAFTSMAN_POINTS_PER_INCH / DRAFTSMAN_MM_PER_INCH
+_DraftsmanEnumT = TypeVar("_DraftsmanEnumT", bound=Enum)
 
 
 def draftsman_points_from_mm(value_mm: float) -> float:
@@ -139,8 +141,8 @@ def _new_note_element_xml(
     return element
 
 
-def _read_only_collection(items: list[object]) -> ObjectCollection:
-    return ObjectCollection(items).where()
+def _read_only_collection(items: Sequence[object]) -> ObjectCollection:
+    return ObjectCollection(list(items)).where()
 
 
 _BLANK_PROFILE_RESOURCES = {
@@ -197,7 +199,7 @@ class DraftsmanNoteBorderStyle(IntEnum):
         cls,
         border_style: str | None,
         border_style_v2: int | None,
-    ) -> Self:
+    ) -> "DraftsmanNoteBorderStyle":
         """Resolve a style from current V2 data with legacy fallback."""
 
         if border_style_v2 is not None:
@@ -219,7 +221,7 @@ class DraftsmanHorizontalAlignment(Enum):
     STRETCH = "Stretch"
 
     @classmethod
-    def from_xml_text(cls, value: str | None) -> Self | None:
+    def from_xml_text(cls, value: str | None) -> "DraftsmanHorizontalAlignment | None":
         """Resolve a horizontal alignment from an XML label."""
 
         return _enum_from_xml_text(cls, value)
@@ -234,7 +236,7 @@ class DraftsmanVerticalAlignment(Enum):
     STRETCH = "Stretch"
 
     @classmethod
-    def from_xml_text(cls, value: str | None) -> Self | None:
+    def from_xml_text(cls, value: str | None) -> "DraftsmanVerticalAlignment | None":
         """Resolve a vertical alignment from an XML label."""
 
         return _enum_from_xml_text(cls, value)
@@ -1495,9 +1497,11 @@ class AltiumDraftsmanDocument:
         source_path: str | Path | None = None,
         source_compression: DraftsmanSourceCompression = "raw",
     ) -> None:
-        self._root = root
-        self._source_path = Path(source_path) if source_path is not None else None
-        self._source_compression = source_compression
+        self._root: etree._Element = root
+        self._source_path: Path | None = (
+            Path(source_path) if source_path is not None else None
+        )
+        self._source_compression: DraftsmanSourceCompression = source_compression
 
     @classmethod
     def from_file(cls, path: str | Path) -> Self:
@@ -2035,7 +2039,10 @@ def _decoration_flags_to_text(decorations: DraftsmanFontDecoration) -> str:
     return ", ".join(names)
 
 
-def _enum_from_xml_text(enum_cls: type[Enum], value: str | None) -> Enum | None:
+def _enum_from_xml_text(
+    enum_cls: type[_DraftsmanEnumT],
+    value: str | None,
+) -> _DraftsmanEnumT | None:
     if value is None:
         return None
     for member in enum_cls:

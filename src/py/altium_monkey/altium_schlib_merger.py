@@ -14,6 +14,46 @@ from .altium_schlib import AltiumSchLib
 
 log = logging.getLogger(__name__)
 
+_IMPLEMENTATION_LIST_RECORD = "44"
+_IMPLEMENTATION_RECORD = "45"
+_IMPLEMENTATION_CHILD_RECORDS = {"46", "47", "48"}
+
+
+def _record_type(record: dict[str, object]) -> str:
+    return str(record.get("RECORD", ""))
+
+
+def _normalize_merge_raw_records(
+    records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """
+    Normalize orphan implementation children the way Altium's merge exporter does.
+
+    Some legacy single-symbol SchLib inputs contain a trailing implementation
+    child record without a corresponding Implementation List/Implementation
+    group. Altium's merge output replaces that orphan tail with an
+    Implementation List marker.
+    """
+    has_implementation_list = any(
+        _record_type(record) == _IMPLEMENTATION_LIST_RECORD for record in records
+    )
+    has_implementation = any(
+        _record_type(record) == _IMPLEMENTATION_RECORD for record in records
+    )
+    has_orphan_child = any(
+        _record_type(record) in _IMPLEMENTATION_CHILD_RECORDS for record in records
+    )
+    if has_implementation_list or has_implementation or not has_orphan_child:
+        return records
+
+    normalized = [
+        record
+        for record in records
+        if _record_type(record) not in _IMPLEMENTATION_CHILD_RECORDS
+    ]
+    normalized.append({"RECORD": _IMPLEMENTATION_LIST_RECORD})
+    return normalized
+
 
 def merge_schlibs(
     input_paths: list[Path],
@@ -88,7 +128,7 @@ def merge_schlibs(
             new_sym.component_record = symbol.component_record
             for obj in symbol.objects:
                 new_sym.objects.append(obj)
-            new_sym.raw_records = symbol.raw_records
+            new_sym.raw_records = _normalize_merge_raw_records(symbol.raw_records)
             new_sym._original_streams = dict(symbol._original_streams)
 
             # Copy embedded images
@@ -100,6 +140,7 @@ def merge_schlibs(
         if verbose:
             log.info(f"  Added {len(source.symbols)} symbols from {path.name}")
 
+    merged._weight_policy = "serialized_data_records"
     merged.save(output_path, sync_pin_text_data=True)
 
     if verbose:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import struct
 import uuid
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence, cast
 
 from .altium_pcb_enums import (
     PcbBarcodeKind,
@@ -23,6 +23,10 @@ from .altium_record_types import PcbLayer
 from .altium_resolved_layer_stack import legacy_layer_to_v7_save_id
 from .altium_utilities import parse_widestrings6
 
+if TYPE_CHECKING:
+    from .altium_ole import AltiumOleFile
+    from .altium_text_to_polygon import TrueTypeTextRenderer
+
 # The 93-byte barcode block is reused for ordinary text records too. These
 # defaults are the stable builder values for simple authored PCB text records.
 PCB_TEXT_BARCODE_FULL_WIDTH_MILS = 1050.0
@@ -30,7 +34,7 @@ PCB_TEXT_BARCODE_FULL_HEIGHT_MILS = 210.0
 PCB_TEXT_BARCODE_MARGIN_MILS = 20.0
 PCB_TEXT_BARCODE_MIN_WIDTH_MILS = 0.0
 
-_TT_RENDERER = None
+_TT_RENDERER: "TrueTypeTextRenderer | None" = None
 
 PcbTextKindInput = str | PcbTextKind
 PcbStrokeFontTypeInput = int | str
@@ -177,7 +181,8 @@ def parse_widestrings6_stream(data: bytes) -> dict[int, str]:
                 raise KeyError(entry)
             return self.payload
 
-    return dict(parse_widestrings6(_WideStringsStreamAdapter(data)))
+    adapter = cast("AltiumOleFile", _WideStringsStreamAdapter(data))
+    return dict(parse_widestrings6(adapter))
 
 
 def build_widestrings6_stream(table: Mapping[int, str]) -> bytes:
@@ -451,7 +456,7 @@ def _barcode_module_count(*, text: str, barcode_kind: int) -> int:
     return max(1, len(text))
 
 
-def _get_truetype_renderer() -> object:
+def _get_truetype_renderer() -> "TrueTypeTextRenderer":
     global _TT_RENDERER
     if _TT_RENDERER is None:
         from .altium_text_to_polygon import TrueTypeTextRenderer

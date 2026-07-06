@@ -6,9 +6,10 @@ import html
 import logging
 import math
 import struct
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from .altium_pcb_enums import PadShape
+from .altium_pcb_pad_state import AltiumPadTShape
 from .altium_pcb_mask_paste_rules import (
     get_pad_mask_expansion_iu,
     get_pad_paste_expansion_iu,
@@ -28,9 +29,33 @@ if TYPE_CHECKING:
 
 
 _MIL_TO_MM = 0.0254
+_MASK_EXPANSION_MODE_MANUAL = 2
 
 log = logging.getLogger(__name__)
 
+
+class _PadSvgGeometryState(TypedDict):
+    use_side_expansion: bool
+    geometry_layer: PcbLayer
+    expansion_iu: int
+    base_width_mils: float
+    base_height_mils: float
+    width_mm: float
+    height_mm: float
+    cx: float
+    cy: float
+    half_w: float
+    half_h: float
+    shape: str | None
+    corner_radius_default_percent: int
+    rotation: float
+
+
+_PAD_SVG_SHAPE_CIRCLE = "circle"
+_PAD_SVG_SHAPE_RECTANGLE = "rectangle"
+_PAD_SVG_SHAPE_OCTAGONAL = "octagonal"
+_PAD_SVG_SHAPE_ROUNDED_RECTANGLE = "rounded_rectangle"
+_LEGACY_ROUNDED_CORNER_PERCENT = 50
 
 # SubRecord 6 alt_shape values that override the base shape from SubRecord 5.
 # Binary format stores a combined shape+subkind encoding; value 9 = RoundedRectangle.
@@ -41,6 +66,44 @@ _PAD_HOLE_POSITIVE_TOLERANCE_OFFSET = 162
 _PAD_HOLE_NEGATIVE_TOLERANCE_OFFSET = 166
 _PAD_SUBRECORD5_EXTENDED_START = 61
 _PAD_SUBRECORD5_MODERN_LENGTH = 202
+_PAD_ASSY_TESTPOINT_TOP_OFFSET = 118
+_PAD_ASSY_TESTPOINT_BOTTOM_OFFSET = 119
+_PAD_FLAGS1_SELECTED = 0x01
+_PAD_FLAGS1_USER_ROUTED = 0x08
+_PAD_FLAGS1_TENT_TOP = 0x20
+_PAD_FLAGS1_TENT_BOTTOM = 0x40
+_PAD_FLAGS1_FAB_TESTPOINT_TOP = 0x80
+_PAD_FLAGS2_FAB_TESTPOINT_BOTTOM = 0x01
+_PAD_ASSY_TESTPOINT_BYTE_MASK = 0x01
+
+
+def _svg_side_expansion_iu(
+    pad: object,
+    ctx: "PcbSvgRenderContext",
+    layer: PcbLayer,
+) -> int:
+    if getattr(ctx.options, "footprint_rule_mask_expansion_zero", False):
+        if layer.is_solder_mask():
+            if (
+                bool(getattr(pad, "_has_mask_expansion", False))
+                and int(getattr(pad, "soldermask_expansion_mode", 0) or 0)
+                == _MASK_EXPANSION_MODE_MANUAL
+            ):
+                return int(getattr(pad, "soldermask_expansion_manual", 0) or 0)
+            return 0
+        if layer.is_paste_mask():
+            if (
+                bool(getattr(pad, "_has_mask_expansion", False))
+                and int(getattr(pad, "pastemask_expansion_mode", 0) or 0)
+                == _MASK_EXPANSION_MODE_MANUAL
+            ):
+                return int(getattr(pad, "pastemask_expansion_manual", 0) or 0)
+            return 0
+    if layer.is_solder_mask():
+        return get_pad_mask_expansion_iu(pad)
+    if layer.is_paste_mask():
+        return get_pad_paste_expansion_iu(pad)
+    return 0
 
 
 class AltiumPcbPad(PcbGraphicalObject):
@@ -144,7 +207,8 @@ class AltiumPcbPad(PcbGraphicalObject):
         self.alt_shape: list[int] = []  # 32 entries (alt shape enum, 9=RoundRect)
         self.corner_radius: list[int] = []  # 32 entries (percentage, 0-100)
         # Optional extended full-stack entries (SubRecord 6 tail block, when present).
-        # Tuple format: (layer_code, mode_flags, enabled, size_x_iu, size_y_iu, corner_pct)
+        # Tuple format:
+        # (layer_code, mode_flags, shape_value, size_x_iu, size_y_iu, corner_pct)
         self.full_stack_layer_entries: list[tuple[int, int, int, int, int, int]] = []
         # Semantic custom-pad model attached by higher-level document/library parsers.
         self.custom_shape = None
@@ -411,16 +475,14 @@ class AltiumPcbPad(PcbGraphicalObject):
         # Decode flag bits (from record format binary header layout APAD6 struct)
         flags1 = self._flags & 0xFF  # Low byte (offset 1)
         flags2 = (self._flags >> 8) & 0xFF  # High byte (offset 2)
-        self._flags1_bit0 = flags1 & 0x01  # bit 0 (preserved)
-        self.user_routed = (flags1 & 0x08) != 0  # bit 3 (shared with Track/Fill/Arc)
-        self.is_tenting_top = (flags1 & 0x20) != 0  # bit 5
-        self.is_tenting_bottom = (flags1 & 0x40) != 0  # bit 6
-        self.is_test_fab_top = (flags1 & 0x10) != 0  # bit 4
-        self.is_test_fab_bottom = (flags2 & 0x01) != 0  # bit 0 of high byte
-        # Assembly test points (DFT metadata; does not imply copper suppression)
-        # bit 7 (0x80): set on tagged assembly test pads
-        self.is_assy_test_point_top = (flags1 & 0x80) != 0  # bit 7
-        self.is_assy_test_point_bottom = (flags2 & 0x02) != 0  # bit 1 of high byte
+        self._flags1_bit0 = flags1 & _PAD_FLAGS1_SELECTED
+        self.user_routed = (flags1 & _PAD_FLAGS1_USER_ROUTED) != 0
+        self.is_tenting_top = (flags1 & _PAD_FLAGS1_TENT_TOP) != 0
+        self.is_tenting_bottom = (flags1 & _PAD_FLAGS1_TENT_BOTTOM) != 0
+        self.is_test_fab_top = (flags1 & _PAD_FLAGS1_FAB_TESTPOINT_TOP) != 0
+        self.is_test_fab_bottom = (flags2 & _PAD_FLAGS2_FAB_TESTPOINT_BOTTOM) != 0
+        self.is_assy_test_point_top = False
+        self.is_assy_test_point_bottom = False
         pos += 2
 
         # Net index (offset 3-4)
@@ -588,6 +650,16 @@ class AltiumPcbPad(PcbGraphicalObject):
         if len(content) >= 118:
             self.layer_v7_save_id = struct.unpack("<I", content[114:118])[0]
 
+        if len(content) > _PAD_ASSY_TESTPOINT_TOP_OFFSET:
+            self.is_assy_test_point_top = (
+                content[_PAD_ASSY_TESTPOINT_TOP_OFFSET] & _PAD_ASSY_TESTPOINT_BYTE_MASK
+            ) != 0
+        if len(content) > _PAD_ASSY_TESTPOINT_BOTTOM_OFFSET:
+            self.is_assy_test_point_bottom = (
+                content[_PAD_ASSY_TESTPOINT_BOTTOM_OFFSET]
+                & _PAD_ASSY_TESTPOINT_BYTE_MASK
+            ) != 0
+
         if len(content) >= _PAD_HOLE_NEGATIVE_TOLERANCE_OFFSET + 4:
             self._hole_positive_tolerance = struct.unpack(
                 "<i",
@@ -706,7 +778,7 @@ class AltiumPcbPad(PcbGraphicalObject):
             # - entry_count * entry_stride bytes
             #   entry[0:2]   int16 layer code
             #   entry[2:4]   uint16 mode/flags
-            #   entry[4]     uint8 enabled
+            #   entry[4]     uint8 raw pad-shape value
             #   entry[5:9]   int32 size X (internal units)
             #   entry[9:13]  int32 size Y (internal units)
             #   entry[13:15] uint16 corner % / mode payload
@@ -749,12 +821,12 @@ class AltiumPcbPad(PcbGraphicalObject):
             rec = content[pos : pos + stride]
             layer_code = struct.unpack("<h", rec[0:2])[0]
             mode_flags = struct.unpack("<H", rec[2:4])[0]
-            enabled = rec[4]
+            shape_value = rec[4]
             size_x = struct.unpack("<i", rec[5:9])[0]
             size_y = struct.unpack("<i", rec[9:13])[0]
             corner_pct = struct.unpack("<H", rec[13:15])[0]
             entries.append(
-                (layer_code, mode_flags, enabled, size_x, size_y, corner_pct)
+                (layer_code, mode_flags, shape_value, size_x, size_y, corner_pct)
             )
             pos += stride
 
@@ -842,6 +914,8 @@ class AltiumPcbPad(PcbGraphicalObject):
             int(self.cache_solder_mask_expansion_valid or 0),
             int(self.pad_user_union_index or 0),
             0 if self.layer_v7_save_id is None else int(self.layer_v7_save_id),
+            bool(self.is_assy_test_point_top),
+            bool(self.is_assy_test_point_bottom),
             bool(self._has_hole_tolerances),
             int(self._hole_positive_tolerance),
             int(self._hole_negative_tolerance),
@@ -860,18 +934,18 @@ class AltiumPcbPad(PcbGraphicalObject):
                 return flag_byte | mask
             return flag_byte & (~mask & 0xFF)
 
-        flags1 = _set(flags1, 0x08, bool(self.user_routed))
-        flags1 = _set(flags1, 0x10, bool(self.is_test_fab_top))
-        flags1 = _set(flags1, 0x20, bool(self.is_tenting_top))
-        flags1 = _set(flags1, 0x40, bool(self.is_tenting_bottom))
-        flags1 = _set(flags1, 0x80, bool(self.is_assy_test_point_top))
-        flags2 = _set(flags2, 0x01, bool(self.is_test_fab_bottom))
-        flags2 = _set(flags2, 0x02, bool(self.is_assy_test_point_bottom))
+        flags1 = _set(flags1, _PAD_FLAGS1_USER_ROUTED, bool(self.user_routed))
+        flags1 = _set(flags1, _PAD_FLAGS1_TENT_TOP, bool(self.is_tenting_top))
+        flags1 = _set(flags1, _PAD_FLAGS1_TENT_BOTTOM, bool(self.is_tenting_bottom))
+        flags1 = _set(flags1, _PAD_FLAGS1_FAB_TESTPOINT_TOP, bool(self.is_test_fab_top))
+        flags2 = _set(
+            flags2, _PAD_FLAGS2_FAB_TESTPOINT_BOTTOM, bool(self.is_test_fab_bottom)
+        )
 
         if self._flags1_bit0:
-            flags1 |= 0x01
+            flags1 |= _PAD_FLAGS1_SELECTED
         else:
-            flags1 &= 0xFE
+            flags1 &= ~_PAD_FLAGS1_SELECTED & 0xFF
 
         return flags1 | (flags2 << 8)
 
@@ -893,6 +967,11 @@ class AltiumPcbPad(PcbGraphicalObject):
             ext_data = bytearray(b"\x00" * 57)
 
         min_len = 57
+        if self.is_assy_test_point_top or self.is_assy_test_point_bottom:
+            min_len = max(
+                min_len,
+                _PAD_ASSY_TESTPOINT_BOTTOM_OFFSET - _PAD_SUBRECORD5_EXTENDED_START + 1,
+            )
         if self._has_hole_tolerances:
             min_len = max(
                 min_len,
@@ -935,6 +1014,22 @@ class AltiumPcbPad(PcbGraphicalObject):
         struct.pack_into(
             "<I", ext_data, 53, int(self.layer_v7_save_id or 0) & 0xFFFFFFFF
         )
+        if len(ext_data) > (
+            _PAD_ASSY_TESTPOINT_TOP_OFFSET - _PAD_SUBRECORD5_EXTENDED_START
+        ):
+            top_offset = _PAD_ASSY_TESTPOINT_TOP_OFFSET - _PAD_SUBRECORD5_EXTENDED_START
+            ext_data[top_offset] = (
+                ext_data[top_offset] & ~_PAD_ASSY_TESTPOINT_BYTE_MASK
+            ) | int(bool(self.is_assy_test_point_top))
+        if len(ext_data) > (
+            _PAD_ASSY_TESTPOINT_BOTTOM_OFFSET - _PAD_SUBRECORD5_EXTENDED_START
+        ):
+            bottom_offset = (
+                _PAD_ASSY_TESTPOINT_BOTTOM_OFFSET - _PAD_SUBRECORD5_EXTENDED_START
+            )
+            ext_data[bottom_offset] = (
+                ext_data[bottom_offset] & ~_PAD_ASSY_TESTPOINT_BYTE_MASK
+            ) | int(bool(self.is_assy_test_point_bottom))
         if self._has_hole_tolerances:
             pos_ext_offset = (
                 _PAD_HOLE_POSITIVE_TOLERANCE_OFFSET - _PAD_SUBRECORD5_EXTENDED_START
@@ -1025,7 +1120,7 @@ class AltiumPcbPad(PcbGraphicalObject):
             for (
                 layer_code,
                 mode_flags,
-                enabled,
+                shape_value,
                 size_x,
                 size_y,
                 corner_pct,
@@ -1033,7 +1128,7 @@ class AltiumPcbPad(PcbGraphicalObject):
                 entry = bytearray()
                 entry.extend(struct.pack("<h", int(layer_code)))
                 entry.extend(struct.pack("<H", int(mode_flags) & 0xFFFF))
-                entry.append(int(enabled) & 0xFF)
+                entry.append(int(shape_value) & 0xFF)
                 entry.extend(struct.pack("<i", int(size_x)))
                 entry.extend(struct.pack("<i", int(size_y)))
                 entry.extend(struct.pack("<H", int(corner_pct) & 0xFFFF))
@@ -1569,55 +1664,118 @@ class AltiumPcbPad(PcbGraphicalObject):
         h = int(self.top_height or self.height)
         return w, h
 
-    def _layer_shape(self, layer: PcbLayer) -> int:
-        """
-        Get effective pad shape for the requested layer.
-        """
+    def _layer_shape_body_layer(self, layer: PcbLayer) -> PcbLayer:
         if layer in (
             PcbLayer.TOP_PASTE,
             PcbLayer.TOP_SOLDER,
             PcbLayer.BOTTOM_PASTE,
             PcbLayer.BOTTOM_SOLDER,
         ):
-            layer = self._side_base_layer(layer)
+            return self._side_base_layer(layer)
+        return layer
+
+    def _layer_alt_shape_override(self, layer: PcbLayer) -> int | None:
+        layer = self._layer_shape_body_layer(layer)
 
         layer_idx = layer.value - 1
         if 0 <= layer_idx < len(self.alt_shape):
             override = _ALT_SHAPE_OVERRIDE.get(self.alt_shape[layer_idx])
             if override is not None:
                 return int(override)
+        return None
+
+    def _layer_raw_tshape(self, layer: PcbLayer) -> int:
+        layer = self._layer_shape_body_layer(layer)
 
         if layer == PcbLayer.BOTTOM:
-            return int(self.bot_shape or self.top_shape or PadShape.CIRCLE)
+            return int(self.bot_shape)
         if layer.is_copper() and 2 <= layer.value <= 31:
             idx = layer.value - 2
             if idx < len(self.inner_shape):
-                return int(
-                    self.inner_shape[idx]
-                    or self.mid_shape
-                    or self.top_shape
-                    or PadShape.CIRCLE
-                )
-            return int(self.mid_shape or self.top_shape or PadShape.CIRCLE)
-        return int(self.top_shape or PadShape.CIRCLE)
+                inner_shape = int(self.inner_shape[idx])
+                if inner_shape != 0:
+                    return inner_shape
+            return int(self.mid_shape)
+        return int(self.top_shape)
+
+    def _layer_shape(self, layer: PcbLayer) -> int:
+        """
+        Get effective pad shape for the requested layer.
+        """
+        override = self._layer_alt_shape_override(layer)
+        if override is not None:
+            return override
+        return self._layer_raw_tshape(layer)
+
+    def _resolve_layer_svg_shape(
+        self,
+        layer: PcbLayer,
+        *,
+        width_iu: int,
+        height_iu: int,
+    ) -> tuple[str | None, int]:
+        override = self._layer_alt_shape_override(layer)
+        if override is not None:
+            if override == int(PadShape.ROUNDED_RECTANGLE):
+                return (_PAD_SVG_SHAPE_ROUNDED_RECTANGLE, 0)
+            if override == int(PadShape.RECTANGLE):
+                return (_PAD_SVG_SHAPE_RECTANGLE, 0)
+            if override == int(PadShape.OCTAGONAL):
+                return (_PAD_SVG_SHAPE_OCTAGONAL, 0)
+            return (None, 0)
+
+        raw_shape = self._layer_raw_tshape(layer)
+        try:
+            tshape = AltiumPadTShape(raw_shape)
+        except ValueError:
+            return (None, 0)
+
+        if tshape == AltiumPadTShape.eRectangular:
+            return (_PAD_SVG_SHAPE_RECTANGLE, 0)
+        if tshape == AltiumPadTShape.eOctagonal:
+            return (_PAD_SVG_SHAPE_OCTAGONAL, 0)
+        if tshape == AltiumPadTShape.eRounded:
+            if int(width_iu) == int(height_iu):
+                return (_PAD_SVG_SHAPE_CIRCLE, 0)
+            return (_PAD_SVG_SHAPE_ROUNDED_RECTANGLE, _LEGACY_ROUNDED_CORNER_PERCENT)
+        if tshape == AltiumPadTShape.eRoundedRectangular:
+            return (_PAD_SVG_SHAPE_ROUNDED_RECTANGLE, _LEGACY_ROUNDED_CORNER_PERCENT)
+
+        return (None, 0)
 
     def _layer_corner_radius_mils(
-        self, layer: PcbLayer, width_mils: float, height_mils: float
+        self,
+        layer: PcbLayer,
+        width_mils: float,
+        height_mils: float,
+        *,
+        default_percent: int = 0,
     ) -> float:
         """
         Get corner radius in mils for rounded-rectangle pads.
         """
         pct = 0
+        explicit_pct = False
+        source_pct = False
         layer_idx = layer.value - 1
         if 0 <= layer_idx < len(self.corner_radius):
             pct = int(self.corner_radius[layer_idx])
+            explicit_pct = True
+            source_pct = pct > 0
         elif self.corner_radius_percentage > 0:
             pct = int(self.corner_radius_percentage)
+            source_pct = True
+
+        if pct <= 0 and (default_percent or not explicit_pct):
+            pct = int(default_percent or 0)
+            source_pct = False
 
         if pct <= 0:
             return 0.0
 
-        return (pct / 100.0) * min(width_mils, height_mils) / 2.0
+        minor_mils = min(width_mils, height_mils)
+        divisor = 200.0 if source_pct else 100.0
+        return min((pct / divisor) * minor_mils, minor_mils / 2.0)
 
     def _octagon_points(
         self,
@@ -1795,7 +1953,7 @@ class AltiumPcbPad(PcbGraphicalObject):
     def _resolve_svg_target_layer(
         self,
         for_layer: PcbLayer | None,
-    ) -> tuple[PcbLayer, PcbLayer] | None:
+    ) -> tuple[PcbLayer, PcbLayer | None] | None:
         source_layer = self._source_layer()
         layer = for_layer
         if layer is None:
@@ -1823,11 +1981,11 @@ class AltiumPcbPad(PcbGraphicalObject):
             return None
 
         if render_holes and self.hole_size > 0 and layer.is_copper():
-            return self._hole_svg_elements(
+            return self._hole_knockout_svg_elements(
                 ctx,
                 layer,
-                stroke or ctx.layer_color(layer),
                 include_metadata=include_metadata,
+                hole_color=stroke or ctx.layer_color(layer),
             )
         return []
 
@@ -1837,7 +1995,7 @@ class AltiumPcbPad(PcbGraphicalObject):
         *,
         layer: PcbLayer,
         source_layer: PcbLayer | None,
-    ) -> dict[str, object] | None:
+    ) -> _PadSvgGeometryState | None:
         use_side_expansion = False
         geometry_layer = layer
         expansion_iu = 0
@@ -1849,10 +2007,7 @@ class AltiumPcbPad(PcbGraphicalObject):
             }:
                 use_side_expansion = True
                 geometry_layer = self._side_base_layer(layer)
-                if layer.is_solder_mask():
-                    expansion_iu = get_pad_mask_expansion_iu(self)
-                else:
-                    expansion_iu = get_pad_paste_expansion_iu(self)
+                expansion_iu = _svg_side_expansion_iu(self, ctx, layer)
 
         base_width_iu, base_height_iu = self._layer_size(geometry_layer)
         width_iu = base_width_iu + 2 * expansion_iu
@@ -1867,6 +2022,13 @@ class AltiumPcbPad(PcbGraphicalObject):
         width_mm = width_mils * _MIL_TO_MM
         height_mm = height_mils * _MIL_TO_MM
         pad_cx_mils, pad_cy_mils = self.pad_center_mils(geometry_layer)
+        shape, corner_radius_default_percent = self._resolve_layer_svg_shape(
+            geometry_layer,
+            width_iu=base_width_iu,
+            height_iu=base_height_iu,
+        )
+        if shape is None:
+            return None
 
         return {
             "use_side_expansion": use_side_expansion,
@@ -1880,7 +2042,8 @@ class AltiumPcbPad(PcbGraphicalObject):
             "cy": ctx.y_to_svg(pad_cy_mils),
             "half_w": width_mm / 2.0,
             "half_h": height_mm / 2.0,
-            "shape": self._layer_shape(geometry_layer),
+            "shape": shape,
+            "corner_radius_default_percent": corner_radius_default_percent,
             "rotation": -float(self.rotation or 0.0),
         }
 
@@ -1922,23 +2085,24 @@ class AltiumPcbPad(PcbGraphicalObject):
         *,
         color: str,
         meta_attrs: list[str],
-        geometry: dict[str, object],
+        geometry: _PadSvgGeometryState,
     ) -> list[str]:
-        cx = float(geometry["cx"])
-        cy = float(geometry["cy"])
-        half_w = float(geometry["half_w"])
-        half_h = float(geometry["half_h"])
-        width_mm = float(geometry["width_mm"])
-        height_mm = float(geometry["height_mm"])
-        shape = int(geometry["shape"])
-        rotation = float(geometry["rotation"])
+        cx = geometry["cx"]
+        cy = geometry["cy"]
+        half_w = geometry["half_w"]
+        half_h = geometry["half_h"]
+        width_mm = geometry["width_mm"]
+        height_mm = geometry["height_mm"]
+        shape = geometry["shape"]
+        rotation = geometry["rotation"]
         geometry_layer = geometry["geometry_layer"]
-        base_width_mils = float(geometry["base_width_mils"])
-        base_height_mils = float(geometry["base_height_mils"])
-        use_side_expansion = bool(geometry["use_side_expansion"])
-        expansion_iu = int(geometry["expansion_iu"])
+        base_width_mils = geometry["base_width_mils"]
+        base_height_mils = geometry["base_height_mils"]
+        use_side_expansion = geometry["use_side_expansion"]
+        expansion_iu = geometry["expansion_iu"]
+        corner_radius_default_percent = geometry["corner_radius_default_percent"]
 
-        if shape == PadShape.CIRCLE:
+        if shape == _PAD_SVG_SHAPE_CIRCLE:
             transform = ""
             if abs(rotation) > 1e-9:
                 transform = f' transform="rotate({ctx.fmt(rotation)} {ctx.fmt(cx)} {ctx.fmt(cy)})"'
@@ -1956,7 +2120,7 @@ class AltiumPcbPad(PcbGraphicalObject):
                 f'fill="{html.escape(color)}"{transform} {" ".join(meta_attrs)}/>'
             ]
 
-        if shape == PadShape.RECTANGLE:
+        if shape == _PAD_SVG_SHAPE_RECTANGLE:
             transform = ""
             if abs(rotation) > 1e-9:
                 transform = f' transform="rotate({ctx.fmt(rotation)} {ctx.fmt(cx)} {ctx.fmt(cy)})"'
@@ -1966,18 +2130,19 @@ class AltiumPcbPad(PcbGraphicalObject):
                 f'fill="{html.escape(color)}"{transform} {" ".join(meta_attrs)}/>'
             ]
 
-        if shape == PadShape.OCTAGONAL:
+        if shape == _PAD_SVG_SHAPE_OCTAGONAL:
             points = self._octagon_points(cx, cy, half_w, half_h, rotation)
             point_str = " ".join(f"{ctx.fmt(px)},{ctx.fmt(py)}" for px, py in points)
             return [
                 f'<polygon points="{point_str}" fill="{html.escape(color)}" {" ".join(meta_attrs)}/>'
             ]
 
-        if shape == PadShape.ROUNDED_RECTANGLE:
+        if shape == _PAD_SVG_SHAPE_ROUNDED_RECTANGLE:
             radius_mils = self._layer_corner_radius_mils(
                 geometry_layer,
                 base_width_mils,
                 base_height_mils,
+                default_percent=corner_radius_default_percent,
             )
             if use_side_expansion and expansion_iu != 0:
                 radius_mils = max(

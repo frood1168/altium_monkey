@@ -1099,7 +1099,7 @@ class SchRectMils:
 def _set_record_location_mils(record: object, value: SchPointMils) -> None:
     if not isinstance(value, SchPointMils):
         raise TypeError("location_mils must be a SchPointMils value")
-    record.location = value.to_coord_point()
+    setattr(record, "location", value.to_coord_point())
 
 
 class Primitive(ABC):
@@ -1125,7 +1125,7 @@ class Primitive(ABC):
 
     @property
     @abstractmethod
-    def record_type(self) -> SchRecordType:
+    def record_type(self) -> IntEnum:
         """
         Record type ID.
         """
@@ -1468,11 +1468,19 @@ class SchGraphicalObject(SchPrimitive):
         # Altium omits Location.X=0 and Location.Y=0 in Library Splitter output
         if self._has_location_x or self.location.x != 0:
             self._update_field(
-                record, "LOCATION.X", self.location.x, ["Location.X", "LOCATION.X"]
+                record,
+                "LOCATION.X",
+                self.location.x,
+                ["Location.X", "LOCATION.X"],
+                force=self.location.x != 0,
             )
         if self._has_location_y or self.location.y != 0:
             self._update_field(
-                record, "LOCATION.Y", self.location.y, ["Location.Y", "LOCATION.Y"]
+                record,
+                "LOCATION.Y",
+                self.location.y,
+                ["Location.Y", "LOCATION.Y"],
+                force=self.location.y != 0,
             )
 
         if self.location.x_frac != 0:
@@ -1481,6 +1489,7 @@ class SchGraphicalObject(SchPrimitive):
                 "LOCATION.X_FRAC",
                 self.location.x_frac,
                 ["Location.X_Frac", "LOCATION.X_FRAC"],
+                force=True,
             )
 
         if self.location.y_frac != 0:
@@ -1489,6 +1498,7 @@ class SchGraphicalObject(SchPrimitive):
                 "LOCATION.Y_FRAC",
                 self.location.y_frac,
                 ["Location.Y_Frac", "LOCATION.Y_FRAC"],
+                force=True,
             )
 
         # Nullable colors are explicit object state: None means omitted/default,
@@ -1584,14 +1594,16 @@ class PcbPrimitive(Primitive):
         """
         pass
 
-    def parse_from_binary(self, data: bytes) -> None:
+    def parse_from_binary(self, data: bytes, offset: int = 0) -> int | None:
         """
         Parse primitive from binary data.
 
         Args:
             data: Binary data starting with type byte
         """
+        _ = offset
         self._raw_binary = data
+        return None
 
     def serialize_to_record(self) -> dict[str, Any]:
         """

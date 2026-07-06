@@ -14,9 +14,10 @@ import struct
 import uuid
 import zlib
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
+from typing import Sequence
 
 from .altium_pcblib_defaults import DEFAULT_PCBLIB_FILE_HEADER_MAGIC
 from .altium_pcblib_defaults import DEFAULT_PCBLIB_PAD_VIA_LIBRARY_GUID
@@ -28,6 +29,7 @@ from .altium_pcb_stream_helpers import (
     count_length_prefixed_records as _count_length_prefixed_records,
 )
 from .altium_pcb_stream_helpers import format_bool_text as _format_bool_text
+from .altium_pcb_stream_helpers import format_mil_value as _format_mil_value
 from .altium_pcb_stream_helpers import PcbKeyValueTextEntryMixin
 from .altium_pcblib_sections import PcbLibComponentParamsToc
 from .altium_pcblib_sections import PcbLibComponentParamsTocEntry
@@ -50,10 +52,19 @@ from .altium_pcblib import (
     AltiumPcbLib,
     _altium_ole_truncate,
     _sanitize_ole_name,
+    _footprint_parameter_signature,
+    _serialize_footprint_parameters,
+    _sync_footprint_primitive_parameter_stream,
+    _sync_footprint_via_structure_streams,
 )
 from .altium_pcb_pad_authoring import (
+    ROUND_HOLE_SHAPE,
+    SQUARE_HOLE_SHAPE,
     SLOT_HOLE_SHAPE,
+    apply_authored_pad_local_stack,
     apply_authored_pad_shape,
+    normalize_pad_hole_shape,
+    normalize_pad_shape,
     validate_non_negative,
 )
 from .altium_pcb_mask_expansion import (
@@ -63,6 +74,11 @@ from .altium_pcb_mask_expansion import (
     resolve_pcb_mask_expansion,
     resolve_pcb_mask_expansion_with_legacy_alias,
 )
+from .altium_pcb_via_authoring import apply_authored_via_surface_policy
+from .altium_pcb_via_structure import (
+    AltiumPcbViaStructureFeature,
+    authored_via_structure_for_type,
+)
 from .altium_pcbdoc_builder_text import (
     PCB_TEXT_BARCODE_MARGIN_MILS,
     PCB_TEXT_BARCODE_MIN_WIDTH_MILS,
@@ -70,14 +86,27 @@ from .altium_pcbdoc_builder_text import (
 )
 from .altium_resolved_layer_stack import legacy_layer_to_v7_save_id
 from .altium_record_pcb__arc import AltiumPcbArc
-from .altium_pcb_enums import PcbBarcodeKind
+from .altium_pcb_enums import (
+    MechanicalLayerKind,
+    pcb_mechanical_layer_number_to_v7_saved_layer_id,
+    PcbBarcodeKind,
+)
 from .altium_pcb_enums import PcbBarcodeRenderMode
 from .altium_pcb_enums import PcbBodyProjection
+from .altium_pcb_enums import PcbIpc4761ViaType
 from .altium_pcb_enums import PcbRegionKind
+from .altium_pcb_enums import pcb_region_kind_from_native_kind
+from .altium_pcb_enums import pcb_region_kind_to_native_kind
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__model import AltiumPcbModel
+from .altium_pcb_enums import PadHoleShape
 from .altium_pcb_enums import PadShape
+from .altium_pcb_layer_kind_mapping import coerce_mechanical_layer_kind
+from .altium_pcb_layer_kind_mapping import mechanical_layer_kind_to_data_token
+from .altium_pcb_layer_kind_mapping import mechanical_layer_number_to_legacy_layer_id
+from .altium_pcb_layer_kind_mapping import mechanical_layer_set_token
+from .altium_pcb_layer_kind_mapping import split_layer_set_nonmechanical_parts
 from .altium_record_pcb__pad import AltiumPcbPad
 from .altium_record_pcb__region import AltiumPcbRegion, RegionVertex
 from .altium_record_pcb__shapebased_region import (
@@ -108,14 +137,19 @@ def _build_library_data(header_bytes: bytes, footprint_names: list[str]) -> byte
 
 
 def _build_footprint_parameters(spec: "PcbLibFootprintSpec") -> bytes:
-    body = (
-        f"|PATTERN={spec.footprint.name}"
-        f"|HEIGHT={spec.height}"
-        f"|DESCRIPTION={spec.description}"
-        f"|ITEMGUID={spec.item_guid}"
-        f"|REVISIONGUID={spec.revision_guid}\x00"
+    parameters = dict(spec.footprint.parameters)
+    parameters.update(
+        {
+            "PATTERN": spec.footprint.name,
+            "HEIGHT": spec.height,
+            "DESCRIPTION": spec.description,
+            "ITEMGUID": spec.item_guid,
+            "REVISIONGUID": spec.revision_guid,
+        }
     )
-    return _build_length_prefixed_ascii(body)
+    spec.footprint.parameters = parameters
+    spec.footprint._parameter_signature = _footprint_parameter_signature(spec.footprint)
+    return _serialize_footprint_parameters(parameters)
 
 
 def _build_footprint_widestrings(strings: dict[int, str] | None = None) -> bytes:
@@ -534,10 +568,58 @@ _LEGACY_LAYER_KEY_RE = re.compile(
 _V7_LAYER_KEY_RE = re.compile(
     r"^LAYERV7_(\d+)(LAYERID|NAME|PREV|NEXT|MECHENABLED|COPTHICK|DIELTYPE|DIELCONST|DIELHEIGHT|DIELMATERIAL)$"
 )
+_LAYER_V8_KEY_RE = re.compile(r"^LAYER_V8_(\d+)(.+)$", re.IGNORECASE)
+_V9_CACHE_LAYER_KEY_RE = re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE)
 _LAYER_OPACITY_KEY_RE = re.compile(r"^CFG2D\.LAYEROPACITY\.(.+)$")
 _LAYER_SET_KEY_RE = re.compile(
     r"^LAYERSET(\d+)(NAME|LAYERS|ACTIVELAYER\.7|ISCURRENT|ISLOCKED|FLIPBOARD)$"
 )
+
+
+def mechanical_layer_kind_to_pcblib_token(
+    kind: int | str | MechanicalLayerKind,
+) -> str:
+    """Return the `Library/Data` MECHKIND token used by Altium PcbLib files."""
+
+    return mechanical_layer_kind_to_data_token(kind)
+
+
+def _coerce_mechanical_layer_number(layer: int | str | PcbLayer) -> int:
+    if isinstance(layer, PcbLayer):
+        layer_id = int(layer)
+        if PcbLayer.MECHANICAL_1.value <= layer_id <= PcbLayer.MECHANICAL_16.value:
+            return layer_id - PcbLayer.MECHANICAL_1.value + 1
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+    if isinstance(layer, int):
+        value = int(layer)
+        if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
+            return value - PcbLayer.MECHANICAL_1.value + 1
+        if 1 <= value <= 32:
+            return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+
+    token = "".join(ch for ch in str(layer or "").upper() if ch.isalnum())
+    if token.isdigit():
+        value = int(token)
+        if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
+            return value - PcbLayer.MECHANICAL_1.value + 1
+        if 1 <= value <= 32:
+            return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+    if token.startswith("MECHANICAL"):
+        suffix = token.removeprefix("MECHANICAL")
+        if suffix.isdigit():
+            value = int(suffix)
+            if 1 <= value <= 32:
+                return value
+        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+    try:
+        parsed = int(PcbLayer.from_json_name(token))
+    except ValueError as exc:
+        raise ValueError(f"Unsupported mechanical layer: {layer!r}") from exc
+    if PcbLayer.MECHANICAL_1.value <= parsed <= PcbLayer.MECHANICAL_16.value:
+        return parsed - PcbLayer.MECHANICAL_1.value + 1
+    raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
 
 
 @dataclass(frozen=True)
@@ -586,6 +668,12 @@ class PcbLibLayerTable:
 
     def v7_layer(self, index: int) -> PcbLibV7LayerEntry | None:
         return next((entry for entry in self.v7_layers if entry.index == index), None)
+
+    def v7_layer_by_layer_id(self, layer_id: int) -> PcbLibV7LayerEntry | None:
+        return next(
+            (entry for entry in self.v7_layers if entry.layer_id == int(layer_id)),
+            None,
+        )
 
 
 @dataclass(frozen=True)
@@ -858,6 +946,211 @@ class PcbLibLibraryData:
             segments=new_segments,
             leading_pipe=self.leading_pipe,
             trailing_nul=self.trailing_nul,
+        )
+
+    def _with_segment_value(
+        self,
+        key: str,
+        value: str,
+        *,
+        preferred_segment_key: str | None = None,
+    ) -> "PcbLibLibraryData":
+        new_segments: list[PcbLibLibraryDataSegment] = []
+        updated = False
+        insert_after_index: int | None = None
+        for segment in self.segments:
+            if segment.key == key and not updated:
+                new_segments.append(PcbLibLibraryDataSegment(raw=f"{key}={value}"))
+                updated = True
+            else:
+                new_segments.append(segment)
+            if (
+                preferred_segment_key is not None
+                and segment.key == preferred_segment_key
+            ):
+                insert_after_index = len(new_segments)
+
+        if not updated:
+            new_segment = PcbLibLibraryDataSegment(raw=f"{key}={value}")
+            if insert_after_index is None:
+                new_segments.append(new_segment)
+            else:
+                new_segments.insert(insert_after_index, new_segment)
+
+        return PcbLibLibraryData(
+            segments=tuple(new_segments),
+            leading_pipe=self.leading_pipe,
+            trailing_nul=self.trailing_nul,
+        )
+
+    def _segment_value(self, key: str) -> str | None:
+        for segment in self.segments:
+            if segment.key == key:
+                return segment.value
+        return None
+
+    def _indexed_layer_group(
+        self,
+        key_re: re.Pattern[str],
+        layer_id: int,
+    ) -> tuple[int, dict[str, int]] | None:
+        groups: dict[int, dict[str, int]] = {}
+        for index, segment in enumerate(self.segments):
+            key = segment.key or ""
+            match = key_re.match(key)
+            if match is None:
+                continue
+            group_index = int(match.group(1))
+            suffix = match.group(2).upper()
+            groups.setdefault(group_index, {})[suffix] = index
+
+        for group_index, positions in groups.items():
+            layer_id_index = positions.get("LAYERID")
+            if layer_id_index is None:
+                continue
+            if self.segments[layer_id_index].value == str(int(layer_id)):
+                return group_index, positions
+        return None
+
+    def _indexed_layer_field_value(
+        self,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        field_name: str,
+    ) -> str | None:
+        group = self._indexed_layer_group(key_re, layer_id)
+        if group is None:
+            return None
+        _group_index, positions = group
+        field_index = positions.get(field_name.upper())
+        if field_index is None:
+            return None
+        return self.segments[field_index].value
+
+    def _with_indexed_layer_field(
+        self,
+        *,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        field_name: str,
+        value: str,
+        key_prefix: str,
+        separator: str,
+    ) -> "PcbLibLibraryData":
+        group = self._indexed_layer_group(key_re, layer_id)
+        if group is None:
+            raise KeyError(f"Library/Data indexed layer not found: {layer_id}")
+        group_index, positions = group
+
+        field_key = f"{key_prefix}{group_index}{separator}{field_name.upper()}"
+        field_index = positions.get(field_name.upper())
+        new_segments = list(self.segments)
+        if field_index is not None:
+            new_segments[field_index] = PcbLibLibraryDataSegment(
+                raw=f"{field_key}={value}"
+            )
+        else:
+            preferred_suffixes = ("MECHENABLED", "USEDBYPRIMS", "LAYERID", "NAME")
+            insert_after = next(
+                (
+                    positions[suffix]
+                    for suffix in preferred_suffixes
+                    if suffix in positions
+                ),
+                max(positions.values()),
+            )
+            new_segments.insert(
+                insert_after + 1,
+                PcbLibLibraryDataSegment(raw=f"{field_key}={value}"),
+            )
+        return PcbLibLibraryData(
+            segments=tuple(new_segments),
+            leading_pipe=self.leading_pipe,
+            trailing_nul=self.trailing_nul,
+        )
+
+    def mechanical_layer_kind_field_values(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> dict[str, str | None]:
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        fields: dict[str, str | None] = {}
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        if legacy_id is not None:
+            fields["legacy"] = self._segment_value(f"LAYER{legacy_id}MECHKIND")
+        else:
+            v7_entry = self.layer_table.v7_layer_by_layer_id(v7_layer_id)
+            fields["v7"] = (
+                None
+                if v7_entry is None
+                else self._segment_value(f"LAYERV7_{v7_entry.index}MECHKIND")
+            )
+        fields["layer_v8"] = self._indexed_layer_field_value(
+            _LAYER_V8_KEY_RE,
+            v7_layer_id,
+            "MECHKIND",
+        )
+        fields["v9_cache"] = self._indexed_layer_field_value(
+            _V9_CACHE_LAYER_KEY_RE,
+            v7_layer_id,
+            "MECHKIND",
+        )
+        return fields
+
+    def with_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> "PcbLibLibraryData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        token = mechanical_layer_kind_to_pcblib_token(kind)
+        updated = self
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        if legacy_id is not None:
+            updated = updated._with_segment_value(
+                f"LAYER{legacy_id}MECHKIND",
+                token,
+                preferred_segment_key=f"LAYER{legacy_id}MECHENABLED",
+            )
+        else:
+            v7_entry = updated.layer_table.v7_layer_by_layer_id(v7_layer_id)
+            if v7_entry is None:
+                raise KeyError(
+                    f"Mechanical layer not found in PcbLib V7 layer table: {layer!r}"
+                )
+            updated = updated._with_segment_value(
+                f"LAYERV7_{v7_entry.index}MECHKIND",
+                token,
+                preferred_segment_key=f"LAYERV7_{v7_entry.index}MECHENABLED",
+            )
+
+        updated = updated._with_indexed_layer_field(
+            key_re=_LAYER_V8_KEY_RE,
+            layer_id=v7_layer_id,
+            field_name="MECHKIND",
+            value=token,
+            key_prefix="LAYER_V8_",
+            separator="",
+        )
+        return updated._with_indexed_layer_field(
+            key_re=_V9_CACHE_LAYER_KEY_RE,
+            layer_id=v7_layer_id,
+            field_name="MECHKIND",
+            value=token,
+            key_prefix="V9_CACHE_LAYER",
+            separator="_",
         )
 
     def with_view_config_paths(
@@ -1663,6 +1956,61 @@ class PcbLibLibraryData:
             )
         return updated
 
+    def _enabled_mechanical_layer_numbers(self) -> tuple[int, ...]:
+        layer_table = self.layer_table
+        enabled_numbers: set[int] = set()
+        for entry in layer_table.legacy_layers:
+            if not entry.mechanical_enabled:
+                continue
+            number = entry.layer_number - PcbLayer.MECHANICAL_1.value + 1
+            if 1 <= number <= 16:
+                enabled_numbers.add(number)
+        for entry in layer_table.v7_layers:
+            if not entry.mechanical_enabled:
+                continue
+            first_v7_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(1)
+            if first_v7_id is None:
+                continue
+            number = entry.layer_id - first_v7_id + 1
+            if 17 <= number <= 32:
+                enabled_numbers.add(number)
+        return tuple(sorted(enabled_numbers))
+
+    def _with_enabled_mechanical_layers_in_layer_sets(self) -> "PcbLibLibraryData":
+        layer_sets = self.layer_sets
+        enabled_numbers = self._enabled_mechanical_layer_numbers()
+        enabled_legacy_tokens = tuple(
+            mechanical_layer_set_token(number)
+            for number in enabled_numbers
+            if number <= 16
+        )
+        enabled_extended_tokens = tuple(
+            mechanical_layer_set_token(number)
+            for number in enabled_numbers
+            if number > 16
+        )
+        enabled_tokens = enabled_legacy_tokens + enabled_extended_tokens
+
+        updated_sets: list[PcbLibLayerSet] = []
+        for layer_set in layer_sets.sets:
+            if layer_set.index == 1:
+                prefix, has_drill_drawing, suffix = split_layer_set_nonmechanical_parts(
+                    layer_set.layers
+                )
+                layers = (
+                    prefix
+                    + enabled_legacy_tokens
+                    + (("DrillDrawing",) if has_drill_drawing else ())
+                    + enabled_extended_tokens
+                    + suffix
+                )
+                updated_sets.append(replace(layer_set, layers=layers))
+            elif layer_set.index == 5:
+                updated_sets.append(replace(layer_set, layers=enabled_tokens))
+            else:
+                updated_sets.append(layer_set)
+        return self.with_layer_sets(PcbLibLayerSets(sets=tuple(updated_sets)))
+
     @staticmethod
     def _is_layer_table_record(record: PcbLibLibraryDataRecord) -> bool:
         return any(
@@ -1791,6 +2139,145 @@ class PcbLibLibraryData:
                 )
         return updated
 
+    def with_mechanical_layer(
+        self,
+        layer: int | str | PcbLayer,
+        *,
+        name: str | None = None,
+        enabled: bool = True,
+    ) -> "PcbLibLibraryData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        legacy_id = mechanical_layer_number_to_legacy_layer_id(mechanical_number)
+        v7_layer_id = pcb_mechanical_layer_number_to_v7_saved_layer_id(
+            mechanical_number
+        )
+        if v7_layer_id is None:
+            raise ValueError(f"Unsupported mechanical layer: {layer!r}")
+
+        layer_table = self.layer_table
+        existing_name = None
+        if legacy_id is not None:
+            legacy_entry = layer_table.legacy_layer(legacy_id)
+            if legacy_entry is not None and legacy_entry.name.strip():
+                existing_name = legacy_entry.name.strip()
+        if existing_name is None:
+            v7_entry = layer_table.v7_layer_by_layer_id(v7_layer_id)
+            if v7_entry is not None and v7_entry.name.strip():
+                existing_name = v7_entry.name.strip()
+
+        layer_name = (
+            (name or "").strip() or existing_name or f"Mechanical {mechanical_number}"
+        )
+
+        updated_legacy_layers = []
+        legacy_updated = False
+        for entry in layer_table.legacy_layers:
+            if entry.layer_number == legacy_id:
+                updated_legacy_layers.append(
+                    replace(entry, name=layer_name, mechanical_enabled=bool(enabled))
+                )
+                legacy_updated = True
+            else:
+                updated_legacy_layers.append(entry)
+
+        updated_v7_layers = []
+        v7_updated = False
+        for entry in layer_table.v7_layers:
+            if entry.layer_id == v7_layer_id:
+                updated_v7_layers.append(
+                    replace(entry, name=layer_name, mechanical_enabled=bool(enabled))
+                )
+                v7_updated = True
+            else:
+                updated_v7_layers.append(entry)
+
+        if not legacy_updated and not v7_updated:
+            raise KeyError(
+                f"Mechanical layer not found in PcbLib layer table: {layer!r}"
+            )
+
+        updated = self.with_layer_table(
+            PcbLibLayerTable(
+                legacy_layers=tuple(updated_legacy_layers),
+                v7_layers=tuple(updated_v7_layers),
+            )
+        )
+        return updated._with_enabled_mechanical_layers_in_layer_sets()
+
+    def _next_mechanical_pair_index(self) -> int:
+        pair_indices: set[int] = set()
+        for segment in self.segments:
+            key = segment.key or ""
+            match = re.fullmatch(r"MECHPAIR(\d+)L[12]", key, re.IGNORECASE)
+            if match:
+                pair_indices.add(int(match.group(1)))
+        candidate = 0
+        while candidate in pair_indices:
+            candidate += 1
+        return candidate
+
+    def _mechanical_pair_insert_key(self, pair_index: int) -> str | None:
+        existing_keys = {
+            segment.key for segment in self.segments if segment.key is not None
+        }
+        for candidate in range(int(pair_index) - 1, -1, -1):
+            key = f"MECHPAIR{candidate}L2"
+            if key in existing_keys:
+                return key
+        if "LAYERSET5FLIPBOARD" in existing_keys:
+            return "LAYERSET5FLIPBOARD"
+        return None
+
+    def with_route_tool_path_layer(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> "PcbLibLibraryData":
+        mechanical_number = _coerce_mechanical_layer_number(layer)
+        return self._with_segment_value(
+            "ROUTETOOLPATHLAYER",
+            f"MECHANICAL{mechanical_number}",
+            preferred_segment_key=self._mechanical_pair_insert_key(10_000),
+        )
+
+    def with_mechanical_layer_pair(
+        self,
+        layer_1: int | str | PcbLayer,
+        layer_2: int | str | PcbLayer,
+        *,
+        pair_index: int | None = None,
+    ) -> "PcbLibLibraryData":
+        layer_1_number = _coerce_mechanical_layer_number(layer_1)
+        layer_2_number = _coerce_mechanical_layer_number(layer_2)
+        if layer_1_number == layer_2_number:
+            raise ValueError("Mechanical layer pair endpoints must differ")
+        resolved_pair_index = (
+            self._next_mechanical_pair_index()
+            if pair_index is None
+            else int(pair_index)
+        )
+        if resolved_pair_index < 0:
+            raise ValueError("Mechanical layer pair index must be non-negative")
+
+        updated = self.with_mechanical_layer(
+            f"MECHANICAL{layer_1_number}", enabled=True
+        )
+        updated = updated.with_mechanical_layer(
+            f"MECHANICAL{layer_2_number}", enabled=True
+        )
+        prefix = f"MECHPAIR{resolved_pair_index}"
+        updated = updated._with_segment_value(
+            f"{prefix}L1",
+            f"MECHANICAL{layer_1_number}",
+            preferred_segment_key=updated._mechanical_pair_insert_key(
+                resolved_pair_index
+            ),
+        )
+        return updated._with_segment_value(
+            f"{prefix}L2",
+            f"MECHANICAL{layer_2_number}",
+            preferred_segment_key=f"{prefix}L1",
+        )
+
 
 @dataclass(frozen=True)
 class PcbLibBuildProfile:
@@ -1880,6 +2367,118 @@ class PcbLibBuilder:
         self.profile = profile or PcbLibBuildProfile.default()
         self._footprints: list[PcbLibFootprintSpec] = []
         self._embedded_models: list[PcbLibModelSpec] = []
+        self.layer_kind_mapping_data = PcbLibLayerKindMapping.make_default()
+
+    def _set_library_data(self, library_data: PcbLibLibraryData) -> None:
+        self.profile = PcbLibBuildProfile(
+            library_data=library_data,
+            file_header=self.profile.file_header,
+            pad_via_library=self.profile.pad_via_library,
+        )
+
+    def set_mechanical_layer(
+        self,
+        layer: int | str | PcbLayer,
+        *,
+        name: str | None = None,
+        enabled: bool = True,
+    ) -> "PcbLibBuilder":
+        """
+        Set a mechanical layer display name and enabled state.
+
+        Args:
+            layer: Mechanical layer token or number. Supported tokens include
+                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                Mechanical 1 through 16.
+            name: Optional display name. If omitted, the existing layer-table
+                label is preserved, falling back to `Mechanical N`.
+            enabled: Whether the layer is enabled in the PcbLib layer registry.
+        """
+        self._set_library_data(
+            self.profile.library_data.with_mechanical_layer(
+                layer,
+                name=name,
+                enabled=enabled,
+            )
+        )
+        return self
+
+    def set_mechanical_layer_pair(
+        self,
+        layer_1: int | str | PcbLayer,
+        layer_2: int | str | PcbLayer,
+        *,
+        pair_index: int | None = None,
+    ) -> "PcbLibBuilder":
+        """
+        Define a mechanical mirror pair used by component side flipping.
+
+        Args:
+            layer_1: First mechanical layer endpoint.
+            layer_2: Second mechanical layer endpoint.
+            pair_index: Optional native `MECHPAIR{N}` index. If omitted, the
+                first unused index is selected.
+        """
+        self._set_library_data(
+            self.profile.library_data.with_mechanical_layer_pair(
+                layer_1,
+                layer_2,
+                pair_index=pair_index,
+            )
+        )
+        return self
+
+    def set_route_tool_path_layer(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> "PcbLibBuilder":
+        """Set the PcbLib route-tool-path mechanical layer token."""
+
+        self._set_library_data(
+            self.profile.library_data.with_route_tool_path_layer(layer)
+        )
+        return self
+
+    @property
+    def mechanical_layer_kinds(self) -> dict[int, MechanicalLayerKind]:
+        """Return the current mechanical layer kind mapping by native layer id."""
+
+        return dict(self.layer_kind_mapping_data.mapping)
+
+    def get_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> MechanicalLayerKind | None:
+        """Return the configured kind for a mechanical layer, if present."""
+
+        from .altium_pcb_layer_kind_mapping import coerce_layer_kind_mapping_layer_id
+
+        return self.layer_kind_mapping_data.mapping.get(
+            coerce_layer_kind_mapping_layer_id(layer)
+        )
+
+    def set_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> "PcbLibBuilder":
+        """
+        Set the semantic kind assigned to a mechanical layer.
+
+        PcbLib files persist this both in `Library/LayerKindMapping/Data` and
+        in several `Library/Data` layer registry/cache `MECHKIND` fields.
+        """
+        kind_value = coerce_mechanical_layer_kind(kind)
+        self.layer_kind_mapping_data = self.layer_kind_mapping_data.with_layer_kind(
+            layer,
+            kind_value,
+        )
+        self._set_library_data(
+            self.profile.library_data.with_mechanical_layer_kind(layer, kind_value)
+        )
+        if kind_value == MechanicalLayerKind.ROUTE_TOOL_PATH:
+            self.set_route_tool_path_layer(layer)
+        return self
 
     @staticmethod
     def _format_model_id(value: uuid.UUID | str | None = None) -> str:
@@ -2222,13 +2821,24 @@ class PcbLibBuilder:
         width_mil: float,
         height_mil: float,
         layer: int | PcbLayer = PcbLayer.TOP,
-        shape: int = PadShape.RECTANGLE,
+        shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mil: float = 0.0,
         plated: bool | None = None,
         corner_radius_percent: int | None = None,
+        top_shape: int | str | PadShape | None = None,
+        top_width_mils: float | None = None,
+        top_height_mils: float | None = None,
+        mid_shape: int | str | PadShape | None = None,
+        mid_width_mils: float | None = None,
+        mid_height_mils: float | None = None,
+        bottom_shape: int | str | PadShape | None = None,
+        bottom_width_mils: float | None = None,
+        bottom_height_mils: float | None = None,
+        pad_mode: int | None = None,
         slot_length_mil: float = 0.0,
         slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
         solder_mask_expansion: PcbMaskExpansionInput = None,
         solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -2237,6 +2847,10 @@ class PcbLibBuilder:
         paste_mask_expansion_mils: float | None = None,
         hole_positive_tolerance_mil: float | None = None,
         hole_negative_tolerance_mil: float | None = None,
+        is_test_fab_top: bool = False,
+        is_test_fab_bottom: bool = False,
+        is_assy_testpoint_top: bool = False,
+        is_assy_testpoint_bottom: bool = False,
     ) -> AltiumPcbPad:
         """
         Add a simple pad primitive to a footprint.
@@ -2257,6 +2871,15 @@ class PcbLibBuilder:
             raise ValueError(
                 "slot_length_mil must be greater than or equal to hole_size_mil"
             )
+        resolved_hole_shape = normalize_pad_hole_shape(hole_shape)
+        if slot_iu > 0:
+            if resolved_hole_shape not in (PadHoleShape.ROUND, PadHoleShape.SLOT):
+                raise ValueError("slotted pads cannot use square hole_shape")
+            resolved_hole_shape = PadHoleShape.SLOT
+        elif resolved_hole_shape == PadHoleShape.SLOT:
+            raise ValueError("hole_shape='slot' requires a positive slot_length_mil")
+        elif hole_iu <= 0 and resolved_hole_shape != PadHoleShape.ROUND:
+            raise ValueError("non-round hole_shape requires a positive hole_size_mil")
         pad.designator = designator
         pad.layer = layer_id
         pad.x = self._mil_to_internal_units(x_mil)
@@ -2282,6 +2905,10 @@ class PcbLibBuilder:
         pad.is_plated = bool(plated) if plated is not None else False
         pad.net_index = None
         pad.component_index = None
+        pad.is_test_fab_top = bool(is_test_fab_top)
+        pad.is_test_fab_bottom = bool(is_test_fab_bottom)
+        pad.is_assy_test_point_top = bool(is_assy_testpoint_top)
+        pad.is_assy_test_point_bottom = bool(is_assy_testpoint_bottom)
         pad.polygon_index = 0xFFFF
         pad.union_index = 0xFFFFFFFF
         pad.pad_mode = 0
@@ -2290,6 +2917,47 @@ class PcbLibBuilder:
         pad._subrecord2_data = _PAD_SUBRECORD2_DEFAULT
         pad._subrecord3_data = _PAD_SUBRECORD3_DEFAULT
         pad._subrecord4_data = _PAD_SUBRECORD4_DEFAULT
+        apply_authored_pad_local_stack(
+            pad,
+            base_shape=shape,
+            base_width_iu=width_iu,
+            base_height_iu=height_iu,
+            top_shape=top_shape,
+            top_width_iu=(
+                None
+                if top_width_mils is None
+                else self._mil_to_internal_units(top_width_mils)
+            ),
+            top_height_iu=(
+                None
+                if top_height_mils is None
+                else self._mil_to_internal_units(top_height_mils)
+            ),
+            mid_shape=mid_shape,
+            mid_width_iu=(
+                None
+                if mid_width_mils is None
+                else self._mil_to_internal_units(mid_width_mils)
+            ),
+            mid_height_iu=(
+                None
+                if mid_height_mils is None
+                else self._mil_to_internal_units(mid_height_mils)
+            ),
+            bottom_shape=bottom_shape,
+            bottom_width_iu=(
+                None
+                if bottom_width_mils is None
+                else self._mil_to_internal_units(bottom_width_mils)
+            ),
+            bottom_height_iu=(
+                None
+                if bottom_height_mils is None
+                else self._mil_to_internal_units(bottom_height_mils)
+            ),
+            pad_mode=pad_mode,
+            corner_radius_percent=corner_radius_percent,
+        )
         apply_pcb_mask_expansion_to_pad(
             pad,
             paste=resolve_pcb_mask_expansion(
@@ -2309,6 +2977,10 @@ class PcbLibBuilder:
             pad.hole_shape = SLOT_HOLE_SHAPE
             pad.slot_size = slot_iu
             pad.slot_rotation = float(slot_rotation_degrees)
+        elif resolved_hole_shape == PadHoleShape.SQUARE:
+            pad.hole_shape = SQUARE_HOLE_SHAPE
+        else:
+            pad.hole_shape = ROUND_HOLE_SHAPE
         if (
             hole_positive_tolerance_mil is not None
             or hole_negative_tolerance_mil is not None
@@ -2336,6 +3008,11 @@ class PcbLibBuilder:
         offset_x_mil: float = 0.0,
         offset_y_mil: float = 0.0,
         anchor_diameter_mil: float = 1.0,
+        anchor_width_mil: float | None = None,
+        anchor_height_mil: float | None = None,
+        anchor_rotation_degrees: float = 0.0,
+        anchor_shape: int | str | PadShape = PadShape.CIRCLE,
+        pad_index: int | None = None,
         hole_points_mil: list[list[tuple[float, float]]] | None = None,
         outline_points_are_local: bool = True,
         paste_rule_expansion: bool | None = None,
@@ -2352,6 +3029,21 @@ class PcbLibBuilder:
         """
         if len(outline_points_mil) < 3:
             raise ValueError("Custom pad outline requires at least 3 points")
+        anchor_width = (
+            float(anchor_diameter_mil)
+            if anchor_width_mil is None
+            else float(anchor_width_mil)
+        )
+        anchor_height = (
+            float(anchor_diameter_mil)
+            if anchor_height_mil is None
+            else float(anchor_height_mil)
+        )
+        if anchor_width <= 0.0 or anchor_height <= 0.0:
+            raise ValueError("Custom pad anchor dimensions must be positive")
+        if pad_index is not None and int(pad_index) <= 0:
+            raise ValueError("pad_index must be a positive 1-based native index")
+        resolved_anchor_shape = normalize_pad_shape(anchor_shape)
 
         layer_id = int(layer)
         pad = self.add_pad(
@@ -2359,11 +3051,11 @@ class PcbLibBuilder:
             designator=designator,
             x_mil=x_mil,
             y_mil=y_mil,
-            width_mil=anchor_diameter_mil,
-            height_mil=anchor_diameter_mil,
+            width_mil=anchor_width,
+            height_mil=anchor_height,
             layer=layer_id,
-            shape=PadShape.CIRCLE,
-            rotation_degrees=0.0,
+            shape=resolved_anchor_shape,
+            rotation_degrees=anchor_rotation_degrees,
             solder_mask_expansion=resolve_pcb_mask_expansion_with_legacy_alias(
                 value=solder_mask_expansion,
                 mode=solder_mask_expansion_mode,
@@ -2379,13 +3071,15 @@ class PcbLibBuilder:
                 field_name="paste_mask_expansion",
             ),
         )
+        native_pad_index = len(footprint.pads)
+        region_pad_index = native_pad_index if pad_index is None else int(pad_index)
 
         offset_x_iu = self._mil_to_internal_units(offset_x_mil)
         offset_y_iu = self._mil_to_internal_units(offset_y_mil)
         if offset_x_iu or offset_y_iu:
             pad.hole_offset_x = [offset_x_iu] * 32
             pad.hole_offset_y = [offset_y_iu] * 32
-            pad.alt_shape = [int(PadShape.CIRCLE)] * 32
+            pad.alt_shape = [int(resolved_anchor_shape)] * 32
             pad.corner_radius = [0] * 32
 
         center_x_mil = float(x_mil) + float(offset_x_mil)
@@ -2421,7 +3115,7 @@ class PcbLibBuilder:
             "ARCRESOLUTION": "0.1mil",
             "ISSHAPEBASED": "TRUE",
             "CAVITYHEIGHT": "0mil",
-            "PADINDEX": "1",
+            "PADINDEX": str(region_pad_index),
         }
         absolute_outline = _to_absolute(outline_points_mil)
         outline_vertices: list[PcbExtendedVertex] = []
@@ -2455,12 +3149,13 @@ class PcbLibBuilder:
             source="builder",
             region=region,
             shape_region=shape_region,
+            pad_index=region_pad_index - 1,
             shape_kind=int(PadShape.CUSTOM),
         )
         region.properties = build_pcblib_custom_pad_region_properties(
             region=region,
             shape_region=shape_region,
-            pad_index=1,
+            pad_index=region_pad_index,
         )
         primitive_index = footprint._record_order.index(region)
         footprint.extended_primitive_information.append(
@@ -2482,6 +3177,8 @@ class PcbLibBuilder:
         width_mil: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mil: float | None = None,
+        paste_mask_expansion_mil: float | None = None,
     ) -> AltiumPcbTrack:
         """
         Add a track primitive to a footprint.
@@ -2508,8 +3205,16 @@ class PcbLibBuilder:
         track.is_keepout = False
         track.is_polygon_outline = False
         track.user_routed = True
-        track.solder_mask_expansion = 0
-        track.paste_mask_expansion = 0
+        track.solder_mask_expansion = (
+            0
+            if solder_mask_expansion_mil is None
+            else self._mil_to_internal_units(solder_mask_expansion_mil)
+        )
+        track.paste_mask_expansion = (
+            0
+            if paste_mask_expansion_mil is None
+            else self._mil_to_internal_units(paste_mask_expansion_mil)
+        )
         track.keepout_restrictions = 0
         track._original_content_len = 49
         self._append_primitive(footprint, track)
@@ -2527,6 +3232,8 @@ class PcbLibBuilder:
         width_mil: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mil: float | None = None,
+        paste_mask_expansion_mil: float | None = None,
     ) -> AltiumPcbArc:
         arc = AltiumPcbArc()
         layer_id = int(layer)
@@ -2551,8 +3258,16 @@ class PcbLibBuilder:
         arc.is_keepout = False
         arc.is_polygon_outline = False
         arc.user_routed = True
-        arc.solder_mask_expansion = 0
-        arc.paste_mask_expansion = 0
+        arc.solder_mask_expansion = (
+            0
+            if solder_mask_expansion_mil is None
+            else self._mil_to_internal_units(solder_mask_expansion_mil)
+        )
+        arc.paste_mask_expansion = (
+            0
+            if paste_mask_expansion_mil is None
+            else self._mil_to_internal_units(paste_mask_expansion_mil)
+        )
         arc.keepout_restrictions = 0
         arc._original_content_len = 60
         self._append_primitive(footprint, arc)
@@ -2569,6 +3284,8 @@ class PcbLibBuilder:
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mil: float | None = None,
+        paste_mask_expansion_mil: float | None = None,
     ) -> AltiumPcbFill:
         fill = AltiumPcbFill()
         layer_id = int(layer)
@@ -2591,8 +3308,16 @@ class PcbLibBuilder:
         fill.is_keepout = False
         fill.is_polygon_outline = False
         fill.user_routed = True
-        fill.solder_mask_expansion = 0
-        fill.paste_mask_expansion = 0
+        fill.solder_mask_expansion = (
+            0
+            if solder_mask_expansion_mil is None
+            else self._mil_to_internal_units(solder_mask_expansion_mil)
+        )
+        fill.paste_mask_expansion = (
+            0
+            if paste_mask_expansion_mil is None
+            else self._mil_to_internal_units(paste_mask_expansion_mil)
+        )
         fill.keepout_restrictions = 0
         fill._original_content_len = 50
         self._append_primitive(footprint, fill)
@@ -2608,8 +3333,19 @@ class PcbLibBuilder:
         hole_size_mil: float,
         layer_start: int | PcbLayer = PcbLayer.TOP,
         layer_end: int | PcbLayer = PcbLayer.BOTTOM,
+        ipc4761_via_type: int | PcbIpc4761ViaType = PcbIpc4761ViaType.NONE,
+        ipc4761_features: Sequence[AltiumPcbViaStructureFeature] | None = None,
+        propagation_delay_ps: float | None = None,
         hole_positive_tolerance_mil: float | None = None,
         hole_negative_tolerance_mil: float | None = None,
+        is_tent_top: bool | None = None,
+        is_tent_bottom: bool | None = None,
+        solder_mask_expansion_top_mil: float | None = None,
+        solder_mask_expansion_bottom_mil: float | None = None,
+        is_test_fab_top: bool = False,
+        is_test_fab_bottom: bool = False,
+        is_assy_testpoint_top: bool = False,
+        is_assy_testpoint_bottom: bool = False,
     ) -> AltiumPcbVia:
         via = AltiumPcbVia()
         via.layer = int(PcbLayer.MULTI_LAYER)
@@ -2624,12 +3360,30 @@ class PcbLibBuilder:
         via.layer_end = int(layer_end)
         via.via_mode = 0
         via.union_index = 0
+        via.ipc4761_via_type = PcbIpc4761ViaType(int(ipc4761_via_type))
+        via.via_structure = authored_via_structure_for_type(
+            via.ipc4761_via_type,
+            ipc4761_features,
+        )
+        if propagation_delay_ps is not None:
+            via.propagation_delay_ps = float(propagation_delay_ps)
+        via.is_test_fab_top = bool(is_test_fab_top)
+        via.is_test_fab_bottom = bool(is_test_fab_bottom)
+        via.is_assy_testpoint_top = bool(is_assy_testpoint_top)
+        via.is_assy_testpoint_bottom = bool(is_assy_testpoint_bottom)
         via.diameter_by_layer = [0] * 32
         for layer_id in range(
             min(via.layer_start, via.layer_end), max(via.layer_start, via.layer_end) + 1
         ):
             if 1 <= layer_id <= 32:
                 via.diameter_by_layer[layer_id - 1] = via.diameter
+        apply_authored_via_surface_policy(
+            via,
+            is_tent_top=is_tent_top,
+            is_tent_bottom=is_tent_bottom,
+            solder_mask_expansion_top_mil=solder_mask_expansion_top_mil,
+            solder_mask_expansion_bottom_mil=solder_mask_expansion_bottom_mil,
+        )
         if (
             hole_positive_tolerance_mil is not None
             or hole_negative_tolerance_mil is not None
@@ -2658,6 +3412,8 @@ class PcbLibBuilder:
         is_keepout: bool = False,
         keepout_restrictions: int = 0,
         subpoly_index: int = 0,
+        cavity_height_mil: float = 0.0,
+        v7_layer: str | None = None,
     ) -> AltiumPcbRegion:
         if len(outline_points_mil) < 3:
             raise ValueError("Region outline requires at least 3 points")
@@ -2670,12 +3426,37 @@ class PcbLibBuilder:
         region.is_locked = False
         region.is_keepout = bool(is_keepout)
         region.is_polygon_outline = False
-        region.kind = int(kind)
+        semantic_kind = (
+            kind
+            if isinstance(kind, PcbRegionKind)
+            else pcb_region_kind_from_native_kind(
+                int(kind),
+                is_board_cutout=is_board_cutout,
+            )
+        )
+        region.kind = pcb_region_kind_to_native_kind(
+            semantic_kind,
+            is_board_cutout=is_board_cutout,
+        )
         region.is_board_cutout = bool(is_board_cutout)
         region.is_shapebased = bool(is_shapebased)
         region.keepout_restrictions = int(keepout_restrictions)
         region.subpoly_index = int(subpoly_index)
+        region.cavity_height = self._mil_to_internal_units(cavity_height_mil)
         region.properties = {}
+        if v7_layer is not None:
+            region.properties["V7_LAYER"] = str(v7_layer)
+        if region.cavity_height or semantic_kind == PcbRegionKind.CAVITY_DEFINITION:
+            region.properties["V7_LAYER"] = str(
+                v7_layer
+                if v7_layer is not None
+                else PcbLayer(int(layer)).to_json_name()
+            )
+            region.properties["NAME"] = ""
+            region.properties["ARCRESOLUTION"] = "0.5mil"
+            region.properties["CAVITYHEIGHT"] = _format_mil_value(
+                float(cavity_height_mil)
+            )
         region.outline_vertices = [
             RegionVertex(
                 x_raw=float(self._mil_to_internal_units(x_mil)),
@@ -2732,6 +3513,8 @@ class PcbLibBuilder:
         inverted_margin_mil: float = 0.0,
         use_inverted_rectangle: bool = False,
         inverted_rectangle_size_mil: tuple[float, float] | None = None,
+        is_frame: bool = False,
+        frame_size_mil: tuple[float, float] | None = None,
         text_justification: int | None = None,
     ) -> AltiumPcbText:
         """
@@ -2767,6 +3550,8 @@ class PcbLibBuilder:
             inverted_margin_mils=inverted_margin_mil,
             use_inverted_rectangle=use_inverted_rectangle,
             inverted_rectangle_size_mils=inverted_rectangle_size_mil,
+            is_frame=is_frame,
+            frame_size_mils=frame_size_mil,
             text_justification=text_justification,
         )
         text_record.net_index = None
@@ -2843,8 +3628,8 @@ class PcbLibBuilder:
         for x_mil, y_mil in outline_points_mil:
             vertex = PcbExtendedVertex()
             vertex.is_round = False
-            vertex.x = float(self._mil_to_internal_units(x_mil))
-            vertex.y = float(self._mil_to_internal_units(y_mil))
+            vertex.x = self._mil_to_internal_units(x_mil)
+            vertex.y = self._mil_to_internal_units(y_mil)
             vertex.center_x = vertex.x
             vertex.center_y = vertex.y
             vertex.radius = 0
@@ -2900,7 +3685,26 @@ class PcbLibBuilder:
         bottom_mil: float,
         right_mil: float,
         top_mil: float,
-        **kwargs: object,
+        layer: int | PcbLayer = PcbLayer.MECHANICAL_1,
+        overall_height_mil: float,
+        standoff_height_mil: float = 0.5,
+        cavity_height_mil: float = 0.0,
+        body_projection: PcbBodyProjection = PcbBodyProjection.TOP,
+        model: AltiumPcbModel | None = None,
+        model_2d_x_mil: float = 0.0,
+        model_2d_y_mil: float = 0.0,
+        model_2d_rotation_degrees: float = 0.0,
+        model_3d_rotx_degrees: float | None = None,
+        model_3d_roty_degrees: float | None = None,
+        model_3d_rotz_degrees: float | None = None,
+        model_3d_dz_mil: float | None = None,
+        model_checksum: int | None = None,
+        identifier: str | None = None,
+        name: str = " ",
+        body_color_3d: int = 0x808080,
+        body_opacity_3d: float = 1.0,
+        model_type: int = 1,
+        model_source: str | None = None,
     ) -> AltiumPcbComponentBody:
         return self.add_component_body(
             footprint,
@@ -2910,7 +3714,26 @@ class PcbLibBuilder:
                 (right_mil, top_mil),
                 (left_mil, top_mil),
             ],
-            **kwargs,
+            layer=layer,
+            overall_height_mil=overall_height_mil,
+            standoff_height_mil=standoff_height_mil,
+            cavity_height_mil=cavity_height_mil,
+            body_projection=body_projection,
+            model=model,
+            model_2d_x_mil=model_2d_x_mil,
+            model_2d_y_mil=model_2d_y_mil,
+            model_2d_rotation_degrees=model_2d_rotation_degrees,
+            model_3d_rotx_degrees=model_3d_rotx_degrees,
+            model_3d_roty_degrees=model_3d_roty_degrees,
+            model_3d_rotz_degrees=model_3d_rotz_degrees,
+            model_3d_dz_mil=model_3d_dz_mil,
+            model_checksum=model_checksum,
+            identifier=identifier,
+            name=name,
+            body_color_3d=body_color_3d,
+            body_opacity_3d=body_opacity_3d,
+            model_type=model_type,
+            model_source=model_source,
         )
 
     def _assign_storage_names(self) -> bytes | None:
@@ -2979,7 +3802,8 @@ class PcbLibBuilder:
         pcblib.raw_pad_via_library_header = PcbLibCountHeader.zero().to_bytes()
         pcblib.raw_pad_via_library_data = self.profile.pad_via_library.to_bytes()
         pcblib.raw_layer_kind_mapping_header = PcbLibCountHeader.one().to_bytes()
-        pcblib.raw_layer_kind_mapping = PcbLibLayerKindMapping().to_bytes()
+        pcblib.raw_layer_kind_mapping = self.layer_kind_mapping_data.to_bytes()
+        pcblib._sync_layer_kind_mapping_from_raw()
         pcblib.raw_file_version_info_header = PcbLibCountHeader.one().to_bytes()
         pcblib.raw_file_version_info = PcbLibFileVersionInfo.default().to_bytes()
         pcblib.raw_section_keys = self._assign_storage_names()
@@ -3024,6 +3848,8 @@ class PcbLibBuilder:
                 if footprint.raw_uniqueid_info is not None
                 else None
             )
+            _sync_footprint_primitive_parameter_stream(footprint)
+            _sync_footprint_via_structure_streams(footprint)
             pcblib.footprints.append(footprint)
 
         return pcblib

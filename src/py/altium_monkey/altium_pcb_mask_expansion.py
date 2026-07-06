@@ -130,6 +130,29 @@ def resolve_pcb_mask_expansion(
     return PcbMaskExpansion(selected_mode, expansion_mils)
 
 
+def resolve_pcb_mask_expansion_with_manual_alias(
+    *,
+    value: PcbMaskExpansionInput = None,
+    mode: PcbMaskExpansionModeInput | None = None,
+    expansion_mils: float | None = None,
+    field_name: str,
+    default_mode: PcbMaskExpansionMode = PcbMaskExpansionMode.RULE,
+) -> PcbMaskExpansion:
+    """
+    Resolve mask-expansion inputs while preserving legacy mil-only manual calls.
+    """
+    selected_mode = mode
+    if expansion_mils is not None and value is None and selected_mode is None:
+        selected_mode = PcbMaskExpansionMode.MANUAL
+    return resolve_pcb_mask_expansion(
+        value=value,
+        mode=selected_mode,
+        expansion_mils=expansion_mils,
+        field_name=field_name,
+        default_mode=default_mode,
+    )
+
+
 def legacy_rule_expansion_to_mode(value: bool | None) -> PcbMaskExpansionMode | None:
     """
     Convert legacy custom-pad rule-expansion booleans to explicit modes.
@@ -209,5 +232,5 @@ def _apply_one_mask_expansion(
     manual_value = 0
     if expansion.mode == PcbMaskExpansionMode.MANUAL:
         assert expansion.expansion_mils is not None
-        manual_value = pad._to_internal_units(expansion.expansion_mils)
+        manual_value = int(round(float(expansion.expansion_mils) * 10000.0))
     setattr(pad, manual_attr, manual_value)

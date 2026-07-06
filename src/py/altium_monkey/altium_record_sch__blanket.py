@@ -14,7 +14,7 @@ from .altium_record_types import (
     color_to_hex,
     hex_to_win32_color,
 )
-from .altium_serializer import AltiumSerializer, CaseMode, Fields
+from .altium_serializer import AltiumSerializer, Fields
 from .altium_sch_record_helpers import (
     derive_triangle_indicator_colors,
     detect_case_mode_from_uppercase_fields,
@@ -159,6 +159,8 @@ class AltiumSchBlanket(AltiumSchPolygon):
 
                 if (
                     selected_rect is None
+                    or selected_bottom is None
+                    or selected_left is None
                     or selected_bottom <= raw_bottom
                     and (selected_bottom != raw_bottom or selected_left >= raw_left)
                 ):
@@ -375,7 +377,6 @@ class AltiumSchBlanket(AltiumSchPolygon):
             SchGeometryRecord,
             make_pen,
             make_solid_brush,
-            svg_coord_to_geometry,
             wrap_record_operations,
         )
 
@@ -385,16 +386,15 @@ class AltiumSchBlanket(AltiumSchPolygon):
         svg_points = [ctx.transform_coord_precise(vertex) for vertex in self.vertices]
         min_x = min(point_x for point_x, _ in svg_points)
         min_y = min(point_y for _, point_y in svg_points)
-        max_x = max(point_x for point_x, _ in svg_points)
-        max_y = max(point_y for _, point_y in svg_points)
         sheet_height_px = float(ctx.sheet_height or 0.0)
 
-        coord = lambda px, py: geometry_coord_list(
-            px,
-            py,
-            sheet_height_px=sheet_height_px,
-            units_per_px=units_per_px,
-        )
+        def coord(px: float, py: float) -> list[float]:
+            return geometry_coord_list(
+                px,
+                py,
+                sheet_height_px=sheet_height_px,
+                units_per_px=units_per_px,
+            )
 
         stroke_hex = color_to_hex(self.color) if self.color is not None else "#434343"
         stroke_raw = (

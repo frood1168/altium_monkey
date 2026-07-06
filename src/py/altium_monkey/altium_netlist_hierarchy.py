@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 from .altium_netlist_model import HierarchyPath
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def resolve_child_indices(
     child_filename_lower: str,
     sheet_symbol_info: SchSheetSymbolInfo,
-    filename_to_indices: dict[str, int | list[int]],
+    filename_to_indices: Mapping[str, int | list[int]],
     *,
     channel_instances: Iterable[ChannelInstance] = (),
     channel_netlist_map: dict[tuple[int, int], int] | None = None,

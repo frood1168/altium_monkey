@@ -30,7 +30,15 @@ from collections import OrderedDict
 from typing import Sequence
 
 from .altium_pcb_component import AltiumPcbComponent
-from .altium_utilities import create_stream_from_records, decode_byte_array, parse_byte_record
+from .altium_pcb_property_helpers import (
+    decode_dxp_parameter_value,
+    encode_dxp_parameter_value,
+)
+from .altium_utilities import (
+    create_stream_from_records,
+    decode_byte_array,
+    parse_byte_record,
+)
 
 
 def parse_component_parameter_stream(data: bytes) -> dict[str, dict[str, str]]:
@@ -43,11 +51,11 @@ def parse_component_parameter_stream(data: bytes) -> dict[str, dict[str, str]]:
     while offset < len(data):
         if len(data) < offset + 4:
             raise ValueError("Invalid PrimitiveParameters/Data stream")
-        record_len = struct.unpack("<I", data[offset:offset + 4])[0]
+        record_len = struct.unpack("<I", data[offset : offset + 4])[0]
         offset += 4
         if len(data) < offset + record_len:
             raise ValueError("Invalid PrimitiveParameters/Data stream")
-        raw_record = data[offset:offset + record_len]
+        raw_record = data[offset : offset + record_len]
         offset += record_len
         fields: OrderedDict[str, str] = OrderedDict()
         for part in parse_byte_record(raw_record):
@@ -62,7 +70,9 @@ def parse_component_parameter_stream(data: bytes) -> dict[str, dict[str, str]]:
                 parameter_map[current_uid] = {}
             continue
         if current_uid and "NAME" in fields and "VALUE" in fields:
-            parameter_map.setdefault(current_uid, {})[fields["NAME"]] = fields["VALUE"]
+            parameter_map.setdefault(current_uid, {})[fields["NAME"]] = (
+                decode_dxp_parameter_value(fields["VALUE"])
+            )
     if offset != len(data):
         raise ValueError("Unexpected trailing bytes in PrimitiveParameters/Data")
     return parameter_map
@@ -73,7 +83,7 @@ def build_component_parameter_stream(
 ) -> tuple[bytes, bytes]:
     """
     Build `PrimitiveParameters/Header` and `PrimitiveParameters/Data`.
-    
+
     Only components with non-empty `parameters` dicts are included.
     """
     records: list[dict[str, str]] = []
@@ -113,7 +123,7 @@ def build_component_parameter_stream(
                 OrderedDict(
                     (
                         ("NAME", str(name)),
-                        ("VALUE", str(value)),
+                        ("VALUE", encode_dxp_parameter_value(value)),
                         ("ISIMPORTED", "FALSE"),
                     )
                 )

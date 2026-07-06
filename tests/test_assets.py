@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tomllib
+import zlib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -86,6 +90,18 @@ def test_public_gitignore_tracks_lockfile_and_ignores_example_outputs() -> None:
     assert "examples/**/output/" in gitignore_lines
 
 
+def test_manifest_inputs_and_assets_do_not_use_ignored_output_dirs() -> None:
+    offenders: list[str] = []
+    for example in _load_examples():
+        for key in ("inputs", "assets"):
+            for declared_path in _declared_paths(example, key):
+                normalized = declared_path.replace("\\", "/")
+                if "/output/" in f"/{normalized}":
+                    offenders.append(f"{example['id']} {key[:-1]}: {declared_path}")
+
+    assert not offenders, "\n".join(offenders)
+
+
 def test_public_lockfile_matches_release_dependency_shape() -> None:
     lock_data = tomllib.loads((PUBLIC_ROOT / "uv.lock").read_text(encoding="utf-8"))
     packages = lock_data.get("package", [])
@@ -143,6 +159,7 @@ def test_domain_docs_list_public_workflow_examples() -> None:
         "SchRectMils",
         "schdoc_add_note",
         "schdoc_add_sheet_symbol",
+        "schdoc_vertical_pin_svg",
         "schdoc_svg",
         "schlib_svg",
         "pcbdoc_add_pad",
@@ -154,11 +171,37 @@ def test_domain_docs_list_public_workflow_examples() -> None:
         "pcbdoc_add_differential_pairs",
         "pcbdoc_user_union",
         "pcbdoc_diff_pair_report",
+        "pcbdoc_flex_topology_report",
+        "pcbdoc_create_flex_stiffener",
+        "pcbdoc_create_rigid_flex_split_lines",
+        "pcbdoc_create_flex_in_cutout",
+        "pcbdoc_create_rigid_flex_branch",
+        "pcbdoc_create_rigid_flex_branch_intrusion",
+        "pcbdoc_create_rigid_flex_two_branch",
+        "pcbdoc_create_rigid_flex_impedance_backdrill",
+        "pcbdoc_create_cavity_placements",
+        "pcbdoc_create_rigid_flex_multibranch",
+        "AltiumLayerStackDocument",
+        "AltiumStackBranch",
+        "source_stackup_ref",
+        "layers_for_board_region",
         "intlib_extract_sources",
         "altium_monkey.design.a1",
         "altium_monkey.netlist.a0",
     ):
         assert token in docs_text
+
+
+def test_pcbdoc_domain_docs_list_manifest_pcbdoc_examples() -> None:
+    docs_text = (PUBLIC_ROOT / "docs" / "pcbdoc.md").read_text(encoding="utf-8")
+    pcbdoc_example_ids = sorted(
+        str(example["id"])
+        for example in _load_examples()
+        if str(example["id"]).startswith("pcbdoc")
+    )
+
+    for example_id in ["hello_pcbdoc", *pcbdoc_example_ids]:
+        assert f"`{example_id}`" in docs_text or f"/{example_id}/" in docs_text
 
 
 def test_format_contract_docs_are_published() -> None:
@@ -197,6 +240,10 @@ def test_format_contract_docs_are_published() -> None:
     assert "altium_monkey.pcb.svg.enrichment.a0" in svg_contract
     assert "data-layer-display-name" in svg_contract
     assert "IPC-4761" in pcbdoc_contract
+    assert "source_stackup_ref" in pcbdoc_contract
+    assert "layerstack_id" in pcbdoc_contract
+    assert "branches_for_stack_ref" in pcbdoc_contract
+    assert "with or without braces" in pcbdoc_contract
 
 
 def test_generated_docs_are_current() -> None:
@@ -319,6 +366,155 @@ def _run_example_entrypoint(
     )
 
 
+def _mechanical_kind_sample_layer_set_1() -> list[str]:
+    return [
+        "MultiLayer",
+        "TopPaste",
+        "TopOverlay",
+        "TopSolder",
+        "TopLayer",
+        "BottomLayer",
+        "BottomSolder",
+        "BottomOverlay",
+        "BottomPaste",
+        "DrillGuide",
+        "KeepOutLayer",
+        *[f"Mechanical{number}" for number in range(1, 17)],
+        "DrillDrawing",
+        *[f"Mechanical{number}" for number in range(17, 32)],
+    ]
+
+
+def _mechanical_kind_sample_layer_set_5() -> list[str]:
+    return [f"Mechanical{number}" for number in range(1, 32)]
+
+
+def _split_layer_set(value: object) -> list[str]:
+    return [
+        part.strip() for part in str(value or "").strip().split(",") if part.strip()
+    ]
+
+
+def _public_mechanical_kind_pairs() -> list[tuple[str, str]]:
+    return [
+        ("MECHANICAL10", "MECHANICAL11"),
+        ("MECHANICAL12", "MECHANICAL13"),
+        ("MECHANICAL14", "MECHANICAL15"),
+        ("MECHANICAL16", "MECHANICAL17"),
+        ("MECHANICAL18", "MECHANICAL19"),
+        ("MECHANICAL20", "MECHANICAL21"),
+        ("MECHANICAL22", "MECHANICAL23"),
+        ("MECHANICAL24", "MECHANICAL25"),
+        ("MECHANICAL26", "MECHANICAL27"),
+        ("MECHANICAL28", "MECHANICAL29"),
+        ("MECHANICAL30", "MECHANICAL31"),
+    ]
+
+
+def _mechanical_layer_number(layer: str) -> int:
+    return int(layer.removeprefix("MECHANICAL"))
+
+
+def _expected_mechanical_kind_fields(
+    layer: str,
+    token: str,
+) -> dict[str, str]:
+    expected = {
+        "layer_v8": token,
+        "v9_cache": token,
+    }
+    if _mechanical_layer_number(layer) <= 16:
+        expected["legacy"] = token
+    else:
+        expected["v7"] = token
+    return expected
+
+
+def _indexed_raw_layer_field(
+    raw_record: dict[str, object],
+    key_re: re.Pattern[str],
+    layer_id: int,
+    field_name: str,
+) -> str | None:
+    groups: dict[int, dict[str, str]] = {}
+    for key, value in raw_record.items():
+        match = key_re.match(str(key))
+        if match is None:
+            continue
+        groups.setdefault(int(match.group(1)), {})[match.group(2).upper()] = str(value)
+    for values in groups.values():
+        if values.get("LAYERID") == str(int(layer_id)):
+            return values.get(field_name.upper())
+    return None
+
+
+def _v7_raw_layer_index(
+    raw_record: dict[str, object],
+    layer_id: int,
+) -> int | None:
+    for key, value in raw_record.items():
+        match = re.fullmatch(r"LAYERV7_(\d+)LAYERID", str(key), re.IGNORECASE)
+        if match is None or str(value) != str(int(layer_id)):
+            continue
+        return int(match.group(1))
+    return None
+
+
+def _pcbdoc_mechanical_kind_fields(
+    raw_record: dict[str, object],
+    layer: str,
+) -> dict[str, str | None]:
+    mechanical_number = _mechanical_layer_number(layer)
+    v7_layer_id = 0x01020000 + mechanical_number
+    fields: dict[str, str | None] = {}
+    if mechanical_number <= 16:
+        legacy_value = raw_record.get(f"LAYER{56 + mechanical_number}MECHKIND")
+        fields["legacy"] = str(legacy_value) if legacy_value else None
+    else:
+        v7_index = _v7_raw_layer_index(raw_record, v7_layer_id)
+        v7_value = (
+            None if v7_index is None else raw_record.get(f"LAYERV7_{v7_index}MECHKIND")
+        )
+        fields["v7"] = str(v7_value) if v7_value else None
+    fields["layer_v8"] = _indexed_raw_layer_field(
+        raw_record,
+        re.compile(r"^LAYER_V8_(\d+)(.+)$", re.IGNORECASE),
+        v7_layer_id,
+        "MECHKIND",
+    )
+    fields["v9_cache"] = _indexed_raw_layer_field(
+        raw_record,
+        re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE),
+        v7_layer_id,
+        "MECHKIND",
+    )
+    return fields
+
+
+def _assert_mechanical_kind_manifest(manifest: dict[str, object]) -> None:
+    assert manifest["registry_layer_count"] == 32
+    assert manifest["assignment_count"] == 30
+    assert manifest["pair_count"] == 11
+    assert manifest["route_tool_path_layer"] == "MECHANICAL3"
+    assert manifest["layer_set_1_layers"] == _mechanical_kind_sample_layer_set_1()
+    assert manifest["layer_set_5_layers"] == _mechanical_kind_sample_layer_set_5()
+    assert manifest["primitive_counts"] == {
+        key: 0 for key in manifest["primitive_counts"]
+    }
+    assignments = manifest["assignments"]
+    assert assignments[0]["layer"] == "MECHANICAL2"
+    assert assignments[0]["kind"] == "BOARD_SHAPE"
+    assert assignments[1]["layer"] == "MECHANICAL3"
+    assert assignments[1]["kind"] == "ROUTE_TOOL_PATH"
+    assert assignments[-1]["layer"] == "MECHANICAL31"
+    assert assignments[-1]["kind"] == "VALUE_BOTTOM"
+    if "mechanical_kind_fields" in manifest:
+        assert len(manifest["mechanical_kind_fields"]) == manifest["assignment_count"]
+    assert [
+        (pair["layer_1"], pair["layer_2"]) for pair in manifest["component_layer_pairs"]
+    ] == _public_mechanical_kind_pairs()
+
+
 @pytest.mark.parametrize(
     "example",
     _load_examples(),
@@ -346,6 +542,141 @@ def test_asset_example_runs_and_writes_declared_outputs(
         assert output_path.exists(), (
             f"{example['id']} missing declared output: {output}"
         )
+
+
+def test_pcbdoc_create_mechanical_layer_kinds_is_metadata_only_and_visible(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_mechanical_layer_kinds"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbDoc, MechanicalLayerKind
+    from altium_monkey.altium_pcb_layer_kind_mapping import (
+        mechanical_layer_kind_to_data_token,
+    )
+
+    output_root = check_examples_root / "pcbdoc_create_mechanical_layer_kinds"
+    output_path = output_root / "output" / "pcbdoc_create_mechanical_layer_kinds.PcbDoc"
+    manifest = json.loads(
+        (
+            output_root / "output" / "pcbdoc_create_mechanical_layer_kinds.json"
+        ).read_text(encoding="utf-8")
+    )
+    pcbdoc = AltiumPcbDoc.from_file(output_path)
+
+    _assert_mechanical_kind_manifest(manifest)
+    assert pcbdoc.board is not None
+    assert pcbdoc.get_mechanical_layer_kind("MECHANICAL2") == (
+        MechanicalLayerKind.BOARD_SHAPE
+    )
+    assert pcbdoc.get_mechanical_layer_kind("MECHANICAL3") == (
+        MechanicalLayerKind.ROUTE_TOOL_PATH
+    )
+    assert pcbdoc.get_mechanical_layer_kind("MECHANICAL31") == (
+        MechanicalLayerKind.VALUE_BOTTOM
+    )
+    raw_board = pcbdoc.board.raw_record or {}
+    assert str(raw_board.get("ROUTETOOLPATHLAYER", "")).strip() == "MECHANICAL3"
+    assert _split_layer_set(raw_board.get("LAYERSET1LAYERS")) == (
+        _mechanical_kind_sample_layer_set_1()
+    )
+    assert _split_layer_set(raw_board.get("LAYERSET5LAYERS")) == (
+        _mechanical_kind_sample_layer_set_5()
+    )
+    for pair_index, (layer_1, layer_2) in enumerate(_public_mechanical_kind_pairs()):
+        assert str(raw_board.get(f"MECHPAIR{pair_index}L1", "")).strip() == layer_1
+        assert str(raw_board.get(f"MECHPAIR{pair_index}L2", "")).strip() == layer_2
+    for assignment in manifest["assignments"]:
+        layer = str(assignment["layer"])
+        kind = MechanicalLayerKind[str(assignment["kind"])]
+        token = mechanical_layer_kind_to_data_token(kind)
+        assert _pcbdoc_mechanical_kind_fields(raw_board, layer) == (
+            _expected_mechanical_kind_fields(layer, token)
+        )
+    assert len(pcbdoc.components) == 0
+    assert len(pcbdoc.pads) == 0
+    assert len(pcbdoc.tracks) == 0
+    assert len(pcbdoc.vias) == 0
+
+
+def test_pcblib_create_mechanical_layer_kinds_is_metadata_only_and_visible(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcblib_create_mechanical_layer_kinds"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbLib, MechanicalLayerKind
+    from altium_monkey.altium_pcb_layer_kind_mapping import (
+        mechanical_layer_kind_to_data_token,
+    )
+    from altium_monkey.altium_pcblib_builder import PcbLibBuildProfile
+
+    output_root = check_examples_root / "pcblib_create_mechanical_layer_kinds"
+    output_path = output_root / "output" / "pcblib_create_mechanical_layer_kinds.PcbLib"
+    manifest = json.loads(
+        (
+            output_root / "output" / "pcblib_create_mechanical_layer_kinds.json"
+        ).read_text(encoding="utf-8")
+    )
+    pcblib = AltiumPcbLib.from_file(output_path)
+    library_data = PcbLibBuildProfile.from_pcblib(output_path).library_data
+
+    _assert_mechanical_kind_manifest(manifest)
+    assert pcblib.get_mechanical_layer_kind("MECHANICAL2") == (
+        MechanicalLayerKind.BOARD_SHAPE
+    )
+    assert pcblib.get_mechanical_layer_kind("MECHANICAL3") == (
+        MechanicalLayerKind.ROUTE_TOOL_PATH
+    )
+    assert pcblib.get_mechanical_layer_kind("MECHANICAL31") == (
+        MechanicalLayerKind.VALUE_BOTTOM
+    )
+    route_record = library_data.get_board_record("ROUTETOOLPATHLAYER")
+    assert route_record is not None
+    assert str(route_record.get_value("ROUTETOOLPATHLAYER", "")).strip() == (
+        "MECHANICAL3"
+    )
+    layer_set_1 = library_data.layer_sets.layer_set(1)
+    layer_set_5 = library_data.layer_sets.layer_set(5)
+    assert layer_set_1 is not None
+    assert layer_set_5 is not None
+    assert list(layer_set_1.layers) == _mechanical_kind_sample_layer_set_1()
+    assert list(layer_set_5.layers) == _mechanical_kind_sample_layer_set_5()
+    pair_values: dict[int, dict[int, str]] = {}
+    for segment in library_data.segments:
+        key = segment.key or ""
+        match = re.fullmatch(r"MECHPAIR(\d+)L([12])", key, re.IGNORECASE)
+        if match is None or segment.value is None:
+            continue
+        pair_values.setdefault(int(match.group(1)), {})[int(match.group(2))] = (
+            segment.value
+        )
+    assert [
+        (pair_values[index][1], pair_values[index][2])
+        for index in range(len(_public_mechanical_kind_pairs()))
+    ] == _public_mechanical_kind_pairs()
+    for assignment in manifest["assignments"]:
+        layer = str(assignment["layer"])
+        kind = MechanicalLayerKind[str(assignment["kind"])]
+        token = mechanical_layer_kind_to_data_token(kind)
+        assert library_data.mechanical_layer_kind_field_values(layer) == (
+            _expected_mechanical_kind_fields(layer, token)
+        )
+    assert len(pcblib.footprints) == 1
+    footprint = pcblib.footprints[0]
+    assert len(footprint.pads) == 0
+    assert len(footprint.tracks) == 0
+    assert len(footprint.vias) == 0
 
 
 def test_draftsman_blank_project_example_writes_parseable_drawing(
@@ -938,6 +1269,102 @@ def test_schdoc_svg_writes_project_page_svgs(check_examples_root: Path) -> None:
         assert "<svg" in svg_path.read_text(encoding="utf-8")[:200]
 
 
+def test_schdoc_vertical_pin_svg_example_writes_rotation_proof(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item for item in _load_examples() if item["id"] == "schdoc_vertical_pin_svg"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+    assert "Vertical pin SVG proof: True" in result.stdout
+
+    manifest_path = (
+        check_examples_root
+        / "schdoc_vertical_pin_svg"
+        / "output"
+        / "vertical_pin_svg_manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema"] == "altium_monkey.examples.schdoc_vertical_pin_svg.a0"
+    assert manifest["schlib"] == "output/schdoc_vertical_pin_svg.SchLib"
+    assert manifest["case_count"] == 6
+    assert manifest["symbol_name"] == "PIN_ROTATION_SYMBOL"
+    assert manifest["placed_component"] == {
+        "lib_reference": "PIN_ROTATION_SYMBOL",
+        "source_library_name": "schdoc_vertical_pin_svg.SchLib",
+        "design_item_id": "PIN_ROTATION_SYMBOL",
+        "pin_count": 6,
+    }
+    assert manifest["placed_pin_record_count"] == 6
+    assert manifest["placed_pin_records_are_text"] is True
+    assert manifest["vertical_pin_names_rotated"] is True
+    assert manifest["vertical_pin_designators_rotated"] is True
+    assert manifest["component_horizontal_names_not_rotated"] is True
+    assert manifest["component_horizontal_designators_not_rotated"] is True
+    assert manifest["custom_vertical_names_rotated"] is True
+    assert manifest["custom_vertical_designators_rotated"] is True
+    assert manifest["all_cases_match_expected"] is True
+
+    cases_by_id = {case["id"]: case for case in manifest["cases"]}
+    assert cases_by_id["up_default"]["pin_orientation"] == "DEG_90"
+    assert cases_by_id["down_default"]["pin_orientation"] == "DEG_270"
+    assert cases_by_id["up_default"]["uses_custom_pin_text_settings"] is False
+    assert cases_by_id["down_default"]["uses_custom_pin_text_settings"] is False
+    assert cases_by_id["up_default"]["pin_record_has_custom_text_fields"] is False
+    assert cases_by_id["down_default"]["pin_record_has_custom_text_fields"] is False
+    assert cases_by_id["up_component_horizontal"]["name_rotated"] is False
+    assert cases_by_id["down_component_horizontal"]["designator_rotated"] is False
+    assert (
+        cases_by_id["up_component_horizontal"]["pin_record_has_custom_text_fields"]
+        is True
+    )
+    assert cases_by_id["right_custom_vertical"]["name_rotated"] is True
+    assert cases_by_id["left_custom_vertical"]["designator_rotated"] is True
+    assert (
+        cases_by_id["right_custom_vertical"]["pin_record_has_custom_text_fields"]
+        is True
+    )
+    assert (
+        cases_by_id["left_custom_vertical"]["pin_record_has_custom_text_fields"] is True
+    )
+
+    svg_path = check_examples_root / "schdoc_vertical_pin_svg" / manifest["svg"]
+    svg_text = svg_path.read_text(encoding="utf-8")
+    assert "<svg" in svg_text[:200]
+    assert 'transform="rotate(-90 ' in svg_text
+    assert "UP_DEFAULT" in svg_text
+    assert "DOWN_DEFAULT" in svg_text
+
+    schlib_path = check_examples_root / "schdoc_vertical_pin_svg" / manifest["schlib"]
+    schdoc_path = check_examples_root / "schdoc_vertical_pin_svg" / manifest["schdoc"]
+    assert schlib_path.exists()
+    assert schdoc_path.exists()
+
+    from altium_monkey import AltiumSchDoc
+
+    schdoc = AltiumSchDoc(schdoc_path)
+    component = schdoc.components[0]
+    assert component.lib_reference == "PIN_ROTATION_SYMBOL"
+    assert component.source_library_name == "schdoc_vertical_pin_svg.SchLib"
+    assert component.design_item_id == "PIN_ROTATION_SYMBOL"
+    assert len(component.pins) == 6
+
+    pin_json = [
+        item for item in schdoc.to_json()["Objects"] if item.get("ObjectType") == "Pin"
+    ]
+    assert len(pin_json) == 6
+    assert all("BinaryData" not in item for item in pin_json)
+    assert {str(item["Name"]) for item in pin_json} == {
+        "UP_DEFAULT",
+        "DOWN_DEFAULT",
+        "UP_COMPONENT_HORIZONTAL",
+        "DOWN_COMPONENT_HORIZONTAL",
+        "RIGHT_CUSTOM_VERTICAL",
+        "LEFT_CUSTOM_VERTICAL",
+    }
+
+
 def test_schlib_svg_writes_symbol_part_svgs(check_examples_root: Path) -> None:
     example = next(item for item in _load_examples() if item["id"] == "schlib_svg")
     result = _run_example_entrypoint(example, check_examples_root)
@@ -1246,6 +1673,1647 @@ def test_pcbdoc_stats_reports_loz_old_man_board_metrics(
     assert physical_stack_by_name["CORE1"]["dk"] == pytest.approx(4.1)
     assert physical_stack_by_name["CORE1"]["df"] == pytest.approx(0.02)
     assert physical_stack_by_name["Top Solder"]["dk"] == pytest.approx(3.5)
+
+
+def test_pcbdoc_layer_stack_examples_write_semantic_manifests(
+    check_examples_root: Path,
+) -> None:
+    inspect_example = next(
+        item for item in _load_examples() if item["id"] == "pcbdoc_inspect_layer_stack"
+    )
+    inspect_result = _run_example_entrypoint(inspect_example, check_examples_root)
+    assert inspect_result.returncode == 0, inspect_result.stderr
+    assert "Physical layers:" in inspect_result.stdout
+
+    inspect_payload = json.loads(
+        (
+            check_examples_root
+            / "pcbdoc_inspect_layer_stack"
+            / "output"
+            / "layer_stack.json"
+        ).read_text(encoding="utf-8")
+    )
+    inspect_summary = inspect_payload["summary"]
+    assert inspect_payload["input_kind"] == "pcbdoc"
+    assert inspect_payload["input_path"] == "assets/pcbdoc/blank.PcbDoc"
+    assert inspect_payload["input_pcbdoc"] == "assets/pcbdoc/blank.PcbDoc"
+    assert inspect_summary["physical_layer_count"] > 0
+    assert (
+        inspect_summary["registry_entry_count"]
+        >= (inspect_summary["physical_layer_count"])
+    )
+    assert inspect_payload["layer_stack"]["physical_stacks"]
+    _assert_inspect_layer_stack_interchange_input(
+        inspect_example,
+        check_examples_root,
+        suffix=".stackupx",
+        source_text=_public_stackupx_fixture(),
+        expected_kind="stackupx",
+    )
+    _assert_inspect_layer_stack_interchange_input(
+        inspect_example,
+        check_examples_root,
+        suffix=".stackup",
+        source_text=_public_stackup_text_fixture(),
+        expected_kind="stackup",
+    )
+
+    create_example = next(
+        item for item in _load_examples() if item["id"] == "pcbdoc_create_layer_stack"
+    )
+    create_result = _run_example_entrypoint(create_example, check_examples_root)
+    assert create_result.returncode == 0, create_result.stderr
+    assert "Semantic match: True" in create_result.stdout
+
+    manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_layer_stack"
+        / "output"
+        / "layer_stack_manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["semantic_match"] is True
+    assert manifest["output_pcbdoc"] == (
+        "pcbdoc_create_layer_stack/output/pcbdoc_create_layer_stack.PcbDoc"
+    )
+    assert manifest["authored"] == manifest["readback"]
+    assert manifest["authored_stack_entry_count"] > 0
+    assert manifest["authored"]["physical_stacks"][0]["layers"]
+
+    from altium_monkey import AltiumPcbDoc
+    from altium_monkey.altium_layer_stack_document import AltiumLayerStackDocument
+
+    generated_pcbdoc = (
+        check_examples_root
+        / "pcbdoc_create_layer_stack"
+        / "output"
+        / "pcbdoc_create_layer_stack.PcbDoc"
+    )
+    stack = AltiumLayerStackDocument.from_pcbdoc(
+        AltiumPcbDoc.from_file(generated_pcbdoc)
+    )
+    assert _semantic_physical_layer_names(stack) == [
+        layer["display_name"]
+        for layer in manifest["readback"]["physical_stacks"][0]["layers"]
+    ]
+
+    stackup_files_example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_from_stackup_files"
+    )
+    stackup_files_result = _run_example_entrypoint(
+        stackup_files_example,
+        check_examples_root,
+    )
+    assert stackup_files_result.returncode == 0, stackup_files_result.stderr
+    assert "Semantic matches: True" in stackup_files_result.stdout
+    stackup_files_manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_from_stackup_files"
+        / "output"
+        / "from_stackup_files_manifest.json"
+    )
+    stackup_files_manifest = json.loads(
+        stackup_files_manifest_path.read_text(encoding="utf-8")
+    )
+    assert stackup_files_manifest["all_semantic_matches"] is True
+    cases_by_kind = {
+        case["source_kind"]: case for case in stackup_files_manifest["cases"]
+    }
+    assert set(cases_by_kind) == {"stackup", "stackupx"}
+    assert cases_by_kind["stackup"]["source_origin"] == "stackup"
+    assert cases_by_kind["stackupx"]["source_origin"] == "stackupx"
+    assert cases_by_kind["stackup"]["output_pcbdoc"] == (
+        "pcbdoc_create_from_stackup_files/output/from_stackup.PcbDoc"
+    )
+    assert cases_by_kind["stackupx"]["output_pcbdoc"] == (
+        "pcbdoc_create_from_stackup_files/output/from_stackupx.PcbDoc"
+    )
+    for case in cases_by_kind.values():
+        assert case["semantic_match"] is True
+        assert case["families"].count("solder_mask") == 2
+        assert [layer["display_name"] for layer in case["readback"]] == [
+            "Top Overlay",
+            "Top Solder",
+            "Top Layer",
+            "Dielectric 1",
+            "GND",
+            "Dielectric 2",
+            "PWR",
+            "Dielectric 3",
+            "Bottom Layer",
+            "Bottom Solder",
+            "Bottom Overlay",
+        ]
+
+    custom_example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_custom_rigid_stack"
+    )
+    custom_result = _run_example_entrypoint(custom_example, check_examples_root)
+    assert custom_result.returncode == 0, custom_result.stderr
+    assert "Semantic match: True" in custom_result.stdout
+    assert "Copper layers: TOP_SIG, L2_GND, L3_PWR, BOT_SIG" in (custom_result.stdout)
+
+    custom_manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_custom_rigid_stack"
+        / "output"
+        / "custom_rigid_stack_manifest.json"
+    )
+    custom_manifest = json.loads(custom_manifest_path.read_text(encoding="utf-8"))
+    assert custom_manifest["semantic_match"] is True
+    assert custom_manifest["output_pcbdoc"] == (
+        "pcbdoc_create_custom_rigid_stack/output/"
+        "pcbdoc_create_custom_rigid_stack.PcbDoc"
+    )
+    assert custom_manifest["output_stackup"] == (
+        "pcbdoc_create_custom_rigid_stack/output/"
+        "pcbdoc_create_custom_rigid_stack.stackup"
+    )
+    assert custom_manifest["output_stackupx"] == (
+        "pcbdoc_create_custom_rigid_stack/output/"
+        "pcbdoc_create_custom_rigid_stack.stackupx"
+    )
+    assert (
+        custom_manifest["authored"]
+        == custom_manifest["readback"]
+        == custom_manifest["stackup_readback"]
+        == custom_manifest["stackupx_readback"]
+    )
+    custom_layers = custom_manifest["readback"]["physical_stacks"][0]["layers"]
+    assert [
+        layer["display_name"] for layer in custom_layers if layer["family"] == "copper"
+    ] == ["TOP_SIG", "L2_GND", "L3_PWR", "BOT_SIG"]
+    assert [
+        layer["dielectric_material"]
+        for layer in custom_layers
+        if layer["family"] == "dielectric"
+    ] == ["PP-TEST", "PP-TEST", "FR4-TEST", "PP-TEST", "PP-TEST"]
+    assert custom_manifest["resolved"]["inner_signal_layers"] == [
+        "L2_GND",
+        "L3_PWR",
+    ]
+
+    custom_pcbdoc = (
+        check_examples_root
+        / "pcbdoc_create_custom_rigid_stack"
+        / "output"
+        / "pcbdoc_create_custom_rigid_stack.PcbDoc"
+    )
+    custom_stack = AltiumLayerStackDocument.from_pcbdoc(
+        AltiumPcbDoc.from_file(custom_pcbdoc)
+    )
+    assert _semantic_physical_layer_names(custom_stack)[:4] == [
+        "Top Overlay",
+        "Top Solder",
+        "TOP_SIG",
+        "PP_TOP_1080",
+    ]
+
+    jlcpcb_example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_jlcpcb_rigid_stack"
+    )
+    jlcpcb_source = (
+        check_examples_root
+        / "pcbdoc_create_jlcpcb_rigid_stack"
+        / "pcbdoc_create_jlcpcb_rigid_stack.py"
+    ).read_text(encoding="utf-8")
+    assert "LayerSchema.ComponentPlacement" not in jlcpcb_source
+    assert "stackupx_type_id" not in jlcpcb_source
+    assert "legacy_layer_id" not in jlcpcb_source
+    assert "STACKUP_ATTRIBUTES" not in jlcpcb_source
+    assert "stackup_attributes=" not in jlcpcb_source
+    assert "AltiumStackupSettings" in jlcpcb_source
+    assert "c7ef040e-8d00-490b-b00c-a7e7823ff174" not in jlcpcb_source.lower()
+    assert "f4eccd87-2cfb-4f37-be50-4f3a272b4d01" not in jlcpcb_source.lower()
+
+    jlcpcb_result = _run_example_entrypoint(jlcpcb_example, check_examples_root)
+    assert jlcpcb_result.returncode == 0, jlcpcb_result.stderr
+    assert "Semantic match: True" in jlcpcb_result.stdout
+    assert (
+        "Copper layers: Top Layer, Inner Layer 1, Inner Layer 2, Inner Layer 3, "
+        "Inner Layer 4, Inner Layer 5, Inner Layer 6, Bottom Layer"
+    ) in jlcpcb_result.stdout
+    assert "Dielectric rows: 9" in jlcpcb_result.stdout
+
+    jlcpcb_manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_jlcpcb_rigid_stack"
+        / "output"
+        / "jlcpcb_rigid_stack_manifest.json"
+    )
+    jlcpcb_manifest = json.loads(jlcpcb_manifest_path.read_text(encoding="utf-8"))
+    assert jlcpcb_manifest["source_reference"] == (
+        "JLCPCB JLC081211-1080 8-layer 1.2mm stackup"
+    )
+    assert jlcpcb_manifest["semantic_match"] is True
+    assert jlcpcb_manifest["output_pcbdoc"] == (
+        "pcbdoc_create_jlcpcb_rigid_stack/output/"
+        "pcbdoc_create_jlcpcb_rigid_stack.PcbDoc"
+    )
+    assert jlcpcb_manifest["output_stackup"] == (
+        "pcbdoc_create_jlcpcb_rigid_stack/output/"
+        "pcbdoc_create_jlcpcb_rigid_stack.stackup"
+    )
+    assert jlcpcb_manifest["output_stackupx"] == (
+        "pcbdoc_create_jlcpcb_rigid_stack/output/"
+        "pcbdoc_create_jlcpcb_rigid_stack.stackupx"
+    )
+    assert (
+        jlcpcb_manifest["authored"]
+        == jlcpcb_manifest["pcbdoc_readback"]
+        == jlcpcb_manifest["stackup_readback"]
+        == jlcpcb_manifest["stackupx_readback"]
+    )
+    assert jlcpcb_manifest["copper_layers"] == [
+        "Top Layer",
+        "Inner Layer 1",
+        "Inner Layer 2",
+        "Inner Layer 3",
+        "Inner Layer 4",
+        "Inner Layer 5",
+        "Inner Layer 6",
+        "Bottom Layer",
+    ]
+    assert jlcpcb_manifest["dielectric_layers"] == [
+        "Dielectric 1",
+        "Dielectric 2",
+        "Dielectric 3",
+        "Dielectric 4",
+        "Dielectric 5",
+        "Dielectric 6",
+        "Dielectric 7",
+        "Dielectric 8",
+        "Dielectric 9",
+    ]
+    assert (
+        jlcpcb_manifest["stackup_attributes"]["authored"]["ViaPlatingThickness"]
+        == "18um"
+    )
+    assert (
+        jlcpcb_manifest["stackup_attributes"]["stackupx_readback"]["Type"] == "Standard"
+    )
+    assert jlcpcb_manifest["stackup_attributes"]["pcbdoc_readback"] == {}
+    assert jlcpcb_manifest["stack_names"]["stackup_readback"] == "Master layer stack"
+    assert jlcpcb_manifest["pcbdoc_readback"]["layers"][7]["display_name"] == (
+        "Dielectric 3"
+    )
+    assert jlcpcb_manifest["pcbdoc_readback"]["layers"][8]["display_name"] == (
+        "Dielectric 4"
+    )
+    assert jlcpcb_manifest["pcbdoc_readback"]["layer_pairs"] == [
+        {
+            "pair_index": 0,
+            "low_layer_token": "TOP",
+            "high_layer_token": "BOTTOM",
+            "drill_pair_type_raw": 0,
+            "is_backdrill": False,
+        }
+    ]
+
+    jlcpcb_pcbdoc = (
+        check_examples_root
+        / "pcbdoc_create_jlcpcb_rigid_stack"
+        / "output"
+        / "pcbdoc_create_jlcpcb_rigid_stack.PcbDoc"
+    )
+    jlcpcb_stack = AltiumLayerStackDocument.from_pcbdoc(
+        AltiumPcbDoc.from_file(jlcpcb_pcbdoc)
+    )
+    assert _semantic_physical_layer_names(jlcpcb_stack)[:5] == [
+        "Top Overlay",
+        "Top Solder",
+        "Top Layer",
+        "Dielectric 1",
+        "Inner Layer 1",
+    ]
+
+    impedance_example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_impedance_rigid_stack"
+    )
+    impedance_result = _run_example_entrypoint(impedance_example, check_examples_root)
+    assert impedance_result.returncode == 0, impedance_result.stderr
+    assert "Semantic match: True" in impedance_result.stdout
+    assert (
+        "Copper layers: TOP_SIG, L2_GND, L3_SIG, L4_PWR, "
+        "L5_GND, L6_SIG, L7_GND, BOT_SIG"
+    ) in impedance_result.stdout
+    assert (
+        "Impedance profiles: SE50_TOP, SE50_L3, DIFF90_L6, SE50_BOTTOM"
+    ) in impedance_result.stdout
+
+    impedance_manifest_path = (
+        check_examples_root
+        / "pcbdoc_create_impedance_rigid_stack"
+        / "output"
+        / "impedance_rigid_stack_manifest.json"
+    )
+    impedance_manifest = json.loads(impedance_manifest_path.read_text(encoding="utf-8"))
+    assert impedance_manifest["semantic_match"] is True
+    assert impedance_manifest["output_pcbdoc"] == (
+        "pcbdoc_create_impedance_rigid_stack/output/"
+        "pcbdoc_create_impedance_rigid_stack.PcbDoc"
+    )
+    assert impedance_manifest["output_stackup"] == (
+        "pcbdoc_create_impedance_rigid_stack/output/"
+        "pcbdoc_create_impedance_rigid_stack.stackup"
+    )
+    assert impedance_manifest["output_stackupx"] == (
+        "pcbdoc_create_impedance_rigid_stack/output/"
+        "pcbdoc_create_impedance_rigid_stack.stackupx"
+    )
+    assert (
+        impedance_manifest["authored"]
+        == impedance_manifest["pcbdoc_readback"]
+        == impedance_manifest["stackup_readback"]
+        == impedance_manifest["stackupx_readback"]
+    )
+    assert impedance_manifest["pcbdoc_readback"]["copper_layers"] == [
+        "TOP_SIG",
+        "L2_GND",
+        "L3_SIG",
+        "L4_PWR",
+        "L5_GND",
+        "L6_SIG",
+        "L7_GND",
+        "BOT_SIG",
+    ]
+    assert [
+        profile["name"]
+        for profile in impedance_manifest["pcbdoc_readback"]["impedance_profiles"]
+    ] == ["SE50_TOP", "SE50_L3", "DIFF90_L6", "SE50_BOTTOM"]
+    assert [
+        (line["layer_token"], line["top_ref_token"], line["bottom_ref_token"])
+        for line in impedance_manifest["pcbdoc_readback"]["transmission_lines"]
+    ] == [
+        ("TOP", "", "MID1"),
+        ("MID2", "MID1", "MID3"),
+        ("MID5", "MID4", "MID6"),
+        ("BOTTOM", "MID6", ""),
+    ]
+    impedance_board_entries = _pcbdoc_board_data_entries(
+        check_examples_root / impedance_manifest["output_pcbdoc"]
+    )
+    assert any(
+        entry.startswith("V9_STACKCUSTOMDATA=") for entry in impedance_board_entries
+    )
+    assert not any(
+        entry.startswith(("IMPEDANCEPROFILE_V8_", "TRACEIMPEDANCE_V8_"))
+        for entry in impedance_board_entries
+    )
+
+    rigid_flex_pcbdoc = (
+        check_examples_root / "assets" / "pcbdoc" / "rigid_flex_topology_fixture.PcbDoc"
+    )
+    rigid_flex_stack = AltiumLayerStackDocument.from_pcbdoc(
+        AltiumPcbDoc.from_file(rigid_flex_pcbdoc)
+    )
+    assert len(rigid_flex_stack.board_regions) == 9
+    assert (
+        sum(region.bending_line_count for region in rigid_flex_stack.board_regions) == 4
+    )
+    flex_regions_from_asset = [
+        region
+        for region in rigid_flex_stack.board_regions
+        if region.layerstack_id == "{11111111-2222-4333-8444-555555555555}"
+    ]
+    assert [region.name for region in flex_regions_from_asset] == [
+        "Flex West Arm",
+        "Flex East Arm",
+        "Flex South Arm",
+        "Flex North Arm",
+    ]
+    assert [
+        line.radius_mils
+        for region in flex_regions_from_asset
+        for line in region.bending_lines
+    ] == [
+        300.0,
+        400.0,
+        500.0,
+        600.0,
+    ]
+    flex_dielectric = next(
+        layer
+        for layer in rigid_flex_stack.layers_for_substack(
+            "{11111111-2222-4333-8444-555555555555}"
+        )
+        if layer.display_name == "Dielectric 2"
+    )
+    assert flex_dielectric.dielectric_material == "Kapton / Polyimide"
+    assert flex_dielectric.dielectric_height_mils == pytest.approx(0.5)
+    assert flex_dielectric.dielectric_constant == pytest.approx(3.4)
+    assert flex_dielectric.dielectric_type == 4
+    rigid_flex_resolved = rigid_flex_stack.to_resolved_layer_stack()
+    assert [substack.name for substack in rigid_flex_resolved.substacks] == [
+        "Board Layer Stack",
+        "Research Flex",
+    ]
+    assert rigid_flex_resolved.substacks[1].layer_names == (
+        "GND",
+        "Dielectric 2",
+        "PWR",
+    )
+    rigid_envelope = rigid_flex_resolved.stack_envelope_for_substack(
+        rigid_flex_resolved.substacks[0].source_stackup_ref
+    )
+    flex_envelope = rigid_flex_resolved.stack_envelope_for_substack(
+        rigid_flex_resolved.substacks[1].source_stackup_ref
+    )
+    assert rigid_envelope is not None
+    assert flex_envelope is not None
+    assert rigid_envelope.z_zero == "substack.local_midplane"
+    assert flex_envelope.z_zero == "substack.local_midplane"
+    assert rigid_envelope.is_flex is False
+    assert flex_envelope.is_flex is True
+    assert rigid_envelope.total_thickness_mils > flex_envelope.total_thickness_mils
+    assert rigid_envelope.top_z_mils == pytest.approx(
+        rigid_envelope.total_thickness_mils / 2.0
+    )
+    assert rigid_envelope.bottom_z_mils == pytest.approx(
+        -rigid_envelope.total_thickness_mils / 2.0
+    )
+    assert [row.display_name for row in flex_envelope.layers] == [
+        "GND",
+        "Dielectric 2",
+        "PWR",
+    ]
+    assert [row.family for row in flex_envelope.layers] == [
+        "copper",
+        "dielectric",
+        "copper",
+    ]
+    assert flex_envelope.layers[0].z_top_mils == pytest.approx(flex_envelope.top_z_mils)
+    assert flex_envelope.layers[-1].z_bottom_mils == pytest.approx(
+        flex_envelope.bottom_z_mils
+    )
+    flex_region_envelope = rigid_flex_resolved.stack_envelope_for_board_region(
+        "{11111111-2222-4333-8444-555555555555}"
+    )
+    assert flex_region_envelope == flex_envelope
+    rigid_envelope_with_zero_rows = rigid_flex_resolved.stack_envelope_for_substack(
+        rigid_flex_resolved.substacks[0].source_stackup_ref,
+        include_zero_thickness_layers=True,
+    )
+    assert rigid_envelope_with_zero_rows is not None
+    assert rigid_envelope_with_zero_rows.total_thickness_mils == pytest.approx(
+        rigid_envelope.total_thickness_mils
+    )
+    assert [row.display_name for row in rigid_envelope.layers] != [
+        row.display_name for row in rigid_envelope_with_zero_rows.layers
+    ]
+    assert "Top Paste" in [
+        row.display_name for row in rigid_envelope_with_zero_rows.layers
+    ]
+
+    flex_topology_example = next(
+        item for item in _load_examples() if item["id"] == "pcbdoc_flex_topology_report"
+    )
+    flex_topology_result = _run_example_entrypoint(
+        flex_topology_example,
+        check_examples_root,
+    )
+    assert flex_topology_result.returncode == 0, flex_topology_result.stderr
+    assert "Rigid-flex mode: standard" in flex_topology_result.stdout
+    assert "Substacks: 2" in flex_topology_result.stdout
+    assert "Board regions: 9" in flex_topology_result.stdout
+    assert "Bend lines: 4" in flex_topology_result.stdout
+    assert "Branches: 0" in flex_topology_result.stdout
+
+    flex_topology_root = check_examples_root / "pcbdoc_flex_topology_report"
+    flex_topology_report = json.loads(
+        (flex_topology_root / "output" / "flex_topology_report.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert flex_topology_report["uses_packaged_fixture"] is True
+    assert flex_topology_report["input_pcbdoc"] == (
+        "assets/pcbdoc/rigid_flex_topology_fixture.PcbDoc"
+    )
+    assert flex_topology_report["summary"] == {
+        "active_stack_ref": "{E9E4740F-6231-4A54-9FA5-2B8E8601B7B2}",
+        "rigid_flex_mode": "standard",
+        "physical_stack_count": 1,
+        "substack_count": 2,
+        "flex_substack_count": 1,
+        "board_region_count": 9,
+        "bend_line_count": 4,
+        "branch_count": 0,
+        "layer_pair_count": 1,
+        "resolved_substack_count": 2,
+        "resolved_region_context_count": 9,
+    }
+    flex_substack_report = next(
+        item
+        for item in flex_topology_report["substacks"]
+        if item["name"] == "Research Flex"
+    )
+    assert flex_substack_report["source_stackup_ref"] == (
+        "{11111111-2222-4333-8444-555555555555}"
+    )
+    assert flex_substack_report["enabled_layer_names"] == [
+        "GND",
+        "Dielectric 2",
+        "PWR",
+    ]
+    flex_substack_envelope = flex_substack_report["stack_envelope"]
+    assert flex_substack_envelope["z_zero"] == "substack.local_midplane"
+    assert flex_substack_envelope["is_flex"] is True
+    assert flex_substack_envelope["total_thickness_mils"] == pytest.approx(
+        flex_envelope.total_thickness_mils
+    )
+    assert [row["display_name"] for row in flex_substack_envelope["layers"]] == [
+        "GND",
+        "Dielectric 2",
+        "PWR",
+    ]
+    assert flex_substack_report["region_names"] == [
+        "Flex West Arm",
+        "Flex East Arm",
+        "Flex South Arm",
+        "Flex North Arm",
+    ]
+    flex_regions = [
+        region
+        for region in flex_topology_report["board_regions"]
+        if region["substack_name"] == "Research Flex"
+    ]
+    assert [region["name"] for region in flex_regions] == [
+        "Flex West Arm",
+        "Flex East Arm",
+        "Flex South Arm",
+        "Flex North Arm",
+    ]
+    assert [region["bend_lines"][0]["radius_mils"] for region in flex_regions] == [
+        300.0,
+        400.0,
+        500.0,
+        600.0,
+    ]
+    assert all(
+        region["stack_envelope"]["total_thickness_mils"]
+        == pytest.approx(flex_envelope.total_thickness_mils)
+        for region in flex_regions
+    )
+    rigid_region = next(
+        region
+        for region in flex_topology_report["board_regions"]
+        if region["substack_name"] == "Board Layer Stack"
+    )
+    assert rigid_region["stack_envelope"]["is_flex"] is False
+    assert rigid_region["stack_envelope"]["total_thickness_mils"] == pytest.approx(
+        rigid_envelope.total_thickness_mils
+    )
+    assert flex_topology_report["branches"] == []
+    assert flex_topology_report["query_examples"]["stable_join_key"] == (
+        "AltiumStackSubstack.source_stackup_ref == AltiumStackRegion.layerstack_id"
+    )
+    assert flex_topology_report["query_examples"]["regions_by_flex_substack_id"] == {
+        "{11111111-2222-4333-8444-555555555555}": [
+            "Flex West Arm",
+            "Flex East Arm",
+            "Flex South Arm",
+            "Flex North Arm",
+        ]
+    }
+    flex_topology_text = (
+        flex_topology_root / "output" / "flex_topology_report.txt"
+    ).read_text(encoding="utf-8")
+    assert "Research Flex (flex)" in flex_topology_text
+    assert "Flex West Arm -> Research Flex" in flex_topology_text
+    assert "Substack Local Z Envelopes" in flex_topology_text
+    assert "Research Flex (flex):" in flex_topology_text
+    assert "(none in this standard rigid-flex fixture)" in flex_topology_text
+
+
+def test_pcbdoc_rigid_flex_create_examples_verify_native_readback(
+    check_examples_root: Path,
+) -> None:
+    from altium_monkey import AltiumPcbDoc
+    from altium_monkey.altium_layer_stack_document import AltiumLayerStackDocument
+
+    cases = (
+        {
+            "id": "pcbdoc_create_flex_stiffener",
+            "manifest": "pcbdoc_create_flex_stiffener/output/flex_stiffener_manifest.json",
+            "spec": "assets/pcbdoc_layer_stack_specs/flex_stiffener.json",
+            "exact_interchange_reference": True,
+            "substack_count": 3,
+            "region_count": 3,
+            "branch_names": ["Board"],
+            "stiffener_layers": ["Stiffener 1", "bottom_stiffener"],
+            "bend_radii": [250.0],
+            "geometry": {
+                "board_outline_vertex_count": 13,
+                "board_cutout_count": 1,
+                "board_cutout_vertex_counts": [16],
+                "polygon_count": 6,
+                "polygon_outline_vertex_counts": [5, 5, 6, 6, 45, 45],
+                "region_count": 7,
+                "shapebased_region_count": 7,
+                "shapebased_outline_vertex_counts": [17, 5, 5, 6, 6, 45, 45],
+                "shapebased_layers": [56, 0, 0, 0, 0, 0, 0],
+            },
+        },
+        {
+            "id": "pcbdoc_create_rigid_flex_split_lines",
+            "manifest": (
+                "pcbdoc_create_rigid_flex_split_lines/output/"
+                "rigid_flex_split_lines_manifest.json"
+            ),
+            "spec": "assets/pcbdoc_layer_stack_specs/rigid_flex_split_lines.json",
+            "exact_interchange_reference": True,
+            "substack_count": 2,
+            "region_count": 3,
+            "branch_names": ["Board"],
+            "stiffener_layers": [],
+            "bend_radii": [380.0002, 260.0001],
+            "board_region_extended_tails": False,
+            "region_v7_layers": [
+                "MECHANICAL64532",
+                "MECHANICAL64532",
+                "MECHANICAL64533",
+                "MECHANICAL64533",
+            ],
+        },
+        {
+            "id": "pcbdoc_create_flex_in_cutout",
+            "manifest": (
+                "pcbdoc_create_flex_in_cutout/output/flex_in_cutout_manifest.json"
+            ),
+            "spec": "assets/pcbdoc_layer_stack_specs/flex_in_cutout.json",
+            "exact_interchange_reference": True,
+            "substack_count": 2,
+            "region_count": 3,
+            "branch_names": ["Board"],
+            "stiffener_layers": [],
+            "bend_radii": [196.8504],
+            "stream_sha256": {
+                "Tracks6/Data": (
+                    "656076e50c3ea1fc4e169d64ab282ae4d028cecfa65373ffaf9be16df7585f13"
+                ),
+                "Regions6/Data": (
+                    "5af544734d1fd737e5d008cf2994adf8cdd4e3398aa3db454b4cc24c294130e4"
+                ),
+                "ShapeBasedRegions6/Data": (
+                    "b2b132cb7c07039ab96d442da503b213520c4183d0d3af9856e0f1434adb3331"
+                ),
+                "BoardRegions/Data": (
+                    "d703b8c4b6437603dfa9437e33f636c9d92adbff605b4fc0a032f7da60cad967"
+                ),
+            },
+            "v9_layer_cache_names": {
+                16908289: "Cutout",
+                16908290: "InnerFlex",
+                16908291: "InnerRigid",
+                16908292: "Mechanical 4",
+            },
+            "enabled_mechanical_v7_save_ids": [
+                16908289,
+                16908290,
+                16908291,
+                16908292,
+            ],
+        },
+        {
+            "id": "pcbdoc_create_rigid_flex_branch",
+            "manifest": (
+                "pcbdoc_create_rigid_flex_branch/output/rigid_flex_branch_manifest.json"
+            ),
+            "spec": "assets/pcbdoc_layer_stack_specs/rigid_flex_branch_chain.json",
+            "exact_interchange_reference": True,
+            "substack_count": 3,
+            "region_count": 2,
+            "branch_names": ["MAIN_RIGID"],
+            "stiffener_layers": [],
+            "bend_radii": [500.0],
+            "geometry": {
+                "board_outline_vertex_count": 12,
+                "board_cutout_count": 0,
+                "board_cutout_vertex_counts": [],
+                "polygon_count": 2,
+                "polygon_outline_vertex_counts": [5, 5],
+                "track_count": 20,
+                "track_layers": [
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    39,
+                    39,
+                    39,
+                    39,
+                    40,
+                    40,
+                    40,
+                    40,
+                ],
+                "region_count": 0,
+                "shapebased_region_count": 0,
+                "shapebased_outline_vertex_counts": [],
+            },
+        },
+        {
+            "id": "pcbdoc_create_rigid_flex_branch_intrusion",
+            "manifest": (
+                "pcbdoc_create_rigid_flex_branch_intrusion/output/"
+                "rigid_flex_branch_intrusion_manifest.json"
+            ),
+            "spec": (
+                "assets/pcbdoc_layer_stack_specs/rigid_flex_branch_intrusion.json"
+            ),
+            "exact_interchange_reference": True,
+            "substack_count": 3,
+            "region_count": 2,
+            "branch_names": ["MAIN_RIGID"],
+            "stiffener_layers": [],
+            "bend_radii": [500.0],
+        },
+        {
+            "id": "pcbdoc_create_rigid_flex_two_branch",
+            "manifest": (
+                "pcbdoc_create_rigid_flex_two_branch/output/"
+                "rigid_flex_two_branch_manifest.json"
+            ),
+            "spec": (
+                "assets/pcbdoc_layer_stack_specs/rigid_flex_two_branch_extensions.json"
+            ),
+            "exact_interchange_reference": True,
+            "substack_count": 5,
+            "region_count": 1,
+            "branch_names": ["EAST_BRANCH", "WEST_BRANCH"],
+            "stiffener_layers": [],
+            "bend_radii": [500.0, 500.0],
+        },
+        {
+            "id": "pcbdoc_create_rigid_flex_impedance_backdrill",
+            "manifest": (
+                "pcbdoc_create_rigid_flex_impedance_backdrill/output/"
+                "rigid_flex_impedance_backdrill_manifest.json"
+            ),
+            "spec": (
+                "assets/pcbdoc_layer_stack_specs/rigid_flex_impedance_backdrill.json"
+            ),
+            "exact_interchange_reference": True,
+            "substack_count": 7,
+            "region_count": 7,
+            "branch_names": ["EAST_BRANCH", "WEST_BRANCH", "WEST_EXTENTION_BRANCH"],
+            "stiffener_layers": [],
+            "bend_radii": [250.0, 200.0, 250.0],
+            "impedance_profile_count": 2,
+            "transmission_line_count": 63,
+            "layer_pair_count": 16,
+            "backdrill_pair_count": 5,
+            "region_v7_layers": [
+                "MECHANICAL64540",
+                "MECHANICAL64532",
+                "MECHANICAL64541",
+                "MECHANICAL64533",
+            ],
+            "stream_sha256": {
+                "Regions6/Data": (
+                    "c19bd501ff0db0e55c2da8afd64919035de7517532010bb02993cc01231d85a5"
+                ),
+                "ShapeBasedRegions6/Data": (
+                    "3a71958346f8345fa234d362b8627d51083e687e499a0d508b95d7dcf9b7bfa8"
+                ),
+                "BoardRegions/Data": (
+                    "e7c57d4f49fbfcb7e6f70a08b62442c1afb160cd0224acd9f9fd0898cf7b59d6"
+                ),
+            },
+        },
+        {
+            "id": "pcbdoc_create_rigid_flex_multibranch",
+            "manifest": (
+                "pcbdoc_create_rigid_flex_multibranch/output/"
+                "rigid_flex_multibranch_manifest.json"
+            ),
+            "spec": (
+                "assets/pcbdoc_layer_stack_specs/rigid_flex_nested_multibranch.json"
+            ),
+            "exact_interchange_reference": True,
+            "substack_count": 7,
+            "region_count": 7,
+            "branch_names": ["EAST_BRANCH", "WEST_BRANCH", "WEST_EXTENTION_BRANCH"],
+            "stiffener_layers": [],
+            "bend_radii": [250.0, 200.0, 250.0],
+            "geometry": {
+                "board_outline_vertex_count": 28,
+                "board_cutout_count": 0,
+                "board_cutout_vertex_counts": [],
+                "polygon_count": 6,
+                "polygon_outline_vertex_counts": [5, 5, 5, 5, 9, 21],
+                "track_count": 28,
+                "track_layers": [
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                    33,
+                ],
+                "region_count": 4,
+                "shapebased_region_count": 4,
+                "shapebased_outline_vertex_counts": [5, 5, 5, 5],
+                "shapebased_layers": [0, 0, 0, 0],
+            },
+        },
+    )
+
+    examples = {str(item["id"]): item for item in _load_examples()}
+    for case in cases:
+        example = examples[str(case["id"])]
+        result = _run_example_entrypoint(example, check_examples_root)
+        assert result.returncode == 0, result.stderr
+        assert "Semantic match: True" in result.stdout
+
+        manifest = json.loads(
+            (check_examples_root / str(case["manifest"])).read_text(encoding="utf-8")
+        )
+        assert manifest["semantic_match"] is True
+        readback = manifest["pcbdoc_readback"]
+        assert readback == manifest["authored"]
+        spec: dict[str, object] | None = None
+        if "spec" in case:
+            spec = json.loads(
+                (check_examples_root / str(case["spec"])).read_text(encoding="utf-8")
+            )
+            assert readback == spec["expected_native_signature"]
+            assert manifest["pcbdoc_geometry"] == spec["source_geometry_counts"]
+        assert len(readback["substacks"]) == case["substack_count"]
+        assert len(readback["regions"]) == case["region_count"]
+        assert [branch["name"] for branch in readback["branches"]] == case[
+            "branch_names"
+        ]
+        assert readback["stiffener_layers"] == case["stiffener_layers"]
+        assert [
+            radius
+            for region in readback["regions"]
+            for radius in region["bend_radii_mils"]
+        ] == case["bend_radii"]
+        assert manifest["stackup_readback"]["branch_names"] == case["branch_names"]
+        assert manifest["stackupx_readback"]["branch_names"] == case["branch_names"]
+        stackupx_reference: Path | None = None
+        if case.get("exact_interchange_reference"):
+            assert manifest["stackup_exact_reference_match"] is True
+            assert manifest["stackupx_exact_reference_match"] is True
+            assert spec is not None
+            spec_root = check_examples_root / "assets" / "pcbdoc_layer_stack_specs"
+            stackup_reference = spec_root / str(spec["reference_stackup"])
+            stackupx_reference = spec_root / str(spec["reference_stackupx"])
+            assert (check_examples_root / manifest["output_stackup"]).read_bytes() == (
+                stackup_reference.read_bytes()
+            )
+            assert (check_examples_root / manifest["output_stackupx"]).read_bytes() == (
+                stackupx_reference.read_bytes()
+            )
+        if "geometry" in case:
+            geometry = manifest["pcbdoc_geometry"]
+            for key, expected in case["geometry"].items():
+                assert geometry[key] == expected
+        if "stream_sha256" in case:
+            assert (
+                _pcbdoc_stream_sha256(
+                    check_examples_root / manifest["output_pcbdoc"],
+                    case["stream_sha256"],
+                )
+                == case["stream_sha256"]
+            )
+
+        output_pcbdoc = AltiumPcbDoc.from_file(
+            check_examples_root / manifest["output_pcbdoc"]
+        )
+        if "v9_layer_cache_names" in case:
+            assert output_pcbdoc.board is not None
+            expected_names = dict(case["v9_layer_cache_names"])
+            for layer_id, expected_name in expected_names.items():
+                assert output_pcbdoc.board.v9_layer_cache[layer_id] == expected_name
+        if "enabled_mechanical_v7_save_ids" in case:
+            assert output_pcbdoc.board is not None
+            assert list(output_pcbdoc.board.enabled_mechanical_v7_save_ids) == list(
+                case["enabled_mechanical_v7_save_ids"]
+            )
+        if "region_v7_layers" in case:
+            expected_v7_layers = list(case["region_v7_layers"])
+            assert [
+                region.properties.get("V7_LAYER", "")
+                for region in output_pcbdoc.regions
+            ] == expected_v7_layers
+            assert [
+                region.properties.get("V7_LAYER", "")
+                for region in output_pcbdoc.shapebased_regions
+            ] == expected_v7_layers
+
+        pcbdoc_stack = AltiumLayerStackDocument.from_pcbdoc(output_pcbdoc)
+        assert len(pcbdoc_stack.substacks) == case["substack_count"]
+        assert len(pcbdoc_stack.board_regions) == case["region_count"]
+        assert [branch.name for branch in pcbdoc_stack.branches] == case["branch_names"]
+        if "impedance_profile_count" in case:
+            assert (
+                len(pcbdoc_stack.impedance_profiles) == case["impedance_profile_count"]
+            )
+            assert (
+                len(pcbdoc_stack.transmission_lines) == case["transmission_line_count"]
+            )
+            assert len(pcbdoc_stack.layer_pairs) == case["layer_pair_count"]
+            assert (
+                sum(1 for pair in pcbdoc_stack.layer_pairs if pair.is_backdrill is True)
+                == case["backdrill_pair_count"]
+            )
+        board_data_entries = _pcbdoc_board_data_entries(
+            check_examples_root / manifest["output_pcbdoc"]
+        )
+        if spec is not None:
+            _assert_top_level_bend_cache_matches_spec(
+                check_examples_root / manifest["output_pcbdoc"],
+                spec,
+            )
+        _assert_v9_cache_contexts_cover_substacks(
+            board_data_entries,
+            tuple(pcbdoc_stack.substacks),
+        )
+        _assert_v8_board_rows_cover_authored_stack(
+            board_data_entries,
+            pcbdoc_stack,
+        )
+        _assert_native_board6_omits_stackupx_only_layers(
+            board_data_entries,
+            pcbdoc_stack,
+        )
+        if stackupx_reference is not None and case.get("exact_interchange_reference"):
+            assert spec is not None
+            if _spec_has_board_stack_source_entries(spec):
+                _assert_board6_stack_source_entries_match_spec(
+                    check_examples_root / manifest["output_pcbdoc"],
+                    spec,
+                )
+            else:
+                _assert_embedded_stackupx_stack_layer_signature_matches_reference(
+                    check_examples_root / manifest["output_pcbdoc"],
+                    stackupx_reference,
+                )
+            _assert_embedded_stackupx_branch_stack_refs_are_defined(
+                check_examples_root / manifest["output_pcbdoc"],
+            )
+        if case.get("board_region_extended_tails", True):
+            _assert_board_regions_have_extended_outline_tails(
+                check_examples_root / manifest["output_pcbdoc"],
+                expected_region_count=int(case["region_count"]),
+            )
+        else:
+            _assert_board_regions_have_no_extended_outline_tails(
+                check_examples_root / manifest["output_pcbdoc"],
+                expected_region_count=int(case["region_count"]),
+            )
+
+
+def _assert_inspect_layer_stack_interchange_input(
+    example: dict[str, object],
+    check_examples_root: Path,
+    *,
+    suffix: str,
+    source_text: str,
+    expected_kind: str,
+) -> None:
+    entrypoint = example.get("entrypoint")
+    if not isinstance(entrypoint, str):
+        raise TypeError("pcbdoc_inspect_layer_stack entrypoint must be a string")
+    sample_root = check_examples_root / "pcbdoc_inspect_layer_stack"
+    input_path = sample_root / "output" / f"public_fixture{suffix}"
+    output_path = sample_root / "output" / f"public_fixture{suffix}.json"
+    input_path.parent.mkdir(parents=True, exist_ok=True)
+    input_path.write_text(source_text, encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(check_examples_root / entrypoint),
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+        cwd=check_examples_root.parent,
+        env=_example_subprocess_env(),
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert f"Input kind: {expected_kind}" in result.stdout
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert payload["input_kind"] == expected_kind
+    assert payload["input_path"].endswith(f"public_fixture{suffix}")
+    assert "input_pcbdoc" not in payload
+    summary = payload["summary"]
+    assert summary["physical_layer_count"] == 3
+    assert summary["layer_pair_count"] == 1
+    assert summary["top_layer"] == "Top Layer"
+    assert summary["bottom_layer"] == "Bottom Layer"
+    assert summary["impedance_profile_count"] == 0
+    assert payload["layer_stack"]["physical_stacks"][0]["layer_names"] == [
+        "Top Layer",
+        "Dielectric 1",
+        "Bottom Layer",
+    ]
+
+
+def _public_stackupx_fixture() -> str:
+    return """\
+<StackupDocument SerializerVersion="1.1.0.0" Version="2.1.0.0" Id="{PUBLIC-STACKUPX}" RevisionId="{PUBLIC-REVISION}" RevisionDate="2026-06-02T00:00:00Z" xmlns="http://altium.com/ns/LayerStackManager">
+  <FeatureSet>
+    <Feature Id="{PUBLIC-FEATURE}">Standard Stackup</Feature>
+  </FeatureSet>
+  <Stackup Type="Standard">
+    <Stacks>
+      <Stack Id="{PUBLIC-SUBSTACK}" Name="Board Layer Stack" IsFlex="False">
+        <Layers>
+          <Layer Id="{PUBLIC-TOP}" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Top Layer" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.4mil</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="{PUBLIC-DIELECTRIC}" TypeId="92b02d5e-8d69-48a8-880e-ac4b77db099d" Name="Dielectric 1" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">10mil</Property>
+              <Property Name="Material" Type="String">FR-4</Property>
+              <Property Name="DielectricConstant" Type="DimensionlessValue">4.2</Property>
+            </Properties>
+          </Layer>
+          <Layer Id="{PUBLIC-BOTTOM}" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Bottom Layer" IsShared="True">
+            <Properties>
+              <Property Name="Thickness" Type="LengthValue">1.4mil</Property>
+            </Properties>
+          </Layer>
+        </Layers>
+        <ViaSpans>
+          <ViaSpan Id="{PUBLIC-SPAN}" AutoName="Thru 1:2" Type="ThruVia" StartLayerId="{PUBLIC-TOP}" StopLayerId="{PUBLIC-BOTTOM}" />
+        </ViaSpans>
+      </Stack>
+    </Stacks>
+  </Stackup>
+</StackupDocument>
+"""
+
+
+def _public_stackup_text_fixture() -> str:
+    rows = [
+        "STACKUPVERSION=1",
+        "STACKUPDOCUMENTID={PUBLIC-STACKUP}",
+        "STACKUPDOCUMENTREVISIONID={PUBLIC-REVISION}",
+        "STACKUPDOCUMENTREVISIONDATE=06/02/2026 00:00:00",
+        "FEATURE_0ID={PUBLIC-FEATURE}",
+        "FEATURE_0NAME=Standard Stackup",
+        "LAYERMASTERSTACK_V8ID={PUBLIC-STACKUP}",
+        "LAYERMASTERSTACK_V8NAME=Master layer stack",
+        "LAYERSUBSTACK_V8_0ID={PUBLIC-SUBSTACK}",
+        "LAYERSUBSTACK_V8_0NAME=Board Layer Stack",
+        "LAYERSUBSTACK_V8_0ISFLEX=False",
+        "LAYERSUBSTACK_V8_0USEDBYPRIMS=False",
+        "LAYER_V8_0LAYERID=16777217",
+        "LAYER_V8_0ID={PUBLIC-TOP}",
+        "LAYER_V8_0NAME=Top Layer",
+        "LAYER_V8_0COPTHICK=1.4mil",
+        "LAYER_V8_1LAYERID=17039361",
+        "LAYER_V8_1ID={PUBLIC-DIELECTRIC}",
+        "LAYER_V8_1NAME=Dielectric 1",
+        "LAYER_V8_1DIELHEIGHT=10mil",
+        "LAYER_V8_1DIELCONST=4.2",
+        "LAYER_V8_1DIELMATERIAL=FR-4",
+        "LAYER_V8_2LAYERID=16842751",
+        "LAYER_V8_2ID={PUBLIC-BOTTOM}",
+        "LAYER_V8_2NAME=Bottom Layer",
+        "LAYER_V8_2COPTHICK=1.4mil",
+        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0ID={PUBLIC-SPAN}",
+        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0NAME=Thru 1:2",
+        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0TYPE=0",
+        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0FIRSTLAYERID={PUBLIC-TOP}",
+        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0LASTLAYERID={PUBLIC-BOTTOM}",
+    ]
+    return "|" + "|".join(rows) + "\n"
+
+
+def _semantic_physical_layer_names(
+    stack: object,
+) -> list[str]:
+    physical_stacks = list(getattr(stack, "physical_stacks", ()) or ())
+    if not physical_stacks:
+        return []
+    return [
+        str(getattr(layer, "display_name", ""))
+        for layer in tuple(getattr(physical_stacks[0], "layers", ()) or ())
+    ]
+
+
+def _pcbdoc_board_data_entries(path: Path) -> tuple[str, ...]:
+    from altium_monkey.altium_ole import AltiumOleFile
+    from altium_monkey.altium_pcbdoc_builder import PcbDocBoardData
+
+    with AltiumOleFile(str(path)) as ole:
+        board_data = PcbDocBoardData.from_bytes(ole.openstream(["Board6", "Data"]))
+    return tuple(
+        str(getattr(entry, "raw", "") or "")
+        for segment in tuple(board_data.segments)
+        for entry in tuple(segment.entries)
+    )
+
+
+def _pcbdoc_top_level_board_data_entries(path: Path) -> tuple[str, ...]:
+    from altium_monkey.altium_ole import AltiumOleFile
+    from altium_monkey.altium_pcbdoc_builder import PcbDocBoardData
+
+    with AltiumOleFile(str(path)) as ole:
+        board_data = PcbDocBoardData.from_bytes(ole.openstream(["Board6", "Data"]))
+    return tuple(
+        str(getattr(entry, "raw", "") or "")
+        for entry in tuple(board_data.top_level_segment.entries)
+    )
+
+
+def _pcbdoc_stream_sha256(
+    path: Path,
+    expected_streams: object,
+) -> dict[str, str]:
+    from altium_monkey.altium_ole import AltiumOleFile
+
+    if not isinstance(expected_streams, dict):
+        raise TypeError("expected streams must be a mapping")
+    result: dict[str, str] = {}
+    with AltiumOleFile(str(path)) as ole:
+        for stream_name in expected_streams:
+            stream_parts = str(stream_name).split("/")
+            result[str(stream_name)] = hashlib.sha256(
+                ole.openstream(stream_parts)
+            ).hexdigest()
+    return result
+
+
+def _assert_top_level_bend_cache_matches_spec(
+    pcbdoc_path: Path,
+    spec: dict[str, object],
+) -> None:
+    document = spec.get("layer_stack_document")
+    assert isinstance(document, dict)
+    board_split_lines = document.get("board_split_lines", [])
+    board_bending_lines = document.get("board_bending_lines", [])
+    board_arc_split_lines = document.get("board_arc_split_lines", [])
+    assert isinstance(board_split_lines, list)
+    assert isinstance(board_bending_lines, list)
+    assert isinstance(board_arc_split_lines, list)
+    if not board_split_lines and not board_bending_lines and not board_arc_split_lines:
+        return
+
+    expected: list[str] = []
+    for index, value in enumerate(board_split_lines):
+        expected.append(f"SPLITLINE{index}={value}")
+    if board_split_lines:
+        expected.append(f"SPLITLINECOUNT={len(board_split_lines)}")
+    elif board_bending_lines or board_arc_split_lines:
+        expected.append("SPLITLINECOUNT=0")
+    if board_bending_lines or board_arc_split_lines:
+        expected.append(f"BENDINGLINECOUNT={len(board_bending_lines)}")
+        for index, line in enumerate(board_bending_lines):
+            assert isinstance(line, dict)
+            expected.append(f"BENDINGLINE{index}={line['raw_value']}")
+    if board_arc_split_lines:
+        expected.append(f"ARCSPLITLINESCOUNT={len(board_arc_split_lines)}")
+        for index, value in enumerate(board_arc_split_lines):
+            expected.append(f"ARCSPLITLINE{index}={value}")
+
+    raw_entries = _pcbdoc_top_level_board_data_entries(pcbdoc_path)
+    actual = tuple(
+        raw
+        for raw in raw_entries
+        if raw.startswith("SPLITLINE")
+        or raw.startswith("BENDINGLINE")
+        or raw.startswith("ARCSPLITLINE")
+    )
+    assert actual == tuple(expected)
+
+
+def _assert_board_regions_have_extended_outline_tails(
+    path: Path,
+    *,
+    expected_region_count: int,
+) -> None:
+    from altium_monkey.altium_ole import AltiumOleFile
+
+    with AltiumOleFile(str(path)) as ole:
+        data = ole.openstream(["BoardRegions", "Data"])
+
+    tail_lengths: list[int] = []
+    offset = 0
+    while offset < len(data) - 1:
+        if data[offset] != 0x0B:
+            offset += 1
+            continue
+        record_length = struct.unpack("<I", data[offset + 1 : offset + 5])[0]
+        content = data[offset + 5 : offset + 5 + record_length]
+        property_length = struct.unpack("<I", content[18:22])[0]
+        cursor = 22 + property_length
+        outline_count = struct.unpack("<I", content[cursor : cursor + 4])[0]
+        cursor += 4 + outline_count * 16
+        hole_count = struct.unpack("<H", content[14:16])[0]
+        for _ in range(hole_count):
+            hole_vertex_count = struct.unpack("<I", content[cursor : cursor + 4])[0]
+            cursor += 4 + hole_vertex_count * 16
+        tail = content[cursor:]
+        tail_vertex_count = struct.unpack("<I", tail[:4])[0]
+        assert 0 < tail_vertex_count <= outline_count
+        assert len(tail) == 4 + (tail_vertex_count + 1) * 37
+        tail_lengths.append(len(tail))
+        offset += 5 + record_length
+
+    assert len(tail_lengths) == expected_region_count
+
+
+def _assert_board_regions_have_no_extended_outline_tails(
+    path: Path,
+    *,
+    expected_region_count: int,
+) -> None:
+    tail_lengths = _board_region_trailing_byte_lengths(path)
+    assert tail_lengths == [0] * expected_region_count
+
+
+def _board_region_trailing_byte_lengths(path: Path) -> list[int]:
+    from altium_monkey.altium_ole import AltiumOleFile
+
+    with AltiumOleFile(str(path)) as ole:
+        data = ole.openstream(["BoardRegions", "Data"])
+
+    tail_lengths: list[int] = []
+    offset = 0
+    while offset < len(data) - 1:
+        if data[offset] != 0x0B:
+            offset += 1
+            continue
+        record_length = struct.unpack("<I", data[offset + 1 : offset + 5])[0]
+        content = data[offset + 5 : offset + 5 + record_length]
+        property_length = struct.unpack("<I", content[18:22])[0]
+        cursor = 22 + property_length
+        outline_count = struct.unpack("<I", content[cursor : cursor + 4])[0]
+        cursor += 4 + outline_count * 16
+        hole_count = struct.unpack("<H", content[14:16])[0]
+        for _ in range(hole_count):
+            hole_vertex_count = struct.unpack("<I", content[cursor : cursor + 4])[0]
+            cursor += 4 + hole_vertex_count * 16
+        tail_lengths.append(len(content[cursor:]))
+        offset += 5 + record_length
+    return tail_lengths
+
+
+def _assert_v9_cache_contexts_cover_substacks(
+    raw_entries: tuple[str, ...],
+    substacks: tuple[object, ...],
+) -> None:
+    context_refs: set[str] = set()
+    for raw in raw_entries:
+        key = raw.split("=", 1)[0]
+        match = re.match(r"^V9_CACHE_LAYER\d+_(.+)CONTEXT$", key, re.IGNORECASE)
+        if match is None:
+            continue
+        context_refs.add(_normalized_native_ref(match.group(1)))
+
+    expected_refs = {
+        _normalized_native_ref(getattr(substack, "source_stackup_ref", ""))
+        for substack in substacks
+        if getattr(substack, "source_stackup_ref", "")
+    }
+    assert expected_refs
+    assert expected_refs <= context_refs
+
+    default_ref = _canonical_empty_substack_ref()
+    if default_ref not in expected_refs:
+        assert default_ref not in context_refs
+
+
+def _assert_v8_board_rows_cover_authored_stack(
+    raw_entries: tuple[str, ...],
+    stack: object,
+) -> None:
+    substacks = tuple(getattr(stack, "substacks", ()) or ())
+    physical_stacks = tuple(getattr(stack, "physical_stacks", ()) or ())
+    assert substacks
+    assert physical_stacks
+
+    v8_substack_refs: set[str] = set()
+    v8_context_refs: set[str] = set()
+    v8_layer_names: dict[int, str] = {}
+    for raw in raw_entries:
+        key, _separator, value = raw.partition("=")
+        substack_match = re.match(
+            r"^LAYERSUBSTACK_V8_\d+ID$",
+            key,
+            re.IGNORECASE,
+        )
+        if substack_match is not None:
+            v8_substack_refs.add(_normalized_native_ref(value))
+            continue
+        context_match = re.match(
+            r"^LAYER_V8_\d+_(.+)CONTEXT$",
+            key,
+            re.IGNORECASE,
+        )
+        if context_match is not None:
+            v8_context_refs.add(_normalized_native_ref(context_match.group(1)))
+            continue
+        name_match = re.match(
+            r"^LAYER_V8_(\d+)NAME$",
+            key,
+            re.IGNORECASE,
+        )
+        if name_match is not None:
+            v8_layer_names[int(name_match.group(1))] = value
+
+    expected_refs = {
+        _normalized_native_ref(getattr(substack, "source_stackup_ref", ""))
+        for substack in substacks
+        if getattr(substack, "source_stackup_ref", "")
+    }
+    assert expected_refs <= v8_substack_refs
+    assert expected_refs <= v8_context_refs
+    default_ref = _canonical_empty_substack_ref()
+    if default_ref not in expected_refs:
+        assert default_ref not in v8_substack_refs
+        assert default_ref not in v8_context_refs
+
+    authored_layer_names = [
+        str(getattr(layer, "display_name", ""))
+        for layer in tuple(getattr(physical_stacks[0], "layers", ()) or ())
+        if _native_board6_emits_layer_row(layer)
+    ]
+    assert authored_layer_names
+    ordered_v8_names = [v8_layer_names[index] for index in sorted(v8_layer_names)]
+    assert ordered_v8_names[: len(authored_layer_names)] == authored_layer_names
+    assert "Drill Guide" in ordered_v8_names
+    assert "Keep-Out Layer" in ordered_v8_names
+    assert "Mechanical 32" in ordered_v8_names
+
+    if any(
+        getattr(layer, "is_stiffener", None) is True
+        for physical_stack in physical_stacks
+        for layer in tuple(getattr(physical_stack, "layers", ()) or ())
+    ):
+        coverlay_names = [
+            str(getattr(layer, "display_name", ""))
+            for physical_stack in physical_stacks
+            for layer in tuple(getattr(physical_stack, "layers", ()) or ())
+            if getattr(layer, "coverlay_expansion", "")
+        ]
+        expected_tail_names = [
+            f"{coverlay_name} ({getattr(substack, 'name', '')})"
+            for substack in substacks
+            for coverlay_name in coverlay_names
+        ]
+        assert expected_tail_names
+        assert ordered_v8_names[-len(expected_tail_names) :] == expected_tail_names
+
+
+def _assert_native_board6_omits_stackupx_only_layers(
+    raw_entries: tuple[str, ...],
+    stack: object,
+) -> None:
+    physical_stacks = tuple(getattr(stack, "physical_stacks", ()) or ())
+    if not physical_stacks:
+        return
+    stackupx_only_names = {
+        str(getattr(layer, "display_name", ""))
+        for layer in tuple(getattr(physical_stacks[0], "layers", ()) or ())
+        if not _native_board6_emits_layer_row(layer)
+    }
+    if not stackupx_only_names:
+        return
+
+    for raw in raw_entries:
+        key, _separator, value = raw.partition("=")
+        assert "ISSURFACEFINISH" not in key.upper()
+        if re.search(
+            r"^(V9_STACK_LAYER|LAYER_V8_|V9_CACHE_LAYER)\d+_?NAME$",
+            key,
+            re.IGNORECASE,
+        ):
+            assert value not in stackupx_only_names
+
+
+def _assert_board6_stack_source_entries_match_spec(
+    pcbdoc_path: Path,
+    spec: dict[str, object],
+) -> None:
+    from altium_monkey.altium_layer_stack_document import (
+        is_layer_stack_source_entry_key,
+    )
+    from altium_monkey.altium_ole import AltiumOleFile
+    from altium_monkey.altium_pcbdoc_builder import PcbDocBoardData
+
+    document = spec.get("layer_stack_document")
+    assert isinstance(document, dict)
+    source = document.get("source")
+    assert isinstance(source, dict)
+    expected_entries = source.get("board_stack_entry_texts")
+    assert isinstance(expected_entries, list)
+    assert expected_entries
+
+    with AltiumOleFile(str(pcbdoc_path)) as ole:
+        board_data = PcbDocBoardData.from_bytes(ole.openstream(["Board6", "Data"]))
+    actual_entries = [
+        str(getattr(entry, "raw", "") or "")
+        for segment in tuple(board_data.segments)
+        for entry in tuple(segment.entries)
+        if is_layer_stack_source_entry_key(getattr(entry, "key", None))
+    ]
+
+    assert [_normalized_board_stack_entry(item) for item in actual_entries] == [
+        _normalized_board_stack_entry(str(item)) for item in expected_entries
+    ]
+
+
+def _spec_has_board_stack_source_entries(spec: dict[str, object]) -> bool:
+    document = spec.get("layer_stack_document")
+    if not isinstance(document, dict):
+        return False
+    source = document.get("source")
+    if not isinstance(source, dict):
+        return False
+    entries = source.get("board_stack_entry_texts")
+    return isinstance(entries, list) and bool(entries)
+
+
+def _normalized_board_stack_entry(raw: str) -> str:
+    key, separator, value = raw.partition("=")
+    if separator and key.upper() == "V9_STACKCUSTOMDATA":
+        xml_bytes = zlib.decompress(base64.b64decode(value))
+        if xml_bytes.startswith(b"?<"):
+            xml_bytes = xml_bytes[1:]
+        return f"{key}#xml-sha256={hashlib.sha256(xml_bytes).hexdigest()}"
+    return raw
+
+
+def _native_board6_emits_layer_row(layer: object) -> bool:
+    return str(getattr(layer, "family", "") or "").strip().lower() != "surface_finish"
+
+
+def _assert_embedded_stackupx_stack_layer_signature_matches_reference(
+    pcbdoc_path: Path,
+    stackupx_reference: Path,
+) -> None:
+    from altium_monkey.altium_stackupx import AltiumStackupXDocument
+
+    embedded = _embedded_stackupx_from_pcbdoc(pcbdoc_path)
+    reference = AltiumStackupXDocument.from_bytes(stackupx_reference.read_bytes())
+    assert _stackupx_stack_layer_signature(embedded) == _stackupx_stack_layer_signature(
+        reference
+    )
+
+
+def _assert_embedded_stackupx_bytes_match_reference(
+    pcbdoc_path: Path,
+    stackupx_reference: Path,
+) -> None:
+    embedded = _embedded_stackupx_bytes_from_pcbdoc(pcbdoc_path)
+    reference = stackupx_reference.read_bytes()
+    if reference.startswith(b"\xef\xbb\xbf"):
+        reference = reference[3:]
+    assert embedded == reference
+
+
+def _assert_embedded_stackupx_branch_stack_refs_are_defined(pcbdoc_path: Path) -> None:
+    embedded = _embedded_stackupx_from_pcbdoc(pcbdoc_path)
+    stack_ids = {
+        _normalized_native_ref(getattr(stack, "id", ""))
+        for stack in tuple(getattr(embedded, "stacks", ()) or ())
+        if _normalized_native_ref(getattr(stack, "id", ""))
+    }
+    branch_refs: set[str] = set()
+    for branch in tuple(getattr(embedded, "branches", ()) or ()):
+        for section in tuple(getattr(branch, "sections", ()) or ()):
+            for stack in tuple(getattr(section, "stacks", ()) or ()):
+                for value in (
+                    getattr(stack, "layer_stack_id", ""),
+                    getattr(stack, "source_layer_stack_id", ""),
+                    getattr(stack, "parent_layer_stack_id", ""),
+                ):
+                    key = _normalized_native_ref(value)
+                    if key:
+                        branch_refs.add(key)
+    assert branch_refs <= stack_ids
+
+
+def _embedded_stackupx_from_pcbdoc(pcbdoc_path: Path) -> object:
+    from altium_monkey.altium_stackupx import AltiumStackupXDocument
+
+    return AltiumStackupXDocument.from_bytes(
+        _embedded_stackupx_bytes_from_pcbdoc(pcbdoc_path)
+    )
+
+
+def _embedded_stackupx_bytes_from_pcbdoc(pcbdoc_path: Path) -> bytes:
+    from altium_monkey import AltiumPcbDoc
+
+    pcbdoc = AltiumPcbDoc.from_file(pcbdoc_path)
+    if pcbdoc.board is None:
+        raise AssertionError(f"{pcbdoc_path} does not contain Board6/Data")
+    token = pcbdoc.board.raw_record["V9_STACKCUSTOMDATA"]
+    xml_bytes = zlib.decompress(base64.b64decode(token))
+    if xml_bytes.startswith(b"?<"):
+        xml_bytes = xml_bytes[1:]
+    return xml_bytes
+
+
+def _stackupx_stack_layer_signature(
+    stackupx: object,
+) -> tuple[
+    tuple[
+        str,
+        str,
+        bool | None,
+        str,
+        tuple[
+            tuple[
+                str,
+                bool | None,
+                bool | None,
+                tuple[tuple[str, str, str], ...],
+            ],
+            ...,
+        ],
+    ],
+    ...,
+]:
+    return tuple(
+        (
+            _normalized_native_ref(getattr(stack, "id", "")),
+            str(getattr(stack, "name", "")),
+            getattr(stack, "is_flex", None),
+            str(getattr(stack, "stack_type", "")),
+            tuple(
+                (
+                    str(getattr(layer, "name", "")),
+                    getattr(layer, "is_enabled", None),
+                    getattr(layer, "is_shared", None),
+                    tuple(
+                        sorted(
+                            (
+                                str(getattr(prop, "name", "")),
+                                str(getattr(prop, "type_name", "")),
+                                str(getattr(prop, "value", "")),
+                            )
+                            for prop in tuple(getattr(layer, "properties", ()) or ())
+                        )
+                    ),
+                )
+                for layer in tuple(getattr(stack, "layers", ()) or ())
+            ),
+        )
+        for stack in tuple(getattr(stackupx, "stacks", ()) or ())
+    )
+
+
+def _canonical_empty_substack_ref() -> str:
+    from altium_monkey.altium_pcbdoc_builder import PcbDocBoardData
+
+    return _normalized_native_ref(PcbDocBoardData.default().default_substack_guid())
+
+
+def _normalized_native_ref(value: object) -> str:
+    return str(value or "").strip().strip("{}").upper()
 
 
 def test_pcbdoc_bom_writes_resolved_component_rows(
@@ -1885,6 +3953,32 @@ def test_pcbdoc_via_ipc4761_examples_write_expected_via_state(
     assert mutation_summary["matched_via_count"] == len(matched_vias)
 
 
+def test_pcbdoc_public_via_surface_policy_roundtrip(tmp_path: Path) -> None:
+    from altium_monkey import AltiumPcbDoc
+
+    pcbdoc = AltiumPcbDoc()
+    pcbdoc.add_via(
+        position_mils=(100.0, 0.0),
+        diameter_mils=30.0,
+        hole_size_mils=12.0,
+        is_tent_top=True,
+        is_tent_bottom=False,
+        solder_mask_expansion_top_mils=-3.0,
+        solder_mask_expansion_bottom_mils=5.0,
+    )
+
+    output_path = tmp_path / "public_via_surface_policy.PcbDoc"
+    pcbdoc.save(output_path)
+    parsed = AltiumPcbDoc.from_file(output_path)
+    assert len(parsed.vias) == 1
+    via = parsed.vias[0]
+    assert via.is_tent_top is True
+    assert via.is_tent_bottom is False
+    assert via.solder_mask_expansion_mode == 2
+    assert via.soldermask_expansion_front == -30000
+    assert via.soldermask_expansion_back == 50000
+
+
 def test_pcbdoc_differential_pair_examples_write_expected_state(
     check_examples_root: Path,
 ) -> None:
@@ -2189,8 +4283,418 @@ def test_pcblib_add_free_3d_extruded_writes_component_body(
     assert len(body.outline) == 6
 
 
+def test_pcblib_create_cavity_region_writes_native_cavity(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item for item in _load_examples() if item["id"] == "pcblib_create_cavity_region"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbLib, PcbLayer, PcbRegionKind
+
+    output_root = check_examples_root / "pcblib_create_cavity_region" / "output"
+    output_path = output_root / "pcblib_create_cavity_region.PcbLib"
+    manifest_path = output_root / "pcblib_create_cavity_region.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    pcblib = AltiumPcbLib.from_file(output_path)
+    assert len(pcblib.footprints) == 1
+    footprint = pcblib.footprints[0]
+    assert footprint.name == "R0402_0.40MM_HD_CAVITY_DEMO"
+    assert len(footprint.pads) == 2
+    assert len(footprint.regions) == 1
+    assert len(footprint.component_bodies) == 1
+
+    model_entries = pcblib.get_embedded_model_entries()
+    assert len(model_entries) == 1
+    model, payload = model_entries[0]
+    assert model.name == "RESC1005X04L.step"
+    try:
+        step_payload = zlib.decompress(payload)
+    except zlib.error:
+        step_payload = payload
+    assert step_payload.startswith(b"ISO-10303-21")
+
+    body = footprint.component_bodies[0]
+    assert body.model_is_embedded is True
+    assert body.model_name == "RESC1005X04L.step"
+    assert body.model_id == model.id
+    assert int(body.model_checksum) & 0xFFFFFFFF == int(model.checksum) & 0xFFFFFFFF
+
+    cavity_region = footprint.regions[0]
+    assert cavity_region.kind == 4
+    assert cavity_region.region_kind == PcbRegionKind.CAVITY_DEFINITION
+    assert cavity_region.layer == PcbLayer.MECHANICAL_1
+    assert cavity_region.properties["KIND"] == "4"
+    assert cavity_region.properties["V7_LAYER"] == "MECHANICAL1"
+    assert cavity_region.properties["CAVITYHEIGHT"] == "19.685mil"
+    assert cavity_region.cavity_height_mils == pytest.approx(19.685)
+    assert manifest["region_native_kind"] == 4
+    assert manifest["region_kind"] == "CAVITY_DEFINITION"
+    assert manifest["cavity_height_mm"] == pytest.approx(0.5, abs=0.0001)
+    assert manifest["component_body_count"] == 1
+    assert manifest["embedded_model_count"] == 1
+    assert manifest["embedded_model_names"] == ["RESC1005X04L.step"]
+
+
+def test_pcblib_via_ipc4761_example_writes_expected_side_tables(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcblib_add_via_ipc4761_matrix"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import (
+        AltiumPcbLib,
+        PcbIpc4761ViaType,
+        PcbViaStructureFeatureSide,
+        PcbViaStructureFeatureType,
+    )
+
+    output_root = check_examples_root / "pcblib_add_via_ipc4761_matrix" / "output"
+    output_path = output_root / "pcblib_add_via_ipc4761_matrix.PcbLib"
+    manifest_path = output_root / "pcblib_add_via_ipc4761_matrix.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    pcblib = AltiumPcbLib.from_file(output_path)
+    assert len(pcblib.footprints) == 1
+    footprint = pcblib.footprints[0]
+    assert footprint.name == "PCBLIB_VIA_IPC4761_MATRIX"
+    assert footprint.footprint_primitive_parameters == {
+        "TEST_PARAMETER": "pcblib_add_via_ipc4761_matrix"
+    }
+    assert len(footprint.vias) == 14
+    assert {int(via.ipc4761_via_type) for via in footprint.vias} == set(range(13))
+    assert len(footprint.via_structures) == 13
+    assert len(footprint.via_structure_links) == 13
+
+    custom_via = footprint.vias[-1]
+    assert custom_via.ipc4761_via_type == PcbIpc4761ViaType.TYPE_7_FILLING_AND_CAPPING
+    assert custom_via.propagation_delay_ps == pytest.approx(12.5)
+    assert custom_via.is_test_fab_top is True
+    assert custom_via.is_assy_testpoint_bottom is True
+    assert custom_via.via_structure is not None
+    assert len(custom_via.via_structure.features) == 5
+    filling = custom_via.get_ipc4761_feature(PcbViaStructureFeatureType.FILLING)
+    capping = custom_via.get_ipc4761_feature(PcbViaStructureFeatureType.CAPPING)
+    assert filling is not None
+    assert capping is not None
+    assert filling.side == PcbViaStructureFeatureSide.BOTH
+    assert filling.material == "EPOXY"
+    assert capping.side == PcbViaStructureFeatureSide.BOTH
+    assert capping.material == "COPPER"
+
+    assert manifest["via_count"] == len(footprint.vias)
+    assert manifest["via_structure_count"] == len(footprint.via_structures)
+    assert manifest["via_structure_link_count"] == len(footprint.via_structure_links)
+    assert manifest["footprint_primitive_parameters"] == (
+        footprint.footprint_primitive_parameters
+    )
+    assert manifest["custom_type7"]["filling_material"] == "EPOXY"
+    assert manifest["custom_type7"]["capping_material"] == "COPPER"
+
+
+def test_pcblib_recreate_via_feature_libraries_replays_public_authoring_api(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcblib_recreate_via_feature_libraries"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbLib
+
+    output_root = (
+        check_examples_root / "pcblib_recreate_via_feature_libraries" / "output"
+    )
+    manifest_path = output_root / "pcblib_recreate_via_feature_libraries.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    libraries = {entry["footprint"]: entry for entry in manifest["libraries"]}
+
+    assert set(libraries) == {
+        "via_ipc4761_type_matrix",
+        "via_propagation_delay_matrix",
+        "via_features_and_all_primitives",
+        "via_test_point_flags",
+        "footprint_parameters",
+    }
+    for entry in libraries.values():
+        assert all(entry["semantic_match"].values())
+        output_path = (
+            check_examples_root
+            / "pcblib_recreate_via_feature_libraries"
+            / (entry["output"])
+        )
+        assert output_path.exists()
+        reparsed = AltiumPcbLib.from_file(output_path)
+        assert len(reparsed.footprints) == 1
+        assert reparsed.footprints[0].name == entry["footprint"]
+
+    mixed = libraries["via_features_and_all_primitives"]
+    assert mixed["record_count"] == 156
+    assert mixed["pad_count"] == 2
+    assert mixed["via_count"] == 60
+    assert mixed["via_structure_count"] == 39
+    assert mixed["via_structure_link_count"] == 51
+    assert mixed["footprint_primitive_parameters"] == {
+        "TEST_PARAMETER": "via_features_and_all_primitives"
+    }
+    assert mixed["parameters"]["SMARTUNIONSSTORAGE"] == "2"
+    assert sum(1 for via in mixed["vias"] if via["ipc4761_via_type"] != 0) == 51
+
+    flags = libraries["via_test_point_flags"]
+    assert [
+        (
+            via["is_test_fab_top"],
+            via["is_test_fab_bottom"],
+            via["is_assy_testpoint_top"],
+            via["is_assy_testpoint_bottom"],
+        )
+        for via in flags["vias"]
+    ] == [
+        (True, False, False, False),
+        (False, True, False, False),
+        (True, True, False, False),
+        (False, False, True, False),
+        (False, True, False, True),
+        (False, False, False, True),
+        (True, True, True, True),
+    ]
+
+    footprint_parameters = libraries["footprint_parameters"]
+    assert footprint_parameters["record_count"] == 0
+    assert footprint_parameters["parameters"]["HEIGHT"] == "123mil"
+    assert footprint_parameters["parameters"]["AREA"] == "314000000000001.728000"
+    assert footprint_parameters["footprint_primitive_parameters"] == {
+        "TEST_PARAMETER1": "1st_param",
+        "TEST_PARAMETER3": "3rd_param",
+        "TEST_PARAMETER2": "2nd_param",
+    }
+
+
+def test_pcbdoc_create_cavity_placements_writes_board_side_cavities(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_create_cavity_placements"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumPcbDoc, PcbLayer, PcbRegionKind
+    from altium_monkey.altium_layer_stack_document import AltiumLayerStackDocument
+
+    output_root = check_examples_root / "pcbdoc_create_cavity_placements" / "output"
+    output_path = output_root / "pcbdoc_create_cavity_placements.PcbDoc"
+    source_pcblib_path = output_root / "R0402_0.40MM_HD.PcbLib"
+    manifest_path = output_root / "cavity_placements_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["semantic_match"] is True
+    assert source_pcblib_path.exists()
+    assert manifest["source_pcblib"] == (
+        "pcbdoc_create_cavity_placements/output/R0402_0.40MM_HD.PcbLib"
+    )
+    assert manifest["stackup_reference"] == (
+        "assets/pcbdoc_layer_stack_specs/cavity_placements.stackup"
+    )
+    assert manifest["stackupx_reference"] == (
+        "assets/pcbdoc_layer_stack_specs/cavity_placements.stackupx"
+    )
+    assert manifest["stackup_exact_reference_match"] is True
+    assert manifest["stackupx_exact_reference_match"] is True
+    assert manifest["copper_layers"] == [
+        "Top Layer",
+        "IN1",
+        "IN2",
+        "IN3",
+        "IN4",
+        "Bottom Layer",
+    ]
+    assert manifest["copper_layer_policy"] == {
+        "Top Layer": {
+            "legacy_layer_id": 1,
+            "component_placement": "BodyUp",
+            "copper_orientation": "0",
+            "thickness_mils": 1.378,
+        },
+        "IN1": {
+            "legacy_layer_id": 2,
+            "component_placement": "BodyUp",
+            "copper_orientation": "0",
+            "thickness_mils": 1.378,
+        },
+        "IN2": {
+            "legacy_layer_id": 4,
+            "component_placement": "None",
+            "copper_orientation": "0",
+            "thickness_mils": 1.378,
+        },
+        "IN3": {
+            "legacy_layer_id": 5,
+            "component_placement": "BodyDown",
+            "copper_orientation": "1",
+            "thickness_mils": 1.378,
+        },
+        "IN4": {
+            "legacy_layer_id": 3,
+            "component_placement": "BodyDown",
+            "copper_orientation": "1",
+            "thickness_mils": 1.378,
+        },
+        "Bottom Layer": {
+            "legacy_layer_id": 32,
+            "component_placement": "BodyDown",
+            "copper_orientation": "1",
+            "thickness_mils": 1.378,
+        },
+    }
+    assert [layer["name"] for layer in manifest["dielectric_layers"]] == [
+        "Top Solder",
+        "Dielectric 1",
+        "Dielectric 2",
+        "Dielectric 3",
+        "Dielectric 7",
+        "Dielectric 6",
+        "Dielectric 4",
+        "Bottom Solder",
+    ]
+    assert [layer["thickness_mils"] for layer in manifest["dielectric_layers"]] == [
+        1.0,
+        18.0,
+        18.0,
+        18.0,
+        18.0,
+        18.0,
+        18.0,
+        1.0,
+    ]
+    assert manifest["pad_layers"] == {
+        "R1": ["TOP"],
+        "R2": ["MID1"],
+        "R4": ["MID4"],
+        "R5": ["MID2"],
+        "R6": ["BOTTOM"],
+    }
+    assert manifest["cavity_region_count"] == 5
+    assert manifest["shapebased_cavity_region_count"] == 5
+    assert manifest["component_body_count"] == 5
+    assert manifest["shapebased_component_body_count"] == 5
+    assert manifest["embedded_model_count"] == 1
+    assert manifest["embedded_model_names"] == ["RESC1005X04L.step"]
+    assert manifest["cavity_height_mils"] == [19.685]
+    expected_designator_positions = {
+        "R6": (943.342, 469.0052, 970.0, 485.0, 73.3161),
+        "R5": (858.342, 469.0052, 885.0, 485.0, 73.3161),
+        "R4": (773.342, 469.0052, 800.0, 485.0, 73.3161),
+        "R2": (597.0178, 469.8851, 623.6758, 485.8799, 73.3161),
+        "R1": (523.6736, 469.0052, 545.0, 485.0, 62.6529),
+    }
+    for designator, (
+        x_mils,
+        y_mils,
+        snap_x_mils,
+        snap_y_mils,
+        textbox_width_mils,
+    ) in expected_designator_positions.items():
+        text = manifest["component_text_layout"][designator]["designator"]
+        assert text["text"] == designator
+        assert text["layer"] == int(PcbLayer.TOP_OVERLAY)
+        assert text["x_mils"] == pytest.approx(x_mils)
+        assert text["y_mils"] == pytest.approx(y_mils)
+        assert text["height_mils"] == pytest.approx(32.0)
+        assert text["rotation_degrees"] == pytest.approx(0.0)
+        assert text["stroke_width_mils"] == pytest.approx(10.0)
+        assert text["textbox_width_mils"] == pytest.approx(textbox_width_mils)
+        assert text["textbox_height_mils"] == pytest.approx(51.9897)
+        assert text["snap_x_mils"] == pytest.approx(snap_x_mils)
+        assert text["snap_y_mils"] == pytest.approx(snap_y_mils)
+        assert text["is_mirrored"] is False
+        assert set(manifest["component_text_layout"][designator]) == {"designator"}
+
+    pcbdoc = AltiumPcbDoc.from_file(output_path)
+    assert [component.layer for component in pcbdoc.components] == [
+        "BOTTOM",
+        "MID2",
+        "MID4",
+        "MID1",
+        "TOP",
+    ]
+    assert [component.footprint for component in pcbdoc.components] == [
+        "R0402_0.40MM_HD",
+        "R0402_0.40MM_HD",
+        "R0402_0.40MM_HD",
+        "R0402_0.40MM_HD",
+        "R0402_0.40MM_HD",
+    ]
+    assert all(
+        component.raw_record["COMMENTON"] == "FALSE" for component in pcbdoc.components
+    )
+    assert not any(text.is_comment for text in pcbdoc.texts)
+    assert {pad.layer for pad in pcbdoc.pads if pad.component_index == 1} == {
+        PcbLayer.MID2
+    }
+    assert {pad.layer for pad in pcbdoc.pads if pad.component_index == 2} == {
+        PcbLayer.MID4
+    }
+    assert {pad.layer for pad in pcbdoc.pads if pad.component_index == 3} == {
+        PcbLayer.MID1
+    }
+    assert all(
+        region.region_kind == PcbRegionKind.CAVITY_DEFINITION
+        and region.cavity_height_mils == pytest.approx(19.685)
+        for region in pcbdoc.regions
+    )
+    assert all(
+        region.region_kind == PcbRegionKind.CAVITY_DEFINITION
+        and region.properties["KIND"] == "4"
+        for region in pcbdoc.shapebased_regions
+    )
+    pcbdoc_stack = AltiumLayerStackDocument.from_pcbdoc(pcbdoc)
+    assert {
+        layer.display_name: layer.component_placement
+        for layer in pcbdoc_stack.physical_stacks[0].layers
+        if layer.family == "copper"
+    } == {
+        "Top Layer": 1,
+        "IN1": 1,
+        "IN2": 0,
+        "IN3": 2,
+        "IN4": 2,
+        "Bottom Layer": 2,
+    }
+    spec = json.loads(
+        (
+            check_examples_root
+            / "assets"
+            / "pcbdoc_layer_stack_specs"
+            / "cavity_placements.json"
+        ).read_text(encoding="utf-8")
+    )
+    _assert_board6_stack_source_entries_match_spec(output_path, spec)
+
+
 def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None:
-    from altium_monkey import AltiumPcbLib, PcbMaskExpansion, PcbTextKind
+    from altium_monkey import (
+        AltiumPcbLib,
+        PadHoleShape,
+        PadShape,
+        PcbLayer,
+        PcbMaskExpansion,
+        PcbTextJustification,
+        PcbTextKind,
+    )
 
     pcblib = AltiumPcbLib()
     footprint = pcblib.add_footprint("PUBLIC_MASK_TEXT")
@@ -2206,7 +4710,52 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
         designator="2",
         position_mils=(100.0, 0.0),
         outline_points_mils=[(-10.0, -10.0), (10.0, -10.0), (0.0, 10.0)],
+        anchor_width_mils=14.0,
+        anchor_height_mils=8.0,
+        anchor_rotation_degrees=37.0,
+        anchor_shape=PadShape.RECTANGLE,
         paste_mask_expansion_mode="none",
+    )
+    footprint.add_pad(
+        designator="SQ",
+        position_mils=(200.0, 0.0),
+        width_mils=60.0,
+        height_mils=60.0,
+        layer=PcbLayer.MULTI_LAYER,
+        hole_size_mils=30.0,
+        plated=True,
+        hole_shape=PadHoleShape.SQUARE,
+    )
+    footprint.add_via(
+        position_mils=(300.0, 0.0),
+        diameter_mils=30.0,
+        hole_size_mils=12.0,
+        is_tent_top=True,
+        is_tent_bottom=False,
+        solder_mask_expansion_top_mils=-3.0,
+        solder_mask_expansion_bottom_mils=5.0,
+    )
+    footprint.add_track(
+        (0.0, 50.0),
+        (100.0, 50.0),
+        width_mils=6.0,
+        solder_mask_expansion_mils=1.5,
+        paste_mask_expansion_mils=-0.5,
+    )
+    footprint.add_arc(
+        center_mils=(150.0, 50.0),
+        radius_mils=20.0,
+        start_angle_degrees=0.0,
+        end_angle_degrees=180.0,
+        width_mils=5.0,
+        solder_mask_expansion_mils=2.0,
+        paste_mask_expansion_mils=0.018,
+    )
+    footprint.add_fill(
+        (200.0, 40.0),
+        (240.0, 70.0),
+        solder_mask_expansion_mils=3.0,
+        paste_mask_expansion_mils=0.019,
     )
     footprint.add_text(
         text="SERIF",
@@ -2224,6 +4773,14 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
         is_inverted=True,
         inverted_margin_mils=5.0,
     )
+    footprint.add_text(
+        text="FRAME",
+        position_mils=(0.0, 300.0),
+        height_mils=60.0,
+        is_frame=True,
+        frame_size_mils=(300.0, 120.0),
+        text_justification=PcbTextJustification.CENTER_CENTER,
+    )
 
     output_path = tmp_path / "public_mask_text.PcbLib"
     pcblib.save(output_path)
@@ -2236,6 +4793,28 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
     assert pads_by_designator["1"].pastemask_expansion_manual == -400000
     assert pads_by_designator["1"].soldermask_expansion_mode == 1
     assert pads_by_designator["2"].pastemask_expansion_mode == 0
+    assert pads_by_designator["2"].width == 140000
+    assert pads_by_designator["2"].height == 80000
+    assert pads_by_designator["2"].rotation == 37.0
+    assert pads_by_designator["2"].shape == PadShape.RECTANGLE
+    assert pads_by_designator["2"].custom_shape is not None
+    assert pads_by_designator["2"].custom_shape.anchor_pad_index == 1
+    assert any(
+        region.properties.get("PADINDEX") == "2" for region in parsed_footprint.regions
+    )
+    assert pads_by_designator["SQ"].hole_size == 300000
+    assert pads_by_designator["SQ"].hole_shape == PadHoleShape.SQUARE
+    assert len(parsed_footprint.vias) == 1
+    assert parsed_footprint.vias[0].is_tent_top is True
+    assert parsed_footprint.vias[0].is_tent_bottom is False
+    assert parsed_footprint.vias[0].soldermask_expansion_front == -30000
+    assert parsed_footprint.vias[0].soldermask_expansion_back == 50000
+    assert parsed_footprint.tracks[0].solder_mask_expansion == 15000
+    assert parsed_footprint.tracks[0].paste_mask_expansion == -5000
+    assert parsed_footprint.arcs[0].solder_mask_expansion == 20000
+    assert parsed_footprint.arcs[0].paste_mask_expansion == 180
+    assert parsed_footprint.fills[0].solder_mask_expansion == 30000
+    assert parsed_footprint.fills[0].paste_mask_expansion == 190
     assert texts_by_content["SERIF"].font_type == 0
     assert texts_by_content["SERIF"].stroke_font_type == 3
     assert texts_by_content["TT"].font_type == 1
@@ -2243,6 +4822,102 @@ def test_pcblib_public_mask_and_text_authoring_roundtrip(tmp_path: Path) -> None
     assert texts_by_content["TT"].is_bold is True
     assert texts_by_content["TT"].is_inverted is True
     assert texts_by_content["TT"].margin_border_width == 50000
+    assert texts_by_content["FRAME"].is_frame is True
+    assert texts_by_content["FRAME"].textbox_rect_width == 3000000
+    assert texts_by_content["FRAME"].textbox_rect_height == 1200000
+
+
+def test_pcbdoc_public_shared_primitive_option_roundtrip(tmp_path: Path) -> None:
+    from altium_monkey import (
+        AltiumPcbDoc,
+        PadShape,
+        PcbLayer,
+        PcbMaskExpansion,
+        PcbRegionKind,
+    )
+
+    pcbdoc = AltiumPcbDoc()
+    pcbdoc.add_pad(
+        designator="P1",
+        position_mils=(0.0, 0.0),
+        width_mils=40.0,
+        height_mils=30.0,
+        solder_mask_expansion=PcbMaskExpansion.manual(4.0),
+        paste_mask_expansion_mode="none",
+    )
+    pcbdoc.add_pad(
+        designator="LS",
+        position_mils=(80.0, 0.0),
+        width_mils=60.0,
+        height_mils=60.0,
+        layer=PcbLayer.MULTI_LAYER,
+        shape=PadShape.CIRCLE,
+        mid_shape=PadShape.RECTANGLE,
+        mid_width_mils=50.0,
+        mid_height_mils=50.0,
+        bottom_shape=PadShape.OCTAGONAL,
+        bottom_width_mils=55.0,
+        bottom_height_mils=55.0,
+        hole_size_mils=30.0,
+        plated=True,
+    )
+    pcbdoc.add_track(
+        (0.0, 50.0),
+        (100.0, 50.0),
+        width_mils=6.0,
+        solder_mask_expansion_mils=1.5,
+        paste_mask_expansion_mils=-0.5,
+    )
+    pcbdoc.add_arc(
+        center_mils=(150.0, 50.0),
+        radius_mils=20.0,
+        start_angle_degrees=0.0,
+        end_angle_degrees=180.0,
+        width_mils=5.0,
+        solder_mask_expansion_mils=2.0,
+        paste_mask_expansion_mils=0.018,
+    )
+    pcbdoc.add_fill(
+        (200.0, 40.0),
+        (240.0, 70.0),
+        solder_mask_expansion_mils=3.0,
+        paste_mask_expansion_mils=0.019,
+    )
+    pcbdoc.add_region(
+        outline_points_mils=[
+            (0.0, 100.0),
+            (100.0, 100.0),
+            (100.0, 200.0),
+            (0.0, 200.0),
+        ],
+        kind=PcbRegionKind.BOARD_CUTOUT,
+        is_board_cutout=True,
+        is_shapebased=True,
+        subpoly_index=3,
+    )
+
+    output_path = tmp_path / "public_shared_options.PcbDoc"
+    pcbdoc.save(output_path)
+    parsed = AltiumPcbDoc.from_file(output_path)
+
+    assert parsed.pads[0].soldermask_expansion_mode == 2
+    assert parsed.pads[0].soldermask_expansion_manual == 40000
+    assert parsed.pads[0].pastemask_expansion_mode == 0
+    assert parsed.pads[1].pad_mode == 1
+    assert parsed.pads[1].mid_shape == PadShape.RECTANGLE
+    assert parsed.pads[1].mid_width == 500000
+    assert parsed.pads[1].bot_shape == PadShape.OCTAGONAL
+    assert parsed.pads[1].bot_width == 550000
+    assert parsed.tracks[0].solder_mask_expansion == 15000
+    assert parsed.tracks[0].paste_mask_expansion == -5000
+    assert parsed.arcs[0].solder_mask_expansion == 20000
+    assert parsed.arcs[0].paste_mask_expansion == 180
+    assert parsed.fills[0].solder_mask_expansion == 30000
+    assert parsed.fills[0].paste_mask_expansion == 190
+    assert parsed.regions[0].is_board_cutout is True
+    assert parsed.regions[0].is_shapebased is True
+    assert parsed.regions[0].subpoly_index == 3
+    assert parsed.shapebased_regions[0].properties["ISBOARDCUTOUT"] == "TRUE"
 
 
 def test_pcblib_power_resistor_synthesis_writes_parseable_libraries(

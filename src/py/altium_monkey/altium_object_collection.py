@@ -239,9 +239,6 @@ class ObjectCollectionView(ObjectCollection):
     def __contains__(self, item: Any) -> bool:
         return item in self._matching_items()
 
-    def extend(self, items: Iterable[Any]) -> None:
-        raise _query_view_mutation_error("extend items")
-
     def __bool__(self) -> bool:
         return any(True for _ in self)
 

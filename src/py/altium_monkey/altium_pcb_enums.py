@@ -5,6 +5,60 @@ from enum import Enum, IntEnum
 from .altium_record_types import PcbLayer
 
 
+class MechanicalLayerKind(IntEnum):
+    """Altium mechanical layer semantic kind values."""
+
+    UNDEFINED = 0
+    ASSEMBLY_TOP = 1
+    ASSEMBLY_BOTTOM = 2
+    ASSEMBLY_NOTES = 3
+    BOARD = 4
+    COATING_TOP = 5
+    COATING_BOTTOM = 6
+    COMPONENT_CENTER_TOP = 7
+    COMPONENT_CENTER_BOTTOM = 8
+    COMPONENT_OUTLINE_TOP = 9
+    COMPONENT_OUTLINE_BOTTOM = 10
+    COURTYARD_TOP = 11
+    COURTYARD_BOTTOM = 12
+    DESIGNATOR_TOP = 13
+    DESIGNATOR_BOTTOM = 14
+    DIMENSIONS = 15
+    DIMENSIONS_TOP = 16
+    DIMENSIONS_BOTTOM = 17
+    FAB_NOTES = 18
+    GLUE_POINTS_TOP = 19
+    GLUE_POINTS_BOTTOM = 20
+    GOLD_PLATING_TOP = 21
+    GOLD_PLATING_BOTTOM = 22
+    VALUE_TOP = 23
+    VALUE_BOTTOM = 24
+    VCUT = 25
+    BODY_3D_TOP = 26
+    BODY_3D_BOTTOM = 27
+    ROUTE_TOOL_PATH = 28
+    SHEET = 29
+    BOARD_SHAPE = 30
+    OVERLAY_TOP = 31
+    OVERLAY_BOTTOM = 32
+    SOLDER_TOP = 33
+    SOLDER_BOTTOM = 34
+    PASTE_TOP = 35
+    PASTE_BOTTOM = 36
+    TENTING_TOP = 37
+    TENTING_BOTTOM = 38
+    COVERING_TOP = 39
+    COVERING_BOTTOM = 40
+    PLUGGING_TOP = 41
+    PLUGGING_BOTTOM = 42
+    FILLING = 43
+    CAPPING = 44
+    DIE_PADS_TOP = 45
+    DIE_PADS_BOTTOM = 46
+    WIREBONDING_TOP = 47
+    WIREBONDING_BOTTOM = 48
+
+
 class PcbV7LayerPartition(IntEnum):
     """V7 PCB layer partition ids used by saved-layer identifiers."""
 
@@ -174,6 +228,19 @@ class PadShape(IntEnum):
     CUSTOM = 10
 
 
+class PadHoleShape(IntEnum):
+    """
+    PCB pad drill-hole geometry.
+
+    Native PAD records encode these values as 0=round, 1=square, and 2=slot.
+    Slots also require a positive slot length.
+    """
+
+    ROUND = 0
+    SQUARE = 1
+    SLOT = 2
+
+
 class PcbTextKind(str, Enum):
     """
     PCB text primitive rendering mode.
@@ -324,6 +391,10 @@ class PcbNetClassKind(IntEnum):
 class PcbRegionKind(IntEnum):
     """
     PCB region semantic kind used when authoring or interpreting region records.
+
+    These values are public semantic identifiers, not a 1:1 copy of every
+    native Altium region-kind enum value. Use
+    `pcb_region_kind_to_native_kind(...)` when writing the native `KIND` field.
     """
 
     COPPER = 0
@@ -333,6 +404,63 @@ class PcbRegionKind(IntEnum):
     UNKNOWN_3 = 4
     CAVITY_DEFINITION = 5
     UNKNOWN = 99
+
+
+def pcb_region_kind_to_native_kind(
+    kind: int | PcbRegionKind,
+    *,
+    is_board_cutout: bool = False,
+) -> int:
+    """
+    Map public region semantics to Altium's native `KIND` field.
+
+    Existing board-cutout authoring uses the historical writer contract of
+    `KIND=1` plus `ISBOARDCUTOUT=TRUE`. Cavity definitions use native
+    region kind 4.
+    """
+    if not isinstance(kind, PcbRegionKind):
+        raw_kind = int(kind)
+        if is_board_cutout and raw_kind in (0, 1):
+            return 1
+        return raw_kind
+    if kind == PcbRegionKind.COPPER:
+        return 0
+    if kind in (PcbRegionKind.BOARD_CUTOUT, PcbRegionKind.POLYGON_CUTOUT):
+        return 1
+    if kind == PcbRegionKind.DASHED_OUTLINE:
+        return 2
+    if kind == PcbRegionKind.UNKNOWN_3:
+        return 3
+    if kind == PcbRegionKind.CAVITY_DEFINITION:
+        return 4
+    if is_board_cutout:
+        return 1
+    return int(kind)
+
+
+def pcb_region_kind_from_native_kind(
+    kind: int,
+    *,
+    is_board_cutout: bool = False,
+) -> PcbRegionKind:
+    """
+    Map Altium's native `KIND` field to the public semantic enum.
+    """
+    if int(kind) == 0:
+        return PcbRegionKind.BOARD_CUTOUT if is_board_cutout else PcbRegionKind.COPPER
+    if int(kind) == 1:
+        return (
+            PcbRegionKind.BOARD_CUTOUT
+            if is_board_cutout
+            else PcbRegionKind.POLYGON_CUTOUT
+        )
+    if int(kind) == 2:
+        return PcbRegionKind.DASHED_OUTLINE
+    if int(kind) == 3:
+        return PcbRegionKind.UNKNOWN_3
+    if int(kind) == 4:
+        return PcbRegionKind.CAVITY_DEFINITION
+    return PcbRegionKind.UNKNOWN
 
 
 class PcbBodyProjection(IntEnum):

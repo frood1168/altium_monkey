@@ -128,9 +128,9 @@ class AltiumSchSheetSymbol(SchGraphicalObject):
     @staticmethod
     def _clear_detached_child_state(child: object) -> None:
         if getattr(child, "parent", None) is not None:
-            child.parent = None
+            setattr(child, "parent", None)
         if hasattr(child, "_bound_schematic_context"):
-            child._bound_schematic_context = None
+            setattr(child, "_bound_schematic_context", None)
 
     @staticmethod
     def _normalized_entry_name(name: str) -> str:

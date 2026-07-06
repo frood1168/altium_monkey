@@ -12,19 +12,15 @@ from .altium_record_types import (
     SchGraphicalObject,
     SchPointMils,
     SchRecordType,
-    color_to_hex,
 )
-from .altium_serializer import AltiumSerializer, CaseMode, Fields
+from .altium_serializer import AltiumSerializer, Fields
 from .altium_sch_record_helpers import (
     detect_case_mode_method_from_dotted_uppercase_fields,
 )
 from .altium_sch_svg_renderer import (
     LINE_WIDTH_MILS,
     SchSvgRenderContext,
-    bezier_to_svg_path,
     flatten_bezier,
-    svg_line,
-    svg_path,
 )
 
 

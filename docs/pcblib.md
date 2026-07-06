@@ -61,6 +61,62 @@ and `rule` should leave the manual value omitted. `PcbMaskExpansion` and
 `solder_rule_expansion` for compatibility. Those booleans map to `rule` when
 true and `none` when false. New code should prefer the explicit expansion API.
 
+`add_pad(...)` also accepts `hole_shape="round"`, `"square"`, or `"slot"`
+through `PadHoleShape`. Square holes require a positive drill size. Slotted
+holes require `slot_length_mils`.
+
+Custom pads can set the anchor pad independently from the outline:
+`anchor_width_mils`, `anchor_height_mils`, `anchor_rotation_degrees`, and
+`anchor_shape` control the native anchor pad, while the generated custom-pad
+region writes the correct 1-based native `PADINDEX`.
+
+## Vias
+
+`AltiumPcbFootprint.add_via(...)` supports top/bottom tenting, independent
+manual solder-mask expansion values, propagation delay, fabrication/assembly
+testpoint flags, and IPC-4761 via-protection types:
+
+```python
+footprint.add_via(
+    position_mils=(100, 0),
+    diameter_mils=24,
+    hole_size_mils=10,
+    ipc4761_via_type=PcbIpc4761ViaType.TYPE_7_FILLING_AND_CAPPING,
+    propagation_delay_ps=12.5,
+    is_tent_top=True,
+    is_tent_bottom=False,
+    solder_mask_expansion_top_mils=-3,
+    solder_mask_expansion_bottom_mils=5,
+)
+```
+
+Use `set_ipc4761_feature_side(...)` and
+`set_ipc4761_feature_material(...)` on the returned via to customize IPC-4761
+feature rows such as filling or capping material.
+
+## Keepout Restrictions
+
+Footprint tracks, arcs, fills, and regions can carry Altium's raw
+`keepout_restrictions` mask when authored as object-specific keepouts. Use
+`PcbKeepoutRestriction`, `decode_pcb_keepout_restrictions(...)`,
+`encode_pcb_keepout_restrictions(...)`,
+`pcb_keepout_restriction_names(...)`, and
+`pcb_keepout_restriction_unknown_bits(...)` for named access to the confirmed
+via, track, copper, SMD pad, and through-hole pad restriction bits while
+preserving the raw integer for writeback.
+
+## Footprint Primitive Parameters
+
+`AltiumPcbFootprint.set_footprint_primitive_parameter(...)` writes
+footprint-level user parameters to the PcbLib `PrimitiveParameters` side stream:
+
+```python
+footprint.set_footprint_primitive_parameter("TEST_PARAMETER", "sample")
+```
+
+These parameters are separate from the standard footprint `Parameters` stream
+used for pattern, description, height, and item ids.
+
 ## Text
 
 `AltiumPcbFootprint.add_text(...)` supports stroke, TrueType, and barcode text
@@ -118,6 +174,35 @@ Layer keys and SVG filenames use stable `PcbLayer.to_json_name()` tokens.
 Use `PcbLayer.to_display_name()` only for default UI labels; PcbLib footprints
 do not have a board layer stack, so there is no board-specific rename source.
 
+## Mechanical Layer Kinds
+
+PcbLib semantic mechanical layer roles are stored in
+`Library/LayerKindMapping/Data` and exposed through `MechanicalLayerKind`.
+Authored output also synchronizes Altium's `Library/Data` `MECHKIND`
+layer-table/cache fields so the assignments are visible in Altium's layer
+manager. Mechanical layer display names, enabled flags, and component mirror
+pairs are stored separately in `Library/Data`.
+
+Use `mechanical_layer_kinds` to inspect the parsed mapping, and use
+`get_mechanical_layer_kind(...)` / `set_mechanical_layer_kind(...)` for common
+lookup and authoring:
+
+```python
+from altium_monkey import AltiumPcbLib, MechanicalLayerKind
+
+pcblib = AltiumPcbLib()
+pcblib.add_footprint("MECH_KIND_DEMO")
+pcblib.set_mechanical_layer("MECHANICAL14", name="Top Component Outline")
+pcblib.set_mechanical_layer("MECHANICAL15", name="Bottom Component Outline")
+pcblib.set_mechanical_layer_pair("MECHANICAL14", "MECHANICAL15", pair_index=0)
+pcblib.set_mechanical_layer_kind("MECHANICAL14", MechanicalLayerKind.COMPONENT_OUTLINE_TOP)
+pcblib.save("mechanical_kind.PcbLib")
+```
+
+Mechanical layers 1 through 16 use classic PCB layer ids in the mapping.
+Mechanical layers 17 through 32 use Altium's extended
+`0x04000000 | mechanical_number` id form.
+
 ## Direct Record Edits
 
 Directly editing footprint primitive lists is an advanced escape hatch. It can
@@ -129,12 +214,15 @@ high-level helper methods should be preferred for authored output.
 Start with:
 
 1. [`hello_pcblib`](../examples/hello_pcblib/README.md)
-2. [`pcblib_find_footprint`](../examples/pcblib_find_footprint/README.md)
-3. [`pcblib_split`](../examples/pcblib_split/README.md)
-4. [`pcblib_footprint_svg`](../examples/pcblib_footprint_svg/README.md)
-5. [`pcblib_extract_3d_models`](../examples/pcblib_extract_3d_models/README.md)
-6. [`pcblib_add_free_3d_extruded`](../examples/pcblib_add_free_3d_extruded/README.md)
-7. [`pcblib_synthesize_power_resistor_lib`](../examples/pcblib_synthesize_power_resistor_lib/README.md)
+2. [`pcblib_create_mechanical_layer_kinds`](../examples/pcblib_create_mechanical_layer_kinds/README.md)
+3. [`pcblib_add_via_ipc4761_matrix`](../examples/pcblib_add_via_ipc4761_matrix/README.md)
+4. [`pcblib_find_footprint`](../examples/pcblib_find_footprint/README.md)
+5. [`pcblib_split`](../examples/pcblib_split/README.md)
+6. [`pcblib_footprint_svg`](../examples/pcblib_footprint_svg/README.md)
+7. [`pcblib_extract_3d_models`](../examples/pcblib_extract_3d_models/README.md)
+8. [`pcblib_add_free_3d_extruded`](../examples/pcblib_add_free_3d_extruded/README.md)
+9. [`pcblib_create_cavity_region`](../examples/pcblib_create_cavity_region/README.md)
+10. [`pcblib_synthesize_power_resistor_lib`](../examples/pcblib_synthesize_power_resistor_lib/README.md)
 
 See [API patterns](api_patterns/index.md) for the differences between schematic
 and PCB object systems.

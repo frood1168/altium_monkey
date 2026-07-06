@@ -10,6 +10,7 @@ builder-owned footprint-placement path:
 
 The goal of this first slice is common library footprints made of:
 - pads
+- custom pads
 - tracks
 - arcs
 - fills
@@ -18,8 +19,6 @@ The goal of this first slice is common library footprints made of:
 - logical regions
 
 What is intentionally deferred:
-- component-body / model placement
-- board-side custom-pad `CustomShapes/*` synthesis
 - polygon pour definition/pour-state handling
 """
 
@@ -28,20 +27,34 @@ from __future__ import annotations
 import copy
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Mapping, Sequence, TypedDict, cast
 
 from .altium_pcb_embedded_model_compose import (
     collect_pcblib_embedded_model_entries,
     resolve_footprint_body_model_entries,
 )
 from .altium_pcbdoc_builder_components import _normalize_component_layer
-from .altium_pcbdoc_builder_models import swap_body_projection_for_bottom
 from .altium_pcbdoc_layers import _build_component_layer_flip_map, _flip_layer
+from .altium_pcb_enums import PcbBodyProjection
 from .altium_record_types import PcbLayer
 
 if TYPE_CHECKING:
     from .altium_pcblib import AltiumPcbFootprint, AltiumPcbLib
     from .altium_pcbdoc_builder import PcbDocBuilder
+    from .altium_record_pcb__component_body import AltiumPcbComponentBody
+    from .altium_record_pcb__model import AltiumPcbModel
+    from .altium_record_pcb__pad import AltiumPcbPad
+
+
+class _ComponentTextSpec(TypedDict):
+    text: str
+    position_mils: tuple[float, float]
+    height_mils: float
+    layer: PcbLayer
+    rotation_degrees: float
+    is_designator: bool
+    is_comment: bool
+    is_mirrored: bool
 
 
 def _forward_transform_point(
@@ -54,7 +67,7 @@ def _forward_transform_point(
 ) -> tuple[float, float]:
     """
     Convert footprint-local coordinates into board-absolute coordinates.
-    
+
     This is the forward inverse of `altium_pcbdoc._reverse_transform_point()`:
       local -> mirror_Y (if bottom) -> rotate -> translate
     """
@@ -80,10 +93,12 @@ def _forward_transform_point(
     return float(cx) + dx, float(cy) + dy
 
 
-def _forward_transform_angle(local_angle: float, rotation_deg: float, flipped: bool) -> float:
+def _forward_transform_angle(
+    local_angle: float, rotation_deg: float, flipped: bool
+) -> float:
     """
     Convert a footprint-local primitive angle into board-space.
-    
+
     Top-side:    board = component_rotation + local
     Bottom-side: board = component_rotation - local
     """
@@ -92,7 +107,9 @@ def _forward_transform_angle(local_angle: float, rotation_deg: float, flipped: b
     return (float(rotation_deg) + float(local_angle)) % 360.0
 
 
-def _forward_transform_model_z_rotation(local_angle: float, rotation_deg: float, flipped: bool) -> float:
+def _forward_transform_model_z_rotation(
+    local_angle: float, rotation_deg: float, flipped: bool
+) -> float:
     """
     Convert a footprint-local 3D model Z rotation into board-space.
     """
@@ -102,14 +119,46 @@ def _forward_transform_model_z_rotation(local_angle: float, rotation_deg: float,
 
 
 def _component_layer_flip_map(builder: "PcbDocBuilder") -> dict[int, int]:
-    return _build_component_layer_flip_map(builder.board_data.top_level_segment.to_mapping())
+    return _build_component_layer_flip_map(
+        builder.board_data.top_level_segment.to_mapping()
+    )
 
 
-def _transform_layer(layer_id: int, *, flipped: bool, layer_flip_map: dict[int, int]) -> int:
+def _transform_layer(
+    layer_id: int, *, flipped: bool, layer_flip_map: dict[int, int]
+) -> int:
     return _flip_layer(int(layer_id), layer_flip_map) if flipped else int(layer_id)
 
 
-def _footprint_local_bounds(footprint: "AltiumPcbFootprint") -> tuple[float, float, float, float]:
+def _component_copper_layer_id(layer_token: str) -> int | None:
+    try:
+        layer = PcbLayer.from_json_name(layer_token)
+    except ValueError:
+        return None
+    return int(layer) if layer.is_copper() else None
+
+
+def _transform_placed_primitive_layer(
+    layer_id: int,
+    *,
+    flipped: bool,
+    layer_flip_map: dict[int, int],
+    placement_copper_layer_id: int | None,
+) -> int:
+    if flipped:
+        return _transform_layer(layer_id, flipped=True, layer_flip_map=layer_flip_map)
+    if (
+        placement_copper_layer_id is not None
+        and placement_copper_layer_id != int(PcbLayer.TOP)
+        and int(layer_id) == int(PcbLayer.TOP)
+    ):
+        return placement_copper_layer_id
+    return int(layer_id)
+
+
+def _footprint_local_bounds(
+    footprint: "AltiumPcbFootprint",
+) -> tuple[float, float, float, float]:
     xs: list[float] = []
     ys: list[float] = []
 
@@ -120,8 +169,18 @@ def _footprint_local_bounds(footprint: "AltiumPcbFootprint") -> tuple[float, flo
         xs.extend((float(track.start_x_mils), float(track.end_x_mils)))
         ys.extend((float(track.start_y_mils), float(track.end_y_mils)))
     for arc in footprint.arcs:
-        xs.extend((float(arc.center_x_mils) - float(arc.radius_mils), float(arc.center_x_mils) + float(arc.radius_mils)))
-        ys.extend((float(arc.center_y_mils) - float(arc.radius_mils), float(arc.center_y_mils) + float(arc.radius_mils)))
+        xs.extend(
+            (
+                float(arc.center_x_mils) - float(arc.radius_mils),
+                float(arc.center_x_mils) + float(arc.radius_mils),
+            )
+        )
+        ys.extend(
+            (
+                float(arc.center_y_mils) - float(arc.radius_mils),
+                float(arc.center_y_mils) + float(arc.radius_mils),
+            )
+        )
     for fill in footprint.fills:
         xs.extend((float(fill.pos1_x_mils), float(fill.pos2_x_mils)))
         ys.extend((float(fill.pos1_y_mils), float(fill.pos2_y_mils)))
@@ -142,14 +201,16 @@ def _default_component_text_specs(
     comment_text: str | None,
     layer_token: str,
     rotation_degrees: float,
-) -> list[dict[str, object]]:
+) -> list[_ComponentTextSpec]:
     min_x, min_y, max_x, max_y = _footprint_local_bounds(footprint)
     center_x = (min_x + max_x) / 2.0
     margin = max(40.0, (max_y - min_y) * 0.5 if max_y > min_y else 40.0)
-    overlay_layer = PcbLayer.BOTTOM_OVERLAY if layer_token == "BOTTOM" else PcbLayer.TOP_OVERLAY
+    overlay_layer = (
+        PcbLayer.BOTTOM_OVERLAY if layer_token == "BOTTOM" else PcbLayer.TOP_OVERLAY
+    )
     mirrored = layer_token == "BOTTOM"
 
-    specs: list[dict[str, object]] = [
+    specs: list[_ComponentTextSpec] = [
         {
             "text": str(designator),
             "position_mils": (center_x, max_y + margin),
@@ -178,18 +239,23 @@ def _default_component_text_specs(
 
 
 def _transform_component_body_into_board(
-    body: object,
+    body: "AltiumPcbComponentBody",
     *,
     cx_mils: float,
     cy_mils: float,
     rotation_degrees: float,
     flipped: bool,
     layer_flip_map: dict[int, int],
-) -> object:
+) -> "AltiumPcbComponentBody":
     placed = copy.deepcopy(body)
-    placed.layer = _transform_layer(placed.layer, flipped=flipped, layer_flip_map=layer_flip_map)
+    placed.layer = _transform_layer(
+        placed.layer, flipped=flipped, layer_flip_map=layer_flip_map
+    )
     if flipped:
-        placed.body_projection = swap_body_projection_for_bottom(placed.body_projection)
+        if placed.body_projection == PcbBodyProjection.TOP:
+            placed.body_projection = PcbBodyProjection.BOTTOM
+        elif placed.body_projection == PcbBodyProjection.BOTTOM:
+            placed.body_projection = PcbBodyProjection.TOP
 
     for vertex in placed.outline:
         tx, ty = _forward_transform_point(
@@ -218,8 +284,12 @@ def _transform_component_body_into_board(
             end_angle = float(vertex.end_angle)
             if flipped:
                 start_angle, end_angle = end_angle, start_angle
-            vertex.start_angle = _forward_transform_angle(start_angle, rotation_degrees, flipped)
-            vertex.end_angle = _forward_transform_angle(end_angle, rotation_degrees, flipped)
+            vertex.start_angle = _forward_transform_angle(
+                start_angle, rotation_degrees, flipped
+            )
+            vertex.end_angle = _forward_transform_angle(
+                end_angle, rotation_degrees, flipped
+            )
 
     if getattr(placed, "holes", None):
         for hole in placed.holes:
@@ -280,6 +350,7 @@ def _add_placed_tracks(
     rotation_degrees: float,
     flipped: bool,
     layer_flip_map: dict[int, int],
+    placement_copper_layer_id: int | None,
 ) -> None:
     for track in footprint.tracks:
         start = _forward_transform_point(
@@ -302,7 +373,12 @@ def _add_placed_tracks(
             start,
             end,
             width_mils=track.width_mils,
-            layer=_transform_layer(track.layer, flipped=flipped, layer_flip_map=layer_flip_map),
+            layer=_transform_placed_primitive_layer(
+                track.layer,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
             component_index=component_index,
         )
 
@@ -317,6 +393,7 @@ def _add_placed_arcs(
     rotation_degrees: float,
     flipped: bool,
     layer_flip_map: dict[int, int],
+    placement_copper_layer_id: int | None,
 ) -> None:
     for arc in footprint.arcs:
         center = _forward_transform_point(
@@ -330,10 +407,19 @@ def _add_placed_arcs(
         builder.add_arc(
             center_mils=center,
             radius_mils=arc.radius_mils,
-            start_angle=_forward_transform_angle(arc.start_angle, rotation_degrees, flipped),
-            end_angle=_forward_transform_angle(arc.end_angle, rotation_degrees, flipped),
+            start_angle=_forward_transform_angle(
+                arc.start_angle, rotation_degrees, flipped
+            ),
+            end_angle=_forward_transform_angle(
+                arc.end_angle, rotation_degrees, flipped
+            ),
             width_mils=arc.width_mils,
-            layer=_transform_layer(arc.layer, flipped=flipped, layer_flip_map=layer_flip_map),
+            layer=_transform_placed_primitive_layer(
+                arc.layer,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
             component_index=component_index,
         )
 
@@ -348,6 +434,7 @@ def _add_placed_fills(
     rotation_degrees: float,
     flipped: bool,
     layer_flip_map: dict[int, int],
+    placement_copper_layer_id: int | None,
 ) -> None:
     for fill in footprint.fills:
         pos1 = _forward_transform_point(
@@ -369,13 +456,22 @@ def _add_placed_fills(
         builder.add_fill(
             pos1,
             pos2,
-            rotation_degrees=_forward_transform_angle(fill.rotation, rotation_degrees, flipped),
-            layer=_transform_layer(fill.layer, flipped=flipped, layer_flip_map=layer_flip_map),
+            rotation_degrees=_forward_transform_angle(
+                fill.rotation, rotation_degrees, flipped
+            ),
+            layer=_transform_placed_primitive_layer(
+                fill.layer,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
             component_index=component_index,
         )
 
 
-def _resolve_placed_text_value(text: object, designator: str, comment_text: str | None) -> str:
+def _resolve_placed_text_value(
+    text: object, designator: str, comment_text: str | None
+) -> str:
     if bool(getattr(text, "is_designator", False)):
         return designator
     if bool(getattr(text, "is_comment", False)) and comment_text is not None:
@@ -395,9 +491,14 @@ def _add_placed_texts(
     rotation_degrees: float,
     flipped: bool,
     layer_flip_map: dict[int, int],
+    placement_copper_layer_id: int | None,
 ) -> tuple[bool, bool]:
-    footprint_has_designator_text = any(bool(getattr(text, "is_designator", False)) for text in footprint.texts)
-    footprint_has_comment_text = any(bool(getattr(text, "is_comment", False)) for text in footprint.texts)
+    footprint_has_designator_text = any(
+        bool(getattr(text, "is_designator", False)) for text in footprint.texts
+    )
+    footprint_has_comment_text = any(
+        bool(getattr(text, "is_comment", False)) for text in footprint.texts
+    )
 
     for text in footprint.texts:
         position = _forward_transform_point(
@@ -412,8 +513,15 @@ def _add_placed_texts(
             text=_resolve_placed_text_value(text, designator, comment_text),
             position_mils=position,
             height_mils=text.height_mils,
-            layer=_transform_layer(text.layer, flipped=flipped, layer_flip_map=layer_flip_map),
-            rotation_degrees=_forward_transform_angle(text.rotation, rotation_degrees, flipped),
+            layer=_transform_placed_primitive_layer(
+                text.layer,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
+            rotation_degrees=_forward_transform_angle(
+                text.rotation, rotation_degrees, flipped
+            ),
             stroke_width_mils=text.stroke_width_mils,
             font_name=text.font_name or "Arial",
             is_comment=text.is_comment,
@@ -440,7 +548,9 @@ def _add_default_component_texts_if_needed(
     rotation_degrees: float,
     flipped: bool,
 ) -> None:
-    if footprint_has_designator_text and (comment_text is None or footprint_has_comment_text):
+    if footprint_has_designator_text and (
+        comment_text is None or footprint_has_comment_text
+    ):
         return
 
     for spec in _default_component_text_specs(
@@ -483,12 +593,24 @@ def _add_placed_pads(
     flipped: bool,
     layer_flip_map: dict[int, int],
     pad_nets: Mapping[str, str] | None,
+    placement_copper_layer_id: int | None,
 ) -> None:
     for pad in footprint.pads:
-        if getattr(pad, "custom_shape", None) is not None:
-            raise NotImplementedError(
-                "Footprint placement for custom pads needs board-side CustomShapes/Data synthesis"
+        custom_shape = getattr(pad, "custom_shape", None)
+        if custom_shape is not None:
+            _add_placed_custom_pad(
+                builder,
+                pad,
+                component_index=component_index,
+                cx_mils=cx_mils,
+                cy_mils=cy_mils,
+                rotation_degrees=rotation_degrees,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                pad_nets=pad_nets,
+                placement_copper_layer_id=placement_copper_layer_id,
             )
+            continue
         position = _forward_transform_point(
             pad.x_mils,
             pad.y_mils,
@@ -502,13 +624,218 @@ def _add_placed_pads(
             position_mils=position,
             width_mils=pad._from_internal_units(pad.top_width),
             height_mils=pad._from_internal_units(pad.top_height),
-            layer=_transform_layer(pad.layer, flipped=flipped, layer_flip_map=layer_flip_map),
+            layer=_transform_placed_primitive_layer(
+                pad.layer,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
             shape=int(pad.effective_top_shape),
-            rotation_degrees=_forward_transform_angle(pad.rotation, rotation_degrees, flipped),
+            rotation_degrees=_forward_transform_angle(
+                pad.rotation, rotation_degrees, flipped
+            ),
             hole_size_mils=pad.hole_size_mils,
             plated=pad.is_plated,
             net=None if pad_nets is None else pad_nets.get(str(pad.designator)),
             component_index=component_index,
+        )
+
+
+def _vertices_to_points_mils(
+    vertices: Sequence[object] | None,
+) -> list[tuple[float, float]]:
+    points = [
+        (float(getattr(vertex, "x_mils")), float(getattr(vertex, "y_mils")))
+        for vertex in list(vertices or [])
+    ]
+    if len(points) >= 2 and points[0] == points[-1]:
+        return points[:-1]
+    return points
+
+
+def _custom_shape_region_ids(footprint: "AltiumPcbFootprint") -> set[int]:
+    region_ids: set[int] = set()
+    for pad in footprint.pads:
+        custom_shape = getattr(pad, "custom_shape", None)
+        if custom_shape is None:
+            continue
+        iter_layer_shapes = getattr(custom_shape, "iter_layer_shapes", None)
+        if not callable(iter_layer_shapes):
+            continue
+        for layer_shape in cast(Sequence[object], iter_layer_shapes()):
+            region = getattr(layer_shape, "region", None)
+            if region is not None:
+                region_ids.add(id(region))
+            shape_region = getattr(layer_shape, "shape_region", None)
+            if shape_region is not None:
+                region_ids.add(id(shape_region))
+    return region_ids
+
+
+def _custom_pad_layer_shape_geometry(
+    layer_shape: object,
+) -> tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]:
+    source_region = getattr(layer_shape, "region", None) or getattr(
+        layer_shape,
+        "shape_region",
+        None,
+    )
+    if source_region is None:
+        return [], []
+    raw_outline = getattr(source_region, "outline_vertices", None)
+    outline = _vertices_to_points_mils(
+        raw_outline if isinstance(raw_outline, Sequence) else None
+    )
+    raw_holes = getattr(source_region, "hole_vertices", None)
+    holes = []
+    if isinstance(raw_holes, Sequence):
+        holes = [
+            _vertices_to_points_mils(hole if isinstance(hole, Sequence) else None)
+            for hole in raw_holes
+        ]
+    return outline, holes
+
+
+def _transform_points(
+    points: list[tuple[float, float]],
+    *,
+    cx_mils: float,
+    cy_mils: float,
+    rotation_degrees: float,
+    flipped: bool,
+) -> list[tuple[float, float]]:
+    return [
+        _forward_transform_point(
+            point_x,
+            point_y,
+            cx_mils,
+            cy_mils,
+            rotation_degrees,
+            flipped,
+        )
+        for point_x, point_y in points
+    ]
+
+
+def _ordered_custom_pad_layer_shapes(pad: "AltiumPcbPad") -> list[object]:
+    custom_shape = getattr(pad, "custom_shape", None)
+    if custom_shape is None:
+        return []
+    iter_layer_shapes = getattr(custom_shape, "iter_layer_shapes", None)
+    if not callable(iter_layer_shapes):
+        return []
+    shapes = list(cast(Sequence[object], iter_layer_shapes()))
+    primary = getattr(custom_shape, "primary_layer_shape", None)
+    if primary is not None and primary in shapes:
+        return [primary] + [shape for shape in shapes if shape is not primary]
+    return shapes
+
+
+def _add_placed_custom_pad(
+    builder: "PcbDocBuilder",
+    pad: "AltiumPcbPad",
+    *,
+    component_index: int,
+    cx_mils: float,
+    cy_mils: float,
+    rotation_degrees: float,
+    flipped: bool,
+    layer_flip_map: dict[int, int],
+    pad_nets: Mapping[str, str] | None,
+    placement_copper_layer_id: int | None,
+) -> None:
+    layer_shapes = _ordered_custom_pad_layer_shapes(pad)
+    if not layer_shapes:
+        raise NotImplementedError("Custom pad has no source layer shape")
+
+    primary_shape = layer_shapes[0]
+    outline, holes = _custom_pad_layer_shape_geometry(primary_shape)
+    if len(outline) < 3:
+        raise NotImplementedError("Custom pad outline requires at least 3 points")
+    position = _forward_transform_point(
+        float(getattr(pad, "x_mils")),
+        float(getattr(pad, "y_mils")),
+        cx_mils,
+        cy_mils,
+        rotation_degrees,
+        flipped,
+    )
+    primary_layer = _transform_placed_primitive_layer(
+        int(getattr(primary_shape, "layer", getattr(pad, "layer", PcbLayer.TOP))),
+        flipped=flipped,
+        layer_flip_map=layer_flip_map,
+        placement_copper_layer_id=placement_copper_layer_id,
+    )
+    builder.add_custom_pad(
+        designator=str(getattr(pad, "designator", "")),
+        position_mils=position,
+        outline_points_mils=_transform_points(
+            outline,
+            cx_mils=cx_mils,
+            cy_mils=cy_mils,
+            rotation_degrees=rotation_degrees,
+            flipped=flipped,
+        ),
+        layer=primary_layer,
+        anchor_width_mils=float(pad._from_internal_units(pad.top_width)),
+        anchor_height_mils=float(pad._from_internal_units(pad.top_height)),
+        anchor_rotation_degrees=_forward_transform_angle(
+            float(getattr(pad, "rotation", 0.0)),
+            rotation_degrees,
+            flipped,
+        ),
+        anchor_shape=int(getattr(pad, "effective_top_shape", 1)),
+        hole_points_mils=[
+            _transform_points(
+                hole,
+                cx_mils=cx_mils,
+                cy_mils=cy_mils,
+                rotation_degrees=rotation_degrees,
+                flipped=flipped,
+            )
+            for hole in holes
+        ],
+        outline_points_are_local=False,
+        net=None
+        if pad_nets is None
+        else pad_nets.get(str(getattr(pad, "designator", ""))),
+        component_index=component_index,
+    )
+
+    authored_pad = builder.pads[-1]
+    zero_based_pad_index = len(builder.pads) - 1
+    for layer_shape in layer_shapes[1:]:
+        extra_outline, extra_holes = _custom_pad_layer_shape_geometry(layer_shape)
+        if len(extra_outline) < 3:
+            continue
+        builder._add_custom_pad_layer_shape(
+            pad=authored_pad,
+            zero_based_pad_index=zero_based_pad_index,
+            outline_points_mils=_transform_points(
+                extra_outline,
+                cx_mils=cx_mils,
+                cy_mils=cy_mils,
+                rotation_degrees=rotation_degrees,
+                flipped=flipped,
+            ),
+            layer=_transform_placed_primitive_layer(
+                int(getattr(layer_shape, "layer", primary_layer)),
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
+            hole_points_mils=[
+                _transform_points(
+                    hole,
+                    cx_mils=cx_mils,
+                    cy_mils=cy_mils,
+                    rotation_degrees=rotation_degrees,
+                    flipped=flipped,
+                )
+                for hole in extra_holes
+            ],
+            component_index=component_index,
+            record=builder.custom_shapes[-1],
         )
 
 
@@ -537,6 +864,29 @@ def _add_placed_vias(
             hole_size_mils=via.hole_size_mils,
             layer_start=via.layer_start,
             layer_end=via.layer_end,
+            ipc4761_via_type=via.ipc4761_via_type,
+            ipc4761_features=()
+            if via.via_structure is None
+            else tuple(via.via_structure.features),
+            propagation_delay_ps=via.propagation_delay_ps,
+            hole_positive_tolerance_mils=via.hole_positive_tolerance_mils,
+            hole_negative_tolerance_mils=via.hole_negative_tolerance_mils,
+            is_tent_top=via.is_tent_top,
+            is_tent_bottom=via.is_tent_bottom,
+            solder_mask_expansion_top_mils=(
+                via.soldermask_expansion_front / 10000.0
+                if getattr(via, "_has_soldermask_expansion_front", False)
+                else None
+            ),
+            solder_mask_expansion_bottom_mils=(
+                via.soldermask_expansion_back / 10000.0
+                if getattr(via, "_has_soldermask_expansion_back", False)
+                else None
+            ),
+            is_test_fab_top=via.is_test_fab_top,
+            is_test_fab_bottom=via.is_test_fab_bottom,
+            is_assy_testpoint_top=via.is_assy_testpoint_top,
+            is_assy_testpoint_bottom=via.is_assy_testpoint_bottom,
             component_index=component_index,
         )
 
@@ -551,15 +901,33 @@ def _add_placed_regions(
     rotation_degrees: float,
     flipped: bool,
     layer_flip_map: dict[int, int],
+    placement_copper_layer_id: int | None,
 ) -> None:
+    custom_region_ids = _custom_shape_region_ids(footprint)
     for region in footprint.regions:
+        if id(region) in custom_region_ids:
+            continue
         outline = [
-            _forward_transform_point(vertex.x_mils, vertex.y_mils, cx_mils, cy_mils, rotation_degrees, flipped)
+            _forward_transform_point(
+                vertex.x_mils,
+                vertex.y_mils,
+                cx_mils,
+                cy_mils,
+                rotation_degrees,
+                flipped,
+            )
             for vertex in region.outline_vertices
         ]
         holes = [
             [
-                _forward_transform_point(vertex.x_mils, vertex.y_mils, cx_mils, cy_mils, rotation_degrees, flipped)
+                _forward_transform_point(
+                    vertex.x_mils,
+                    vertex.y_mils,
+                    cx_mils,
+                    cy_mils,
+                    rotation_degrees,
+                    flipped,
+                )
                 for vertex in hole
             ]
             for hole in region.hole_vertices
@@ -567,9 +935,16 @@ def _add_placed_regions(
         builder.add_region(
             outline_points_mils=outline,
             hole_points_mils=holes,
-            layer=_transform_layer(region.layer, flipped=flipped, layer_flip_map=layer_flip_map),
+            layer=_transform_placed_primitive_layer(
+                region.layer,
+                flipped=flipped,
+                layer_flip_map=layer_flip_map,
+                placement_copper_layer_id=placement_copper_layer_id,
+            ),
             is_keepout=bool(region.is_keepout),
             keepout_restrictions=int(region.keepout_restrictions),
+            region_kind=region.region_kind,
+            cavity_height_mils=region.cavity_height_mils,
             component_index=component_index,
         )
 
@@ -577,7 +952,7 @@ def _add_placed_regions(
 def _resolve_body_model_entries(
     footprint: "AltiumPcbFootprint",
     source_pcblib: "AltiumPcbLib | None",
-) -> dict[int, tuple[object, bytes]]:
+) -> dict[int, tuple["AltiumPcbModel", bytes]]:
     if not footprint.component_bodies or source_pcblib is None:
         return {}
     resolved_entries = resolve_footprint_body_model_entries(
@@ -660,19 +1035,25 @@ def place_footprint_into_builder(
 ) -> int:
     """
     Place one `AltiumPcbFootprint` onto the board through the builder path.
-    
-    This first slice is intentionally explicit about unsupported features:
-    - custom pads raise `NotImplementedError`
-    - embedded 3D model placement requires `source_pcblib`
+
+    Embedded 3D model placement requires `source_pcblib` so model payloads can
+    be resolved from the source library.
     """
     layer_token = _normalize_component_layer(layer)
     flipped = layer_token == "BOTTOM"
+    placement_copper_layer_id = _component_copper_layer_id(layer_token)
     cx_mils, cy_mils = position_mils
     layer_flip_map = _component_layer_flip_map(builder)
     source_pcblib = _maybe_load_source_pcblib(source_pcblib, source_footprint_library)
-    footprint_has_designator_text = any(bool(getattr(text, "is_designator", False)) for text in footprint.texts)
-    footprint_has_comment_text = any(bool(getattr(text, "is_comment", False)) for text in footprint.texts)
-    effective_comment_on = bool(comment_visible) and (comment_text is not None or footprint_has_comment_text)
+    footprint_has_designator_text = any(
+        bool(getattr(text, "is_designator", False)) for text in footprint.texts
+    )
+    footprint_has_comment_text = any(
+        bool(getattr(text, "is_comment", False)) for text in footprint.texts
+    )
+    effective_comment_on = bool(comment_visible) and (
+        comment_text is not None or footprint_has_comment_text
+    )
 
     component_index = builder.add_component(
         designator=designator,
@@ -695,6 +1076,7 @@ def place_footprint_into_builder(
         rotation_degrees=rotation_degrees,
         flipped=flipped,
         layer_flip_map=layer_flip_map,
+        placement_copper_layer_id=placement_copper_layer_id,
     )
     _add_placed_arcs(
         builder,
@@ -705,6 +1087,7 @@ def place_footprint_into_builder(
         rotation_degrees=rotation_degrees,
         flipped=flipped,
         layer_flip_map=layer_flip_map,
+        placement_copper_layer_id=placement_copper_layer_id,
     )
     _add_placed_fills(
         builder,
@@ -715,6 +1098,7 @@ def place_footprint_into_builder(
         rotation_degrees=rotation_degrees,
         flipped=flipped,
         layer_flip_map=layer_flip_map,
+        placement_copper_layer_id=placement_copper_layer_id,
     )
     footprint_has_designator_text, footprint_has_comment_text = _add_placed_texts(
         builder,
@@ -727,6 +1111,7 @@ def place_footprint_into_builder(
         rotation_degrees=rotation_degrees,
         flipped=flipped,
         layer_flip_map=layer_flip_map,
+        placement_copper_layer_id=placement_copper_layer_id,
     )
     _add_default_component_texts_if_needed(
         builder,
@@ -752,6 +1137,7 @@ def place_footprint_into_builder(
         flipped=flipped,
         layer_flip_map=layer_flip_map,
         pad_nets=pad_nets,
+        placement_copper_layer_id=placement_copper_layer_id,
     )
     _add_placed_vias(
         builder,
@@ -771,6 +1157,7 @@ def place_footprint_into_builder(
         rotation_degrees=rotation_degrees,
         flipped=flipped,
         layer_flip_map=layer_flip_map,
+        placement_copper_layer_id=placement_copper_layer_id,
     )
     _add_placed_component_bodies(
         builder,

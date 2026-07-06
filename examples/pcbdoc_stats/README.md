@@ -7,6 +7,11 @@ This example is read-only. It is intended to show how project-level loading,
 PcbDoc parsing, board-outline geometry, primitive inspection, and resolved
 layer-stack metadata fit together.
 
+The example intentionally uses `resolved_layer_stack_from_pcbdoc(...)` because
+it is a consumer/reporting workflow. Use `AltiumLayerStackDocument` instead
+when authoring stack data, exporting `.stackup`/`.stackupx`, or querying
+source-aware rigid-flex topology.
+
 ## What It Shows
 
 1. `AltiumDesign.from_prjpcb(...)`

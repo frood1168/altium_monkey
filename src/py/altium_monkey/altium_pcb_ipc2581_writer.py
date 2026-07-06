@@ -13,7 +13,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal, SupportsIndex, SupportsInt
 
 from .altium_api_markers import public_api
 from .altium_embedded_font_helpers import safe_embedded_font_filename_component
@@ -26,6 +26,11 @@ from .altium_pcb_mask_paste_rules import (
     get_via_mask_expansion_iu,
     has_pad_paste_opening,
     is_pad_solder_mask_only,
+)
+from .altium_pcb_enums import (
+    PcbIpc4761ViaType,
+    PcbViaStructureFeatureSide,
+    PcbViaStructureFeatureType,
 )
 from .altium_pcb_rule import AltiumPlaneClearanceRule, AltiumPlaneConnectRule
 from .altium_record_types import PcbLayer
@@ -79,7 +84,77 @@ _MIL_TO_MM = 0.0254
 
 # Copper (signal) layer IDs: Top(1), Mid1-30(2-31), Bottom(32), Multi-Layer(74)
 _COPPER_LAYER_IDS = frozenset(range(1, 33)) | {PcbLayer.MULTI_LAYER.value}
-_EMBEDDED_FONT_RESOLVER_CACHE: dict[str, object | None] = {}
+_EmbeddedFontResolver = Callable[[str, bool, bool], str | None]
+_EMBEDDED_FONT_RESOLVER_CACHE: dict[str, _EmbeddedFontResolver | None] = {}
+
+_IPC4761_FEATURE_TENTING = int(PcbViaStructureFeatureType.TENTING)
+_IPC4761_FEATURE_COVERING = int(PcbViaStructureFeatureType.COVERING)
+_IPC4761_FEATURE_PLUGGING = int(PcbViaStructureFeatureType.PLUGGING)
+_IPC4761_FEATURE_FILLING = int(PcbViaStructureFeatureType.FILLING)
+_IPC4761_FEATURE_CAPPING = int(PcbViaStructureFeatureType.CAPPING)
+_IPC4761_SIDE_TOP = int(PcbViaStructureFeatureSide.TOP)
+_IPC4761_SIDE_BOTTOM = int(PcbViaStructureFeatureSide.BOTTOM)
+_IPC4761_SIDE_BOTH = int(PcbViaStructureFeatureSide.BOTH)
+
+_IPC4761_ACTIVE_FEATURES_BY_TYPE: dict[int, tuple[int, ...]] = {
+    int(PcbIpc4761ViaType.TYPE_1A_TENTING): (_IPC4761_FEATURE_TENTING,),
+    int(PcbIpc4761ViaType.TYPE_1B_TENTING): (_IPC4761_FEATURE_TENTING,),
+    int(PcbIpc4761ViaType.TYPE_2A_TENTING_AND_COVERING): (
+        _IPC4761_FEATURE_TENTING,
+        _IPC4761_FEATURE_COVERING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_2B_TENTING_AND_COVERING): (
+        _IPC4761_FEATURE_TENTING,
+        _IPC4761_FEATURE_COVERING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_3A_PLUGGING): (_IPC4761_FEATURE_PLUGGING,),
+    int(PcbIpc4761ViaType.TYPE_3B_PLUGGING): (_IPC4761_FEATURE_PLUGGING,),
+    int(PcbIpc4761ViaType.TYPE_4A_PLUGGING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_PLUGGING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_4B_PLUGGING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_PLUGGING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_5_FILLING): (_IPC4761_FEATURE_FILLING,),
+    int(PcbIpc4761ViaType.TYPE_6A_FILLING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_FILLING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_6B_FILLING_AND_COVERING): (
+        _IPC4761_FEATURE_COVERING,
+        _IPC4761_FEATURE_FILLING,
+    ),
+    int(PcbIpc4761ViaType.TYPE_7_FILLING_AND_CAPPING): (
+        _IPC4761_FEATURE_FILLING,
+        _IPC4761_FEATURE_CAPPING,
+    ),
+}
+_IPC4761_DEFAULT_FEATURE_SIDES_BY_TYPE: dict[int, dict[int, int]] = {
+    int(PcbIpc4761ViaType.TYPE_1A_TENTING): {
+        _IPC4761_FEATURE_TENTING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_2A_TENTING_AND_COVERING): {
+        _IPC4761_FEATURE_TENTING: _IPC4761_SIDE_TOP,
+        _IPC4761_FEATURE_COVERING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_3A_PLUGGING): {
+        _IPC4761_FEATURE_PLUGGING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_4A_PLUGGING_AND_COVERING): {
+        _IPC4761_FEATURE_COVERING: _IPC4761_SIDE_TOP,
+        _IPC4761_FEATURE_PLUGGING: _IPC4761_SIDE_TOP,
+    },
+    int(PcbIpc4761ViaType.TYPE_6A_FILLING_AND_COVERING): {
+        _IPC4761_FEATURE_COVERING: _IPC4761_SIDE_TOP,
+    },
+}
+_IPC4761_SURFACE_FEATURE_NAMES = {
+    _IPC4761_FEATURE_TENTING: "Tenting",
+    _IPC4761_FEATURE_COVERING: "Covering",
+    _IPC4761_FEATURE_PLUGGING: "Plugging",
+}
 
 # IPC copper artwork uses a different native stroke cursor table than
 # document/value layers. Keep this calibration generic to Sans Serif style 2;
@@ -463,7 +538,7 @@ def _stroke_cursor_advances_for_default_document_text(
 
 def _embedded_font_resolver_for_pcbdoc(
     pcbdoc: Any,
-) -> Callable[[str, bool, bool], str | None] | None:
+) -> _EmbeddedFontResolver | None:
     """
     Build a font resolver backed by embedded PCB TrueType fonts.
     """
@@ -1008,7 +1083,7 @@ class PcbIpc2581Context:
     Accumulated state for IPC-2581B generation.
     """
 
-    pcbdoc: object  # AltiumPcbDoc
+    pcbdoc: AltiumPcbDoc
     board_name: str = "board"
     project_parameters: dict[str, str] = field(default_factory=dict)
 
@@ -1056,6 +1131,11 @@ class PcbIpc2581Context:
     # Net  ->  set of layer names that the net has copper on
     # (tracks, arcs, fills, regions, pads, polygons  -  used for via padstack layer selection)
     net_layers: dict[str, set[str]] = field(default_factory=dict)
+    nonpad_net_layers: dict[str, set[str]] = field(default_factory=dict)
+    _layers_with_pours: set[str] = field(default_factory=set, init=False, repr=False)
+    _local_nonpad_copper_index: (
+        dict[tuple[str, str], list[tuple[str, object]]] | None
+    ) = field(default=None, init=False, repr=False)
 
     # Split-plane spatial index: v9_display_name  ->  list of (outline_mils, net_name)
     # Used for point-in-polygon lookup on "(Multiple Nets)" plane layers.
@@ -2065,7 +2145,9 @@ def _register_plane_antipad_shape(
     if hole_shape == 2 and slot_size_iu > hole_size_iu:
         w = slot_size_iu + 2 * clearance
         h = hole_size_iu + 2 * clearance
-        return _register_pad_shape_by_dims(ctx, w, h, 1)
+        return _register_pad_shape_by_dims(ctx, w, h, 1) or _register_circle_shape(
+            ctx, max(w, h)
+        )
     anti_pad_d = hole_size_iu + 2 * clearance
     return _register_circle_shape(ctx, anti_pad_d)
 
@@ -2097,6 +2179,70 @@ def _plane_layerpad_location_mm(
     ):
         return (0.0, 0.0)
     return (x_mm, y_mm)
+
+
+def _safe_int(
+    value: str | bytes | bytearray | SupportsIndex | SupportsInt | None,
+    default: int = 0,
+) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ipc4761_feature_side(via: object, via_type: int, feature_type: int) -> int:
+    structure = getattr(via, "via_structure", None)
+    for feature in getattr(structure, "features", ()) or ():
+        if _safe_int(getattr(feature, "feature_type", None), -1) == feature_type:
+            return _safe_int(getattr(feature, "side", None), _IPC4761_SIDE_BOTH)
+    return _IPC4761_DEFAULT_FEATURE_SIDES_BY_TYPE.get(via_type, {}).get(
+        feature_type,
+        _IPC4761_SIDE_BOTH,
+    )
+
+
+def _ipc4761_feature_layer_refs(feature_type: int, side: int) -> tuple[str, ...]:
+    if feature_type == _IPC4761_FEATURE_FILLING:
+        return ("Filling",)
+    if feature_type == _IPC4761_FEATURE_CAPPING:
+        return ("Capping",)
+
+    feature_name = _IPC4761_SURFACE_FEATURE_NAMES.get(feature_type)
+    if feature_name is None:
+        return ()
+    if side == _IPC4761_SIDE_TOP:
+        return (f"Top {feature_name}",)
+    if side == _IPC4761_SIDE_BOTTOM:
+        return (f"Bottom {feature_name}",)
+    return (f"Top {feature_name}", f"Bottom {feature_name}")
+
+
+def _ipc4761_feature_diameter_iu(via: object, feature_type: int) -> int:
+    if feature_type == _IPC4761_FEATURE_FILLING:
+        return max(0, _safe_int(getattr(via, "hole_size", 0)))
+    if feature_type == _IPC4761_FEATURE_PLUGGING:
+        return max(0, int(round(_safe_int(getattr(via, "diameter", 0)) / 2.0)))
+    return max(0, _safe_int(getattr(via, "diameter", 0)))
+
+
+def _ipc4761_via_feature_layer_shapes(via: object) -> tuple[tuple[str, int], ...]:
+    via_type = _safe_int(getattr(via, "ipc4761_via_type", 0))
+    feature_types = _IPC4761_ACTIVE_FEATURES_BY_TYPE.get(via_type, ())
+    if not feature_types:
+        return ()
+
+    layer_shapes: list[tuple[str, int]] = []
+    for feature_type in feature_types:
+        diameter_iu = _ipc4761_feature_diameter_iu(via, feature_type)
+        if diameter_iu <= 0:
+            continue
+        side = _ipc4761_feature_side(via, via_type, feature_type)
+        for layer_ref in _ipc4761_feature_layer_refs(feature_type, side):
+            layer_shapes.append((layer_ref, diameter_iu))
+    return tuple(layer_shapes)
 
 
 # ------------------------------------------------------------------ #
@@ -2716,8 +2862,6 @@ def _build_step(ctx: PcbIpc2581Context, cad_data: ET.Element) -> ET.Element:
     """
     Build the <Step> section with profile, padstacks, components, features.
     """
-    board = ctx.pcbdoc.board
-
     step = _sub(cad_data, "Step", {"name": ctx.board_name})
 
     # Datum
@@ -2745,13 +2889,16 @@ def _build_profile(ctx: PcbIpc2581Context, step: ET.Element) -> ET.Element | Non
         Handles both line segments and arc segments (PolyStepCurve).
     """
     board = ctx.pcbdoc.board
-    if not board.outline or not board.outline.vertices:
+    if board is None:
+        return None
+    outline = board.outline
+    if outline is None or not outline.vertices:
         return None
 
     profile = _sub(step, "Profile")
     polygon = _sub(profile, "Polygon")
 
-    verts = board.outline.vertices
+    verts = outline.vertices
     first = verts[0]
     _sub(
         polygon,
@@ -2957,7 +3104,10 @@ def _get_effective_shape(pad: Any, layer: str = "top") -> int:
     layer_enum = _layer_token_to_pcb_layer(layer)
     layer_shape = getattr(pad, "_layer_shape", None)
     if callable(layer_shape):
-        return int(layer_shape(layer_enum))
+        raw_shape = layer_shape(layer_enum)
+        if not isinstance(raw_shape, int | float | str):
+            raw_shape = 0
+        return int(raw_shape or 0)
 
     if layer == "bot":
         return int(getattr(pad, "bot_shape", 0) or getattr(pad, "top_shape", 0) or 0)
@@ -2983,7 +3133,10 @@ def _get_corner_radius_iu(pad: Any, w: int, h: int, layer: str = "top") -> int:
     if callable(layer_radius):
         width_mils = w / _UNITS_PER_MIL
         height_mils = h / _UNITS_PER_MIL
-        radius_mils = float(layer_radius(layer_enum, width_mils, height_mils) or 0.0)
+        raw_radius = layer_radius(layer_enum, width_mils, height_mils)
+        if not isinstance(raw_radius, int | float | str):
+            raw_radius = 0.0
+        radius_mils = float(raw_radius or 0.0)
         if radius_mils <= 0.0:
             return 0
         return int(round(radius_mils * _UNITS_PER_MIL))
@@ -3199,7 +3352,9 @@ def _pad_layer_offset_internal_units(
     offset_fn = getattr(pad, "pad_offset_internal_units", None)
     if callable(offset_fn):
         try:
-            return offset_fn(layer_id)
+            offset = offset_fn(layer_id)
+            if isinstance(offset, tuple | list) and len(offset) >= 2:
+                return (int(offset[0]), int(offset[1]))
         except Exception:
             pass
 
@@ -3221,7 +3376,9 @@ def _pad_layer_center_internal_units(
     center_fn = getattr(pad, "pad_center_internal_units", None)
     if callable(center_fn):
         try:
-            return center_fn(layer_id)
+            center = center_fn(layer_id)
+            if isinstance(center, tuple | list) and len(center) >= 2:
+                return (int(center[0]), int(center[1]))
         except Exception:
             pass
     off_x, off_y = _pad_layer_offset_internal_units(pad, layer_id)
@@ -3250,7 +3407,9 @@ def _pad_hole_center_internal_units(
     center_fn = getattr(pad, "hole_center_internal_units", None)
     if callable(center_fn):
         try:
-            return center_fn(None)
+            center = center_fn(None)
+            if isinstance(center, tuple | list) and len(center) >= 2:
+                return (int(center[0]), int(center[1]))
         except Exception:
             pass
     return (int(getattr(pad, "x", 0)), int(getattr(pad, "y", 0)))
@@ -3559,11 +3718,15 @@ def _through_hole_solder_opening_size_iu(
     pad: Any,
     copper_width_iu: int,
     copper_height_iu: int,
+    *,
+    force_default_mask_expansion: bool = False,
 ) -> tuple[int, int]:
     """
     Return default TH solder-mask opening dimensions for a copper pad.
     """
     mask_exp = _get_mask_expansion(pad)
+    if force_default_mask_expansion and mask_exp == 0:
+        mask_exp = _DEFAULT_MASK_EXPANSION
     if (
         int(getattr(pad, "hole_size", 0) or 0) > 0
         and not bool(getattr(pad, "is_plated", False))
@@ -3588,7 +3751,7 @@ def _through_hole_solder_opening_size_iu(
     return (int(copper_width_iu) + 2 * mask_exp, int(copper_height_iu) + 2 * mask_exp)
 
 
-def _get_via_mask_expansion(via: Any, side: str) -> int:
+def _get_via_mask_expansion(via: Any, side: Literal["top", "bottom"]) -> int:
     """
     Get effective via solder mask expansion in internal units.
 
@@ -3795,6 +3958,27 @@ def _legacy_omits_bottom_copper_layerpad(ctx: PcbIpc2581Context, pad: Any) -> bo
     return False
 
 
+def _two_layer_local_stack_th_uses_top_outer_geometry(
+    ctx: PcbIpc2581Context,
+    pad: object,
+) -> bool:
+    """
+    Return True when native IPC collapses local-stack outer pad bodies.
+
+    AD exports simple two-layer local-stack through-hole pads using the top
+    outer copper body for both outer copper sides. Inner-layer and explicit
+    full-stack entries still keep their own geometry paths.
+    """
+    return (
+        int(getattr(pad, "layer", 0) or 0) == PcbLayer.MULTI_LAYER.value
+        and int(getattr(pad, "pad_mode", 0) or 0) == 1
+        and int(getattr(pad, "hole_size", 0) or 0) > 0
+        and not (getattr(pad, "full_stack_layer_entries", None) or [])
+        and not ctx.inner_signal_layers
+        and not ctx.plane_layers
+    )
+
+
 def _has_trivial_outer_only_npht_tail(pad: Any) -> bool:
     """
     True when NPTH SubRecord 6 only mirrors outer-copper geometry.
@@ -3915,7 +4099,7 @@ def _build_component_pad_order(
         pad_indices = comp_pad_lists.get(comp_idx, [])
         if not pad_indices:
             continue
-        comp_ref = dedup_map.get(comp_idx, comp.designator)
+        comp_ref = dedup_map.get(comp_idx) or comp.designator
         for pin_num, pad_idx in enumerate(pad_indices, 1):
             comp_pad_map[pad_idx] = (comp_ref, str(pin_num))
             ordered_pad_items.append((pad_idx, pcbdoc.pads[pad_idx]))
@@ -4403,9 +4587,41 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             layers_info, [name for name, _plane_net in ctx.plane_layers], pad, ms
         )
 
+    def _is_free_zero_width_npth_pad(pad: object) -> bool:
+        net_index = getattr(pad, "net_index", None)
+        component_index = getattr(pad, "component_index", None)
+        zero_body_attrs = (
+            "width",
+            "height",
+            "top_width",
+            "top_height",
+            "mid_width",
+            "mid_height",
+            "bot_width",
+            "bot_height",
+        )
+        return (
+            int(getattr(pad, "hole_size", 0) or 0) > 0
+            and not bool(getattr(pad, "is_plated", False))
+            and net_index in (None, -1, 0xFFFF, 65535)
+            and component_index in (None, -1, 0xFFFF, 65535)
+            and all(int(getattr(pad, attr, 0) or 0) == 0 for attr in zero_body_attrs)
+        )
+
+    def _suppress_free_zero_width_npth_layerpads() -> bool:
+        pads = list(getattr(ctx.pcbdoc, "pads", []) or [])
+        if not pads:
+            return False
+        if getattr(ctx.pcbdoc, "components", None):
+            return False
+        if getattr(ctx.pcbdoc, "nets", None):
+            return False
+        return all(_is_free_zero_width_npth_pad(pad) for pad in pads)
+
     def _build_zero_width_th_layers_info(
-        pad: Any,
+        pad: object,
         *,
+        suppress_free_npth_layerpads: bool,
         mask_exp: int,
         ts: int,
         bs: int,
@@ -4416,6 +4632,9 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         is_tent_top: bool,
         is_tent_bottom: bool,
     ) -> list[tuple]:
+        if suppress_free_npth_layerpads and _is_free_zero_width_npth_pad(pad):
+            return []
+
         layers_info: list[tuple] = []
         if not is_tent_top:
             if top_solder_size is not None:
@@ -4457,7 +4676,7 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         for plane_name, _plane_net in ctx.plane_layers:
             shape_id = _register_plane_antipad_shape(
                 ctx,
-                pad.hole_size,
+                int(getattr(pad, "hole_size", 0) or 0),
                 int(getattr(pad, "hole_shape", 0) or 0),
                 int(getattr(pad, "slot_size", 0) or 0),
                 plane_clearance_iu,
@@ -4487,6 +4706,7 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         is_tent_bottom: bool,
         top_solder_size: tuple[int, int] | None,
         bottom_solder_size: tuple[int, int] | None,
+        force_default_solder_mask: bool,
     ) -> list[tuple]:
         layers_info: list[tuple] = []
         is_multilayer_pad = (
@@ -4528,7 +4748,12 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                     )
                     layers_info.append((ctx.top_solder_name, smw, smh, ts, top_cr))
             else:
-                smw, smh = _through_hole_solder_opening_size_iu(pad, tw, th)
+                smw, smh = _through_hole_solder_opening_size_iu(
+                    pad,
+                    tw,
+                    th,
+                    force_default_mask_expansion=force_default_solder_mask,
+                )
                 layers_info.append(
                     (ctx.top_solder_name, smw, smh, ts, tr + mask_exp if ts == 4 else 0)
                 )
@@ -4572,7 +4797,12 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                     )
                     layers_info.append((ctx.bottom_solder_name, smw, smh, bs, bot_cr))
             else:
-                smw, smh = _through_hole_solder_opening_size_iu(pad, bw, bh)
+                smw, smh = _through_hole_solder_opening_size_iu(
+                    pad,
+                    bw,
+                    bh,
+                    force_default_mask_expansion=force_default_solder_mask,
+                )
                 layers_info.append(
                     (
                         ctx.bottom_solder_name,
@@ -4604,6 +4834,12 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         tr = _get_corner_radius_iu(pad, tw, th, "top") if ts == 4 else 0
         br = _get_corner_radius_iu(pad, bw, bh, "bot") if bs == 4 else 0
         mr = _get_corner_radius_iu(pad, mw, mh, "mid") if ms == 4 else 0
+        force_default_solder_mask = _two_layer_local_stack_th_uses_top_outer_geometry(
+            ctx,
+            pad,
+        )
+        if force_default_solder_mask:
+            bw, bh, bs, br = tw, th, ts, tr
         is_plated = bool(getattr(pad, "is_plated", False))
         is_tent_top = bool(getattr(pad, "is_tenting_top", False))
         is_tent_bottom = bool(getattr(pad, "is_tenting_bottom", False))
@@ -4637,6 +4873,7 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         if tw == 0 and th == 0:
             return _build_zero_width_th_layers_info(
                 pad,
+                suppress_free_npth_layerpads=_suppress_free_zero_width_npth_layerpads(),
                 mask_exp=mask_exp,
                 ts=ts,
                 bs=bs,
@@ -4668,6 +4905,7 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             is_tent_bottom=is_tent_bottom,
             top_solder_size=top_solder_size,
             bottom_solder_size=bottom_solder_size,
+            force_default_solder_mask=force_default_solder_mask,
         )
 
     def _build_multilayer_pad_layers_info(pad: Any, *, mask_exp: int) -> list[tuple]:
@@ -5039,6 +5277,20 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             if bottom_mask_id:
                 _sub(lp, "StandardPrimitiveRef", {"id": bottom_mask_id})
 
+        for layer_ref, feature_diameter in _ipc4761_via_feature_layer_shapes(via):
+            shape_id = _register_pad_shape_by_dims(
+                ctx,
+                feature_diameter,
+                feature_diameter,
+                1,
+            )
+            padstack = _sub(step, "PadStack")
+            lp = _sub(padstack, "LayerPad", {"layerRef": layer_ref})
+            _sub(lp, "Xform")
+            _sub(lp, "Location", {"x": _fmt(x_mm), "y": _fmt(y_mm)})
+            if shape_id:
+                _sub(lp, "StandardPrimitiveRef", {"id": shape_id})
+
     for pad_idx, pad in ordered_pad_items:
         _emit_pad_padstack(pad_idx, pad)
 
@@ -5055,6 +5307,8 @@ def _rtl_split_body_number(name: str) -> tuple[str, str]:
     """
     # Step 1: strip trailing digits
     m = re.match(r"^(.*?)(\d*)$", name)
+    if m is None:
+        return name, ""
     prefix = m.group(1)  # "Altium Logo BOT" or "C"
     num_str = m.group(2)  # "1" or "26" or ""
 
@@ -5575,6 +5829,8 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         if ci in (None, 0xFFFF, -1):
             return None
         if net_index in (None, 0xFFFF):
+            return None
+        if layer_id is None:
             return None
         candidates = component_smd_pad_index.get(
             (int(ci), int(layer_id), int(net_index)), []
@@ -6331,10 +6587,17 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 x2 = getattr(dimension, "x1", None)
                 y2 = getattr(dimension, "y1", None)
 
-            if None in (x1, y1, x2, y2):
+            if x1 is None or y1 is None or x2 is None or y2 is None:
                 continue
 
-            _append_track(layer_id, x1, y1, x2, y2, w)
+            try:
+                x1_int = int(x1)
+                y1_int = int(y1)
+                x2_int = int(x2)
+                y2_int = int(y2)
+            except (TypeError, ValueError):
+                continue
+            _append_track(layer_id, x1_int, y1_int, x2_int, y2_int, w)
 
             text_point = getattr(dimension, "primary_text_point", lambda: None)()
             text_x = (
@@ -6529,7 +6792,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
     multilayer_projection_targets = [
         lid
         for lname in ctx.layer_names
-        if (func := _classify_layer(lname, ctx)[0]) in ("SIGNAL", "PLANE")
+        if _classify_layer(lname, ctx)[0] in ("SIGNAL", "PLANE")
         for lid in [layer_name_to_id.get(lname)]
         if lid is not None and lid != PcbLayer.MULTI_LAYER.value
     ]
@@ -6634,7 +6897,10 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 continue
             _add_prim(text.layer, text.net_index, "text", text)
         for dim_ptype, dim_prim in _parse_dimensions6_primitives():
-            _add_prim(dim_prim.layer, None, dim_ptype, dim_prim)
+            layer_id = getattr(dim_prim, "layer", None)
+            if layer_id is None:
+                continue
+            _add_prim(int(layer_id), None, dim_ptype, dim_prim)
 
     def _build_drill_hole_inventory() -> tuple[dict[str, list], list]:
         drill_holes: dict[str, list] = {}
@@ -6808,7 +7074,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             _emit_drill_drawing_markers(
                 ctx,
                 dd_us,
-                drill_holes[matching_guide],
+                drill_holes[str(matching_guide)],
                 global_hole_symbol=global_hole_symbol,
             )
         net_groups = layer_prims.get(layer_name)
@@ -7624,11 +7890,15 @@ def _build_layer_list(ctx: PcbIpc2581Context) -> None:
     ) -> tuple[tuple[float, float], tuple[float, float]]:
         p1 = (_round_mils_coord(x1_mils), _round_mils_coord(y1_mils))
         p2 = (_round_mils_coord(x2_mils), _round_mils_coord(y2_mils))
-        return tuple(sorted((p1, p2)))
+        ordered = sorted((p1, p2))
+        return (ordered[0], ordered[1])
 
     def _board_outline_proxy_layers() -> set[str]:
         board = ctx.pcbdoc.board
-        if not board.outline or not board.outline.vertices:
+        if board is None:
+            return set()
+        outline = board.outline
+        if outline is None or not outline.vertices:
             return set()
 
         def _is_canonical_outline_layer_name(display_name: str) -> bool:
@@ -7641,7 +7911,7 @@ def _build_layer_list(ctx: PcbIpc2581Context) -> None:
         outline_arc_keys: set[
             tuple[tuple[float, float], tuple[float, float], tuple[float, float]]
         ] = set()
-        verts = board.outline.vertices
+        verts = outline.vertices
         for idx, current in enumerate(verts):
             nxt = verts[(idx + 1) % len(verts)]
             if current.is_arc:

@@ -16,7 +16,6 @@ from .altium_record_types import (
 )
 from .altium_serializer import (
     AltiumSerializer,
-    CaseMode,
     Fields,
     read_dynamic_string_field,
 )

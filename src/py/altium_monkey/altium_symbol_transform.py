@@ -16,13 +16,27 @@ T = TypeVar("T")
 
 
 class _HasValue(Protocol):
-    value: int
+    @property
+    def value(self) -> int:
+        raise NotImplementedError("enum-like value")
 
 
 class _TransformComponent(Protocol):
-    location: CoordPoint
-    orientation: int | _HasValue
-    is_mirrored: bool
+    @property
+    def location(self) -> CoordPoint:
+        raise NotImplementedError("component location")
+
+    @property
+    def orientation(self) -> int | _HasValue:
+        raise NotImplementedError("component orientation")
+
+    @property
+    def is_mirrored(self) -> bool:
+        raise NotImplementedError("component mirror state")
+
+
+class _HasMutableValue(Protocol):
+    value: int
 
 
 class _HasLocation(Protocol):
@@ -47,7 +61,7 @@ class _HasPoints(Protocol):
 
 
 class _HasOrientation(Protocol):
-    orientation: int | _HasValue
+    orientation: int | _HasMutableValue
 
 
 class _HasPinConglomerate(Protocol):
@@ -112,7 +126,9 @@ def _orientation_to_int(orientation: int | _HasValue) -> int:
     return int(orientation.value)
 
 
-def _component_transform(component: _TransformComponent) -> tuple[float, float, int, bool]:
+def _component_transform(
+    component: _TransformComponent,
+) -> tuple[float, float, int, bool]:
     return (
         component.location.x_mils,
         component.location.y_mils,
@@ -123,7 +139,9 @@ def _component_transform(component: _TransformComponent) -> tuple[float, float, 
 
 def _transform_coord_point(
     point: CoordPoint,
-    point_transform: Callable[[float, float, float, float, int, bool], tuple[float, float]],
+    point_transform: Callable[
+        [float, float, float, float, int, bool], tuple[float, float]
+    ],
     comp_x: float,
     comp_y: float,
     orient: int,
@@ -135,7 +153,9 @@ def _transform_coord_point(
 
 def _transform_coord_list(
     values: list[object],
-    point_transform: Callable[[float, float, float, float, int, bool], tuple[float, float]],
+    point_transform: Callable[
+        [float, float, float, float, int, bool], tuple[float, float]
+    ],
     comp_x: float,
     comp_y: float,
     orient: int,
@@ -145,7 +165,9 @@ def _transform_coord_list(
     for value in values:
         if isinstance(value, CoordPoint):
             transformed.append(
-                _transform_coord_point(value, point_transform, comp_x, comp_y, orient, mirror)
+                _transform_coord_point(
+                    value, point_transform, comp_x, comp_y, orient, mirror
+                )
             )
         else:
             transformed.append(value)
@@ -170,7 +192,9 @@ def _transform_pin_like_orientation(
     if not _is_pin_like(obj) or not _has_orientation(obj):
         return
 
-    new_orient = orientation_transform(_orientation_to_int(obj.orientation), comp_orient, mirror)
+    new_orient = orientation_transform(
+        _orientation_to_int(obj.orientation), comp_orient, mirror
+    )
     if isinstance(obj, AltiumSchPin):
         obj.orientation = Rotation90(new_orient)
     else:
@@ -183,10 +207,10 @@ def _transform_pin_like_orientation(
 def generate_unique_id() -> str:
     """
     Generate an 8-character alphanumeric unique ID.
-    
+
     Altium uses unique IDs to identify objects. When cloning objects
     (e.g., from library to schematic), always regenerate IDs.
-    
+
     Returns:
         8-character string of uppercase letters and digits
     """
@@ -203,7 +227,7 @@ def transform_point_to_symbol_space(
 ) -> tuple[float, float]:
     """
     Transform a point from schematic-space to symbol-space.
-    
+
     Args:
         x_mils: Point X coordinate in mils (schematic space)
         y_mils: Point Y coordinate in mils (schematic space)
@@ -211,10 +235,10 @@ def transform_point_to_symbol_space(
         comp_y_mils: Component location Y in mils
         orientation: Component rotation (0=0deg, 1=90deg, 2=180deg, 3=270deg CCW)
         is_mirrored: Component is horizontally mirrored (Y-axis flip)
-    
+
     Returns:
         Tuple (x, y) in symbol-space mils
-    
+
     Note:
         Altium applies transformations in order: Rotate -> Mirror
         To reverse: Translate -> Un-mirror -> Un-rotate
@@ -245,9 +269,9 @@ def transform_point_to_schematic_space(
 ) -> tuple[float, float]:
     """
     Transform a point from symbol-space to schematic-space.
-    
+
     This is the inverse of transform_point_to_symbol_space().
-    
+
     Args:
         x_mils: Point X coordinate in mils (symbol space)
         y_mils: Point Y coordinate in mils (symbol space)
@@ -255,10 +279,10 @@ def transform_point_to_schematic_space(
         comp_y_mils: Component location Y in mils
         orientation: Component rotation (0=0deg, 1=90deg, 2=180deg, 3=270deg CCW)
         is_mirrored: Component is horizontally mirrored (Y-axis flip)
-    
+
     Returns:
         Tuple (x, y) in schematic-space mils
-    
+
     Note:
         Altium applies transformations in order: Rotate -> Mirror -> Translate
         We apply: Rotate -> Mirror -> Translate
@@ -280,17 +304,19 @@ def transform_point_to_schematic_space(
     return x, y
 
 
-def transform_pin_orientation(pin_orient: int, comp_orient: int, is_mirrored: bool) -> int:
+def transform_pin_orientation(
+    pin_orient: int, comp_orient: int, is_mirrored: bool
+) -> int:
     """
     Transform PIN orientation from schematic-space to symbol-space.
-    
+
     PIN orientations: 0=RIGHT, 1=UP, 2=LEFT, 3=DOWN
-    
+
     Args:
         pin_orient: PIN orientation in schematic (0-3)
         comp_orient: Component rotation (0-3)
         is_mirrored: Component is horizontally mirrored
-    
+
     Returns:
         PIN orientation in symbol-space (0-3)
     """
@@ -310,16 +336,16 @@ def transform_pin_orientation_to_schematic(
 ) -> int:
     """
     Transform PIN orientation from symbol-space to schematic-space.
-    
+
     This is the inverse of transform_pin_orientation().
-    
+
     PIN orientations: 0=RIGHT, 1=UP, 2=LEFT, 3=DOWN
-    
+
     Args:
         pin_orient: PIN orientation in symbol (0-3)
         comp_orient: Component rotation (0-3)
         is_mirrored: Component is horizontally mirrored
-    
+
     Returns:
         PIN orientation in schematic-space (0-3)
     """
@@ -337,15 +363,15 @@ def transform_pin_orientation_to_schematic(
 def to_symbol_space(obj: T, component: _TransformComponent) -> T:
     """
     Transform an OOP object from schematic-space to symbol-space.
-    
+
     Returns a deep copy with transformed coordinates. Works with any object
     that has location/corner/vertices attributes (AltiumSchPin,
     AltiumSchRectangle, AltiumSchLine, AltiumSchPolyline, etc.).
-    
+
     Args:
         obj: OOP record object with coordinate attributes
         component: AltiumSchComponent with location, orientation, is_mirrored
-    
+
     Returns:
         Deep copy of obj with coordinates transformed to symbol-space
     """
@@ -389,12 +415,12 @@ def to_symbol_space(obj: T, component: _TransformComponent) -> T:
 def normalize_rectangle_coords(rect: object) -> None:
     """
     Normalize rectangle coordinates (ConvertToPositiveSlope convention).
-    
+
     Altium convention: Location.X <= Corner.X and Location.Y <= Corner.Y
     After un-mirror transformation, coordinates may be swapped.
-    
+
     Modifies rect in-place.
-    
+
     Args:
         rect: Object with location and corner CoordPoint attributes
     """
@@ -432,19 +458,19 @@ def to_schematic_space(
 ) -> T:
     """
     Transform an OOP object from symbol-space to schematic-space.
-    
+
     Returns a deep copy with transformed coordinates. Works with any object
     that has location/corner/vertices attributes (AltiumSchPin,
     AltiumSchRectangle, AltiumSchLine, AltiumSchPolyline, etc.).
-    
+
     This is the inverse of to_symbol_space() and is used when inserting
     library symbols into schematics.
-    
+
     Args:
         obj: OOP record object with coordinate attributes
         component: AltiumSchComponent with location, orientation, is_mirrored
         regenerate_id: If True, generate a new unique_id for the clone (default True)
-    
+
     Returns:
         Deep copy of obj with coordinates transformed to schematic-space
     """
@@ -498,5 +524,7 @@ def to_schematic_space(
             mirror,
         )
 
-    _transform_pin_like_orientation(result, orient, mirror, transform_pin_orientation_to_schematic)
+    _transform_pin_like_orientation(
+        result, orient, mirror, transform_pin_orientation_to_schematic
+    )
     return cast(T, result)

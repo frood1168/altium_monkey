@@ -140,7 +140,7 @@ class SchSvgRenderOptions:
     )
 
     # Deprecated compatibility switch. Normal Altium-parity image rendering uses
-    # real alpha from native embedded payloads and 32-bit BMP data; schematic
+    # real alpha from native embedded payloads and BMP runtime data; schematic
     # background-color keying is not native behavior and is disabled by default.
     image_background_to_alpha: bool = False
 

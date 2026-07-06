@@ -4,8 +4,8 @@ import math
 from typing import TYPE_CHECKING, cast
 
 from .altium_record_sch__arc import AltiumSchArc
-from .altium_record_types import LineWidth, SchRecordType, color_to_hex
-from .altium_sch_svg_renderer import LINE_WIDTH_MILS, SchSvgRenderContext, svg_polygon
+from .altium_record_types import LineWidth, SchRecordType
+from .altium_sch_svg_renderer import LINE_WIDTH_MILS, SchSvgRenderContext
 
 if TYPE_CHECKING:
     from .altium_sch_geometry_oracle import SchGeometryRecord

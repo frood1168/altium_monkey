@@ -1,0 +1,80 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build, test, and publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/altium-monkey/
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      UV_LINK_MODE: copy
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Verify release tag matches package version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "PyPI publish must run from a release tag, not ${GITHUB_REF_TYPE}:${GITHUB_REF_NAME}."
+            exit 1
+          fi
+          version="$(uv run python - <<'PY'
+          from importlib.util import module_from_spec, spec_from_file_location
+          spec = spec_from_file_location("version", "src/py/altium_monkey/_version.py")
+          module = module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+          print(module.__version__)
+          PY
+          )"
+          expected="v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected}" ]]; then
+            echo "Release tag ${GITHUB_REF_NAME} does not match package version ${expected}."
+            exit 1
+          fi
+
+      - name: Verify release notes mention package version
+        shell: bash
+        run: |
+          version="$(uv run python - <<'PY'
+          from importlib.util import module_from_spec, spec_from_file_location
+          spec = spec_from_file_location("version", "src/py/altium_monkey/_version.py")
+          module = module_from_spec(spec)
+          assert spec.loader is not None
+          spec.loader.exec_module(module)
+          print(module.__version__)
+          PY
+          )"
+          grep -F "Package version: \`${version}\`" RELEASE_NOTES.md
+
+      - name: Run public tests
+        run: uv run --extra test pytest tests -q
+
+      - name: Build distributions
+        run: uv run --with build python -m build
+
+      - name: Check distributions
+        run: uv run --with twine python -m twine check dist/*
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

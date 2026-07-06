@@ -8,16 +8,18 @@ import logging
 import struct
 import uuid
 import zlib
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
 from .altium_api_markers import public_api
 from .altium_embedded_files import sanitize_embedded_asset_name
 from .altium_pcb_stream_helpers import (
+    build_length_prefixed_ascii as _build_length_prefixed_ascii,
     count_length_prefixed_records as _count_length_prefixed_records,
 )
-from .altium_pcblib_sections import PcbLibSectionKeys
+from .altium_pcblib_sections import PcbLibLayerKindMapping, PcbLibSectionKeys
 from .altium_pcb_embedded_model_compose import (
     collect_pcblib_embedded_model_entries,
     copy_footprint_with_models_into_builder,
@@ -31,12 +33,19 @@ from .altium_pcb_extended_primitive_information import (
 )
 from .altium_ole import AltiumOleFile, AltiumOleWriter
 from .altium_pcb_enums import (
+    MechanicalLayerKind,
+    PadHoleShape,
     PadShape,
     PcbBarcodeKind,
     PcbBarcodeRenderMode,
     PcbBodyProjection,
+    PcbIpc4761ViaType,
+    PcbRegionKind,
     PcbTextJustification,
     PcbTextKind,
+)
+from .altium_pcb_layer_kind_mapping import (
+    coerce_layer_kind_mapping_layer_id,
 )
 from .altium_pcbdoc_builder_text import (
     PCB_TEXT_BARCODE_MARGIN_MILS,
@@ -46,8 +55,26 @@ from .altium_pcb_mask_expansion import (
     PcbMaskExpansionInput,
     PcbMaskExpansionModeInput,
 )
+from .altium_pcb_property_helpers import (
+    decode_dxp_parameter_value,
+    encode_dxp_parameter_value,
+    parse_pcb_count_prefixed_property_records,
+    parse_pcb_int_token,
+    serialize_pcb_count_prefixed_property_records,
+)
 from .altium_pcb_pad_bounds import pad_projection_bounds_mils
 from .altium_pcb_step_bounds import compute_step_model_bounds_mils
+from .altium_pcb_via_structure import (
+    AltiumPcbViaStructure,
+    AltiumPcbViaStructureFeature,
+    AltiumPcbViaStructureLink,
+    attach_via_structures_to_vias,
+    build_via_structure_model_for_vias,
+    parse_via_structure_links_stream,
+    parse_via_structure_manager_stream,
+    serialize_via_structure_links_stream,
+    serialize_via_structure_manager_stream,
+)
 from .altium_record_types import PcbLayer, PcbRecordType
 from .altium_record_pcb__model import AltiumPcbModel
 from .altium_record_pcb__pad import AltiumPcbPad
@@ -59,8 +86,10 @@ from .altium_record_pcb__region import AltiumPcbRegion
 from .altium_record_pcb__shapebased_region import AltiumPcbShapeBasedRegion
 from .altium_record_pcb__via import AltiumPcbVia
 from .altium_record_pcb__component_body import AltiumPcbComponentBody
+from .altium_utilities import encode_altium_record
 
 if TYPE_CHECKING:
+    from .altium_pcblib_builder import PcbLibBuildProfile
     from .altium_pcb_svg_renderer import PcbSvgRenderOptions
     from .altium_pcbdoc import AltiumPcbDoc
 
@@ -68,6 +97,46 @@ log = logging.getLogger(__name__)
 
 PcbPointMils = Sequence[float]
 PcbBoundsMils = Sequence[float]
+
+
+@public_api
+@dataclass
+class AltiumPcbLibPrimitiveParameterGroup:
+    """
+    One group from a PcbLib footprint `PrimitiveParameters` stream.
+
+    Altium uses this side stream for footprint/appurtenance user parameters.
+    It is intentionally separate from `AltiumPcbFootprint.parameters`, which is
+    the standard footprint `Parameters` stream containing pattern, height,
+    description, and similar library metadata.
+    """
+
+    primitive_id: str
+    appurtenance: str
+    variant_guid: str
+    parameters: dict[str, str]
+    properties: dict[str, str]
+    raw_header_payload: bytes | None = None
+    raw_parameter_payloads: tuple[bytes, ...] = ()
+
+    def to_payloads(self) -> tuple[bytes, ...]:
+        """Serialize this group to raw property payloads."""
+        props = dict(self.properties)
+        props["PRIMITIVEID"] = self.primitive_id
+        if self.appurtenance:
+            props["APPURTENANCE"] = self.appurtenance
+        else:
+            props.pop("APPURTENANCE", None)
+        props["VARIANTGUID"] = self.variant_guid
+        props["COUNT"] = str(len(self.parameters))
+        payloads = [encode_altium_record(props)[4:]]
+        for name, value in self.parameters.items():
+            payloads.append(
+                encode_altium_record(
+                    {"NAME": name, "VALUE": encode_dxp_parameter_value(value)}
+                )[4:]
+            )
+        return tuple(payloads)
 
 
 def _region_record_has_extended_vertices(data: bytes, offset: int) -> bool:
@@ -207,10 +276,12 @@ class AltiumPcbFootprint:
         self.fills: list["AltiumPcbFill"] = []
         self.texts: list["AltiumPcbText"] = []
         self.vias: list["AltiumPcbVia"] = []
-        self.regions: list["AltiumPcbRegion"] = []
+        self.regions: list["AltiumPcbRegion | AltiumPcbShapeBasedRegion"] = []
         self.component_bodies: list["AltiumPcbComponentBody"] = []
 
         self.parameters: dict[str, str] = {}
+        self.primitive_parameter_groups: list[AltiumPcbLibPrimitiveParameterGroup] = []
+        self.footprint_primitive_parameters: dict[str, str] = {}
 
         # Ordered list of all primitives in parse order (for stream assembly)
         self._record_order: list = []
@@ -222,6 +293,7 @@ class AltiumPcbFootprint:
         self.raw_header: bytes | None = None
         self.raw_data: bytes | None = None
         self.raw_parameters: bytes | None = None
+        self.raw_primitive_parameters: bytes | None = None
         self.raw_widestrings: bytes | None = None
         self.raw_primitive_guids: bytes | None = None
         self.raw_primitive_guids_header: bytes | None = None
@@ -232,12 +304,61 @@ class AltiumPcbFootprint:
         ] = []
         self.raw_uniqueid_info: bytes | None = None
         self.raw_uniqueid_info_header: bytes | None = None
+        self.raw_via_structure_manager: bytes | None = None
+        self.raw_via_structures: bytes | None = None
+        self.via_structures: list[AltiumPcbViaStructure] = []
+        self.via_structure_links: list[AltiumPcbViaStructureLink] = []
+        self._parameter_signature: tuple[tuple[str, str], ...] | None = None
+        self._primitive_parameter_signature: tuple[tuple[str, str], ...] | None = None
+        self._via_structure_signature: (
+            tuple[tuple[int, int | None, bytes | None], ...] | None
+        ) = None
+        self._via_structure_parse_failed: bool = False
         self._authoring_builder: Any | None = None
+
+    @property
+    def primitives(self) -> tuple[object, ...]:
+        """
+        Return footprint primitives in native PcbLib `Data` stream order.
+
+        The typed lists such as `pads`, `vias`, and `tracks` are convenient for
+        querying one object family. Use this aggregate view when native
+        primitive order matters, for example when replaying a footprint whose
+        via-structure side table indexes mixed primitive records.
+        """
+        return tuple(self._record_order)
 
     def __getstate__(self) -> dict[str, object]:
         state = dict(self.__dict__)
         state["_authoring_builder"] = None
         return state
+
+    def set_footprint_primitive_parameter(self, name: str, value: str) -> None:
+        """
+        Set one footprint-level user parameter in the `PrimitiveParameters` stream.
+
+        This does not modify `parameters`, which is the standard footprint
+        `Parameters` stream used for pattern, height, description, and item ids.
+        """
+        key = str(name)
+        if not key:
+            raise ValueError("Footprint primitive-parameter name is required")
+        self.footprint_primitive_parameters[key] = str(value)
+
+    def set_parameter(self, name: str, value: str) -> None:
+        """
+        Set one footprint `Parameters` stream key.
+
+        Use this for standard footprint metadata such as `HEIGHT`, `AREA`,
+        `DESCRIPTION`, item identifiers, and other Altium-authored footprint
+        parameter keys. This is intentionally separate from
+        `set_footprint_primitive_parameter(...)`, which writes the
+        `PrimitiveParameters` side stream.
+        """
+        key = str(name)
+        if not key:
+            raise ValueError("Footprint parameter name is required")
+        self.parameters[key] = str(value)
 
     def _bind_authoring_builder(self, builder: Any) -> None:
         self._authoring_builder = builder
@@ -259,13 +380,24 @@ class AltiumPcbFootprint:
         width_mils: float,
         height_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP,
-        shape: int | PadShape = PadShape.RECTANGLE,
+        shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mils: float = 0.0,
         plated: bool | None = None,
         corner_radius_percent: int | None = None,
+        top_shape: int | str | PadShape | None = None,
+        top_width_mils: float | None = None,
+        top_height_mils: float | None = None,
+        mid_shape: int | str | PadShape | None = None,
+        mid_width_mils: float | None = None,
+        mid_height_mils: float | None = None,
+        bottom_shape: int | str | PadShape | None = None,
+        bottom_width_mils: float | None = None,
+        bottom_height_mils: float | None = None,
+        pad_mode: int | None = None,
         slot_length_mils: float = 0.0,
         slot_rotation_degrees: float = 0.0,
+        hole_shape: int | str | PadHoleShape = PadHoleShape.ROUND,
         solder_mask_expansion: PcbMaskExpansionInput = None,
         solder_mask_expansion_mode: PcbMaskExpansionModeInput | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -274,6 +406,10 @@ class AltiumPcbFootprint:
         paste_mask_expansion_mils: float | None = None,
         hole_positive_tolerance_mils: float | None = None,
         hole_negative_tolerance_mils: float | None = None,
+        is_test_fab_top: bool = False,
+        is_test_fab_bottom: bool = False,
+        is_assy_testpoint_top: bool = False,
+        is_assy_testpoint_bottom: bool = False,
     ) -> AltiumPcbPad:
         """
         Add a pad to this footprint using public mil units.
@@ -289,8 +425,21 @@ class AltiumPcbFootprint:
             hole_size_mils: Drill hole size in mils. Use 0 for SMT pads.
             plated: Optional plated-through flag.
             corner_radius_percent: Optional rounded-rectangle corner radius percentage.
+            top_shape: Optional top-layer body shape for local-stack pads.
+            top_width_mils: Optional top-layer body width in mils.
+            top_height_mils: Optional top-layer body height in mils.
+            mid_shape: Optional inner-layer body shape for local-stack pads.
+            mid_width_mils: Optional inner-layer body width in mils.
+            mid_height_mils: Optional inner-layer body height in mils.
+            bottom_shape: Optional bottom-layer body shape for local-stack pads.
+            bottom_width_mils: Optional bottom-layer body width in mils.
+            bottom_height_mils: Optional bottom-layer body height in mils.
+            pad_mode: Optional native pad mode. Use 1 for explicit local-stack
+                body geometry.
             slot_length_mils: Optional total slotted-hole length in mils.
             slot_rotation_degrees: Optional slotted-hole rotation in degrees.
+            hole_shape: Drill shape: `"round"`, `"square"`, or `"slot"`.
+                Slots also require `slot_length_mils`.
             solder_mask_expansion: Optional `PcbMaskExpansion`, mode string, or
                 native mode id for solder-mask expansion.
             solder_mask_expansion_mode: Optional solder-mask mode string/id:
@@ -307,6 +456,10 @@ class AltiumPcbFootprint:
                 in mils.
             hole_negative_tolerance_mils: Optional lower drill-hole tolerance
                 magnitude in mils.
+            is_test_fab_top: Top-side fabrication testpoint flag.
+            is_test_fab_bottom: Bottom-side fabrication testpoint flag.
+            is_assy_testpoint_top: Top-side assembly testpoint flag.
+            is_assy_testpoint_bottom: Bottom-side assembly testpoint flag.
 
         Returns:
             The authored `AltiumPcbPad` record.
@@ -320,13 +473,24 @@ class AltiumPcbFootprint:
             width_mil=width_mils,
             height_mil=height_mils,
             layer=layer,
-            shape=int(shape),
+            shape=shape,
             rotation_degrees=rotation_degrees,
             hole_size_mil=hole_size_mils,
             plated=plated,
             corner_radius_percent=corner_radius_percent,
+            top_shape=top_shape,
+            top_width_mils=top_width_mils,
+            top_height_mils=top_height_mils,
+            mid_shape=mid_shape,
+            mid_width_mils=mid_width_mils,
+            mid_height_mils=mid_height_mils,
+            bottom_shape=bottom_shape,
+            bottom_width_mils=bottom_width_mils,
+            bottom_height_mils=bottom_height_mils,
+            pad_mode=pad_mode,
             slot_length_mil=slot_length_mils,
             slot_rotation_degrees=slot_rotation_degrees,
+            hole_shape=hole_shape,
             solder_mask_expansion=solder_mask_expansion,
             solder_mask_expansion_mode=solder_mask_expansion_mode,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
@@ -335,6 +499,10 @@ class AltiumPcbFootprint:
             paste_mask_expansion_mils=paste_mask_expansion_mils,
             hole_positive_tolerance_mil=hole_positive_tolerance_mils,
             hole_negative_tolerance_mil=hole_negative_tolerance_mils,
+            is_test_fab_top=is_test_fab_top,
+            is_test_fab_bottom=is_test_fab_bottom,
+            is_assy_testpoint_top=is_assy_testpoint_top,
+            is_assy_testpoint_bottom=is_assy_testpoint_bottom,
         )
 
     def add_custom_pad(
@@ -346,6 +514,11 @@ class AltiumPcbFootprint:
         layer: int | PcbLayer = PcbLayer.TOP,
         offset_mils: PcbPointMils = (0.0, 0.0),
         anchor_diameter_mils: float = 1.0,
+        anchor_width_mils: float | None = None,
+        anchor_height_mils: float | None = None,
+        anchor_rotation_degrees: float = 0.0,
+        anchor_shape: int | str | PadShape = PadShape.CIRCLE,
+        pad_index: int | None = None,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
         outline_points_are_local: bool = True,
         paste_rule_expansion: bool | None = None,
@@ -367,6 +540,14 @@ class AltiumPcbFootprint:
             layer: Target PCB layer.
             offset_mils: Offset from anchor center to custom shape center.
             anchor_diameter_mils: Diameter of the small anchor pad in mils.
+            anchor_width_mils: Optional anchor pad width in mils. Defaults to
+                `anchor_diameter_mils`.
+            anchor_height_mils: Optional anchor pad height in mils. Defaults to
+                `anchor_diameter_mils`.
+            anchor_rotation_degrees: Anchor pad rotation in degrees.
+            anchor_shape: Anchor pad shape.
+            pad_index: Optional 1-based native PADINDEX override for advanced
+                compatibility. Omit for the actual authored pad index.
             hole_points_mils: Optional cutout polygons in mils.
             outline_points_are_local: Treat outline points as shape-local offsets.
             paste_rule_expansion: Compatibility alias. `True` maps to
@@ -403,6 +584,11 @@ class AltiumPcbFootprint:
             offset_x_mil=offset_x_mils,
             offset_y_mil=offset_y_mils,
             anchor_diameter_mil=anchor_diameter_mils,
+            anchor_width_mil=anchor_width_mils,
+            anchor_height_mil=anchor_height_mils,
+            anchor_rotation_degrees=anchor_rotation_degrees,
+            anchor_shape=anchor_shape,
+            pad_index=pad_index,
             hole_points_mil=hole_points_mils,
             outline_points_are_local=outline_points_are_local,
             paste_rule_expansion=paste_rule_expansion,
@@ -423,6 +609,8 @@ class AltiumPcbFootprint:
         width_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion_mils: float | None = None,
     ) -> AltiumPcbTrack:
         """
         Add a straight track segment to this footprint using mil units.
@@ -434,6 +622,8 @@ class AltiumPcbFootprint:
             layer: `PcbLayer` or native layer id.
             v7_layer_id: Optional explicit V7 layer-kind id for compatibility
                 with source libraries that store it separately.
+            solder_mask_expansion_mils: Optional manual solder-mask expansion.
+            paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
         Returns:
             The authored `AltiumPcbTrack` record.
@@ -449,6 +639,8 @@ class AltiumPcbFootprint:
             width_mil=width_mils,
             layer=layer,
             v7_layer_id=v7_layer_id,
+            solder_mask_expansion_mil=solder_mask_expansion_mils,
+            paste_mask_expansion_mil=paste_mask_expansion_mils,
         )
 
     def add_arc(
@@ -461,6 +653,8 @@ class AltiumPcbFootprint:
         width_mils: float,
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion_mils: float | None = None,
     ) -> AltiumPcbArc:
         """
         Add a circular arc to this footprint using mil units and degree angles.
@@ -473,6 +667,8 @@ class AltiumPcbFootprint:
             width_mils: Arc stroke width in mils.
             layer: `PcbLayer` or native layer id.
             v7_layer_id: Optional explicit V7 layer-kind id.
+            solder_mask_expansion_mils: Optional manual solder-mask expansion.
+            paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
         Returns:
             The authored `AltiumPcbArc` record.
@@ -488,6 +684,8 @@ class AltiumPcbFootprint:
             width_mil=width_mils,
             layer=layer,
             v7_layer_id=v7_layer_id,
+            solder_mask_expansion_mil=solder_mask_expansion_mils,
+            paste_mask_expansion_mil=paste_mask_expansion_mils,
         )
 
     def add_fill(
@@ -498,6 +696,8 @@ class AltiumPcbFootprint:
         layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         v7_layer_id: int | None = None,
+        solder_mask_expansion_mils: float | None = None,
+        paste_mask_expansion_mils: float | None = None,
     ) -> AltiumPcbFill:
         """
         Add a rectangular fill to this footprint using opposite mil corners.
@@ -508,6 +708,8 @@ class AltiumPcbFootprint:
             layer: `PcbLayer` or native layer id.
             rotation_degrees: Fill rotation in degrees.
             v7_layer_id: Optional explicit V7 layer-kind id.
+            solder_mask_expansion_mils: Optional manual solder-mask expansion.
+            paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
         Returns:
             The authored `AltiumPcbFill` record.
@@ -523,6 +725,8 @@ class AltiumPcbFootprint:
             layer=layer,
             rotation_degrees=rotation_degrees,
             v7_layer_id=v7_layer_id,
+            solder_mask_expansion_mil=solder_mask_expansion_mils,
+            paste_mask_expansion_mil=paste_mask_expansion_mils,
         )
 
     def add_via(
@@ -533,8 +737,19 @@ class AltiumPcbFootprint:
         hole_size_mils: float,
         layer_start: int | PcbLayer = PcbLayer.TOP,
         layer_end: int | PcbLayer = PcbLayer.BOTTOM,
+        ipc4761_via_type: int | PcbIpc4761ViaType = PcbIpc4761ViaType.NONE,
+        ipc4761_features: Sequence[AltiumPcbViaStructureFeature] | None = None,
+        propagation_delay_ps: float | None = None,
         hole_positive_tolerance_mils: float | None = None,
         hole_negative_tolerance_mils: float | None = None,
+        is_tent_top: bool | None = None,
+        is_tent_bottom: bool | None = None,
+        solder_mask_expansion_top_mils: float | None = None,
+        solder_mask_expansion_bottom_mils: float | None = None,
+        is_test_fab_top: bool = False,
+        is_test_fab_bottom: bool = False,
+        is_assy_testpoint_top: bool = False,
+        is_assy_testpoint_bottom: bool = False,
     ) -> AltiumPcbVia:
         """
         Add a via primitive to this footprint using mil units.
@@ -545,10 +760,24 @@ class AltiumPcbFootprint:
             hole_size_mils: Via drill diameter in mils.
             layer_start: Start layer as `PcbLayer` or native layer id.
             layer_end: End layer as `PcbLayer` or native layer id.
+            ipc4761_via_type: Optional IPC-4761 via-protection type.
+            ipc4761_features: Optional explicit IPC-4761 feature rows. Omit to
+                use Altium's default rows for `ipc4761_via_type`.
+            propagation_delay_ps: Optional via propagation delay in picoseconds.
             hole_positive_tolerance_mils: Optional upper drill-hole tolerance
                 in mils.
             hole_negative_tolerance_mils: Optional lower drill-hole tolerance
                 magnitude in mils.
+            is_tent_top: Optional top-side tenting flag.
+            is_tent_bottom: Optional bottom-side tenting flag.
+            solder_mask_expansion_top_mils: Optional signed top/front manual
+                solder-mask expansion in mils.
+            solder_mask_expansion_bottom_mils: Optional signed bottom/back
+                manual solder-mask expansion in mils.
+            is_test_fab_top: Top-side fabrication testpoint flag.
+            is_test_fab_bottom: Bottom-side fabrication testpoint flag.
+            is_assy_testpoint_top: Top-side assembly testpoint flag.
+            is_assy_testpoint_bottom: Bottom-side assembly testpoint flag.
 
         Returns:
             The authored `AltiumPcbVia` record.
@@ -562,8 +791,19 @@ class AltiumPcbFootprint:
             hole_size_mil=hole_size_mils,
             layer_start=layer_start,
             layer_end=layer_end,
+            ipc4761_via_type=ipc4761_via_type,
+            ipc4761_features=ipc4761_features,
+            propagation_delay_ps=propagation_delay_ps,
             hole_positive_tolerance_mil=hole_positive_tolerance_mils,
             hole_negative_tolerance_mil=hole_negative_tolerance_mils,
+            is_tent_top=is_tent_top,
+            is_tent_bottom=is_tent_bottom,
+            solder_mask_expansion_top_mil=solder_mask_expansion_top_mils,
+            solder_mask_expansion_bottom_mil=solder_mask_expansion_bottom_mils,
+            is_test_fab_top=is_test_fab_top,
+            is_test_fab_bottom=is_test_fab_bottom,
+            is_assy_testpoint_top=is_assy_testpoint_top,
+            is_assy_testpoint_bottom=is_assy_testpoint_bottom,
         )
 
     def add_region(
@@ -572,12 +812,14 @@ class AltiumPcbFootprint:
         outline_points_mils: list[tuple[float, float]],
         layer: int | PcbLayer = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
-        kind: int = 0,
+        kind: int | PcbRegionKind = PcbRegionKind.COPPER,
         is_board_cutout: bool = False,
         is_shapebased: bool = False,
         is_keepout: bool = False,
         keepout_restrictions: int = 0,
         subpoly_index: int = 0,
+        cavity_height_mils: float = 0.0,
+        v7_layer: str | None = None,
     ) -> AltiumPcbRegion:
         """
         Add a region polygon to this footprint using mil-unit vertices.
@@ -593,6 +835,10 @@ class AltiumPcbFootprint:
             is_keepout: Mark the region as a keepout.
             keepout_restrictions: Native keepout restriction bitmask.
             subpoly_index: Native sub-polygon index.
+            cavity_height_mils: Cavity definition height in mils for
+                `PcbRegionKind.CAVITY_DEFINITION` regions.
+            v7_layer: Optional native `V7_LAYER` property override for
+                stack/advanced-layer metadata.
 
         Returns:
             The authored `AltiumPcbRegion` record.
@@ -608,6 +854,8 @@ class AltiumPcbFootprint:
             is_keepout=is_keepout,
             keepout_restrictions=keepout_restrictions,
             subpoly_index=subpoly_index,
+            cavity_height_mil=cavity_height_mils,
+            v7_layer=v7_layer,
         )
 
     def add_text(
@@ -643,6 +891,8 @@ class AltiumPcbFootprint:
         inverted_margin_mils: float = 0.0,
         use_inverted_rectangle: bool = False,
         inverted_rectangle_size_mils: tuple[float, float] | None = None,
+        is_frame: bool = False,
+        frame_size_mils: tuple[float, float] | None = None,
         text_justification: int | PcbTextJustification | None = None,
     ) -> AltiumPcbText:
         """
@@ -684,6 +934,8 @@ class AltiumPcbFootprint:
                 of deriving the box from text extents.
             inverted_rectangle_size_mils: Optional inverted rectangle
                 `(width_mils, height_mils)`.
+            is_frame: Create multiline text-frame text.
+            frame_size_mils: Text-frame `(width_mils, height_mils)`.
             text_justification: Optional `PcbTextJustification` for inverted
                 text.
 
@@ -719,6 +971,8 @@ class AltiumPcbFootprint:
             inverted_margin_mil=inverted_margin_mils,
             use_inverted_rectangle=use_inverted_rectangle,
             inverted_rectangle_size_mil=inverted_rectangle_size_mils,
+            is_frame=is_frame,
+            frame_size_mil=frame_size_mils,
             text_justification=None
             if text_justification is None
             else int(text_justification),
@@ -844,8 +1098,11 @@ class AltiumPcbFootprint:
             if public_name in translated_kwargs:
                 translated_kwargs[builder_name] = translated_kwargs.pop(public_name)
         if "model_2d_mils" in translated_kwargs:
+            model_2d_raw = translated_kwargs.pop("model_2d_mils")
+            if not isinstance(model_2d_raw, Sequence):
+                raise TypeError("model_2d_mils must be a two-value sequence")
             model_2d_x_mils, model_2d_y_mils = _coerce_point_mils(
-                translated_kwargs.pop("model_2d_mils"),
+                model_2d_raw,
                 "model_2d_mils",
             )
             translated_kwargs["model_2d_x_mil"] = model_2d_x_mils
@@ -923,7 +1180,14 @@ class AltiumPcbFootprint:
         pcbdoc.arcs = self.arcs
         pcbdoc.texts = self.texts
         pcbdoc.fills = self.fills
-        pcbdoc.regions = self.regions
+        pcbdoc.regions = [
+            region for region in self.regions if isinstance(region, AltiumPcbRegion)
+        ]
+        pcbdoc.shapebased_regions = [
+            region
+            for region in self.regions
+            if isinstance(region, AltiumPcbShapeBasedRegion)
+        ]
         pcbdoc.component_bodies = self.component_bodies
         return pcbdoc
 
@@ -948,9 +1212,13 @@ class AltiumPcbFootprint:
         Returns:
             SVG document text.
         """
-        from .altium_pcb_svg_renderer import PcbSvgRenderer
+        from .altium_pcb_svg_renderer import PcbSvgRenderer, PcbSvgRenderOptions
 
-        renderer = PcbSvgRenderer(options=options)
+        render_options = replace(
+            options or PcbSvgRenderOptions(),
+            footprint_rule_mask_expansion_zero=True,
+        )
+        renderer = PcbSvgRenderer(options=render_options)
         return renderer.render_board(
             self._to_transient_pcbdoc_for_svg(),
             project_parameters=project_parameters,
@@ -972,9 +1240,13 @@ class AltiumPcbFootprint:
         Returns:
             Dict mapping layer name to SVG document text.
         """
-        from .altium_pcb_svg_renderer import PcbSvgRenderer
+        from .altium_pcb_svg_renderer import PcbSvgRenderer, PcbSvgRenderOptions
 
-        renderer = PcbSvgRenderer(options=options)
+        render_options = replace(
+            options or PcbSvgRenderOptions(),
+            footprint_rule_mask_expansion_zero=True,
+        )
+        renderer = PcbSvgRenderer(options=render_options)
         return renderer.render_layers(
             self._to_transient_pcbdoc_for_svg(),
             project_parameters=project_parameters,
@@ -1436,6 +1708,249 @@ def _parse_length_prefixed_properties(data: bytes) -> dict[str, str]:
     return result
 
 
+def _serialize_footprint_parameters(parameters: dict[str, str]) -> bytes:
+    """Serialize a PcbLib footprint `Parameters` stream."""
+    body = (
+        "|" + "|".join(f"{key}={value}" for key, value in parameters.items()) + "\x00"
+    )
+    return _build_length_prefixed_ascii(body)
+
+
+def _footprint_parameter_signature(
+    footprint: "AltiumPcbFootprint",
+) -> tuple[tuple[str, str], ...]:
+    return tuple(footprint.parameters.items())
+
+
+def _parse_pcblib_primitive_parameter_groups(
+    data: bytes,
+) -> list[AltiumPcbLibPrimitiveParameterGroup]:
+    """
+    Parse a PcbLib footprint `PrimitiveParameters` stream.
+
+    The leading count is the number of parameter groups, not the total number
+    of length-prefixed records. Each group header has `COUNT=N` and is followed
+    by `N` `NAME` / `VALUE` records.
+    """
+    _declared_count, records = parse_pcb_count_prefixed_property_records(data)
+    groups: list[AltiumPcbLibPrimitiveParameterGroup] = []
+    index = 0
+    while index < len(records):
+        header_payload, header_props = records[index]
+        index += 1
+        group_count = parse_pcb_int_token(header_props.get("COUNT")) or 0
+        parameters: dict[str, str] = {}
+        parameter_payloads: list[bytes] = []
+        for _ in range(group_count):
+            if index >= len(records):
+                break
+            param_payload, param_props = records[index]
+            index += 1
+            parameter_payloads.append(param_payload)
+            name = param_props.get("NAME")
+            if name:
+                parameters[name] = decode_dxp_parameter_value(
+                    param_props.get("VALUE", "")
+                )
+
+        groups.append(
+            AltiumPcbLibPrimitiveParameterGroup(
+                primitive_id=header_props.get("PRIMITIVEID", ""),
+                appurtenance=header_props.get("APPURTENANCE", ""),
+                variant_guid=header_props.get("VARIANTGUID", ""),
+                parameters=parameters,
+                properties=dict(header_props),
+                raw_header_payload=header_payload,
+                raw_parameter_payloads=tuple(parameter_payloads),
+            )
+        )
+    return groups
+
+
+def _serialize_pcblib_primitive_parameter_groups(
+    groups: Sequence[AltiumPcbLibPrimitiveParameterGroup],
+) -> bytes:
+    payloads: list[bytes] = []
+    for group in groups:
+        payloads.extend(group.to_payloads())
+    return serialize_pcb_count_prefixed_property_records(payloads, count=len(groups))
+
+
+def _primitive_parameter_signature(
+    footprint: "AltiumPcbFootprint",
+) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(footprint.footprint_primitive_parameters.items()))
+
+
+def _via_structure_signature(
+    footprint: "AltiumPcbFootprint",
+) -> tuple[tuple[int, int | None, bytes | None], ...]:
+    signature: list[tuple[int, int | None, bytes | None]] = []
+    for via in footprint.vias:
+        via_structure = getattr(via, "via_structure", None)
+        signature.append(
+            (
+                int(getattr(via, "ipc4761_via_type", PcbIpc4761ViaType.NONE)),
+                getattr(via, "via_structure_index", None),
+                None if via_structure is None else via_structure.to_payload(),
+            )
+        )
+    return tuple(signature)
+
+
+def _is_footprint_primitive_parameter_group(
+    group: AltiumPcbLibPrimitiveParameterGroup,
+) -> bool:
+    return group.appurtenance.strip().upper() == "FOOTPRINT"
+
+
+def _groups_with_current_footprint_parameters(
+    footprint: "AltiumPcbFootprint",
+) -> list[AltiumPcbLibPrimitiveParameterGroup]:
+    groups: list[AltiumPcbLibPrimitiveParameterGroup] = []
+    found_footprint_group = False
+    for group in footprint.primitive_parameter_groups:
+        if not _is_footprint_primitive_parameter_group(group):
+            groups.append(group)
+            continue
+        found_footprint_group = True
+        groups.append(
+            AltiumPcbLibPrimitiveParameterGroup(
+                primitive_id=group.primitive_id or "NoObject#0",
+                appurtenance=group.appurtenance or "Footprint",
+                variant_guid=group.variant_guid or "Footprint",
+                parameters=dict(footprint.footprint_primitive_parameters),
+                properties=dict(group.properties),
+                raw_header_payload=group.raw_header_payload,
+                raw_parameter_payloads=group.raw_parameter_payloads,
+            )
+        )
+
+    if footprint.footprint_primitive_parameters and not found_footprint_group:
+        groups.insert(
+            0,
+            AltiumPcbLibPrimitiveParameterGroup(
+                primitive_id="NoObject#0",
+                appurtenance="Footprint",
+                variant_guid="Footprint",
+                parameters=dict(footprint.footprint_primitive_parameters),
+                properties={
+                    "PRIMITIVEID": "NoObject#0",
+                    "APPURTENANCE": "Footprint",
+                    "VARIANTGUID": "Footprint",
+                    "COUNT": str(len(footprint.footprint_primitive_parameters)),
+                },
+            ),
+        )
+    return groups
+
+
+def _sync_footprint_primitive_parameter_stream(
+    footprint: "AltiumPcbFootprint",
+) -> None:
+    signature = _primitive_parameter_signature(footprint)
+    if (
+        footprint.raw_primitive_parameters is not None
+        and footprint._primitive_parameter_signature == signature
+    ):
+        return
+
+    groups = _groups_with_current_footprint_parameters(footprint)
+    if not groups:
+        footprint.raw_primitive_parameters = None
+        footprint._primitive_parameter_signature = signature
+        return
+
+    footprint.primitive_parameter_groups = groups
+    footprint.raw_primitive_parameters = _serialize_pcblib_primitive_parameter_groups(
+        groups
+    )
+    footprint._primitive_parameter_signature = signature
+
+
+def _sync_footprint_parameter_stream(footprint: "AltiumPcbFootprint") -> None:
+    signature = _footprint_parameter_signature(footprint)
+    if (
+        footprint.raw_parameters is not None
+        and footprint._parameter_signature == signature
+    ):
+        return
+
+    if not footprint.parameters:
+        footprint.raw_parameters = None
+        footprint._parameter_signature = signature
+        return
+
+    footprint.raw_parameters = _serialize_footprint_parameters(footprint.parameters)
+    footprint._parameter_signature = signature
+
+
+def _sync_footprint_via_structure_streams(footprint: "AltiumPcbFootprint") -> None:
+    signature = _via_structure_signature(footprint)
+    if (
+        footprint.raw_via_structure_manager is not None
+        and footprint.raw_via_structures is not None
+        and footprint._via_structure_signature == signature
+    ):
+        return
+    if footprint._via_structure_parse_failed:
+        return
+
+    has_via_model = bool(footprint.via_structures) or any(
+        int(getattr(via, "ipc4761_via_type", PcbIpc4761ViaType.NONE))
+        != int(PcbIpc4761ViaType.NONE)
+        for via in footprint.vias
+    )
+    if not has_via_model:
+        footprint.raw_via_structure_manager = None
+        footprint.raw_via_structures = None
+        footprint.via_structures = []
+        footprint.via_structure_links = []
+        footprint._via_structure_signature = signature
+        return
+
+    via_ids = {id(via): via_ordinal for via_ordinal, via in enumerate(footprint.vias)}
+    via_primitive_index_by_ordinal: dict[int, int] = {}
+    for primitive_index, primitive in enumerate(footprint._record_order):
+        via_ordinal = via_ids.get(id(primitive))
+        if via_ordinal is not None:
+            via_primitive_index_by_ordinal[via_ordinal] = primitive_index
+    if len(via_primitive_index_by_ordinal) != len(footprint.vias):
+        if footprint._record_order:
+            raise ValueError(
+                f"PcbLib footprint {footprint.name!r} has {len(footprint.vias)} "
+                "vias but its record order does not contain every via"
+            )
+        via_primitive_indexes = list(range(len(footprint.vias)))
+    else:
+        via_primitive_indexes = [
+            via_primitive_index_by_ordinal[via_ordinal]
+            for via_ordinal in range(len(footprint.vias))
+        ]
+    structures, links = build_via_structure_model_for_vias(
+        footprint.vias,
+        existing_structures=footprint.via_structures,
+        primitive_indexes=via_primitive_indexes,
+    )
+    if not structures and not links:
+        footprint.raw_via_structure_manager = None
+        footprint.raw_via_structures = None
+        footprint.via_structures = []
+        footprint.via_structure_links = []
+        footprint._via_structure_signature = signature
+        return
+
+    footprint.via_structures = list(structures)
+    footprint.via_structure_links = list(links)
+    footprint.raw_via_structure_manager = len(structures).to_bytes(
+        4, byteorder="little"
+    ) + serialize_via_structure_manager_stream(structures)
+    footprint.raw_via_structures = len(links).to_bytes(
+        4, byteorder="little"
+    ) + serialize_via_structure_links_stream(links)
+    footprint._via_structure_signature = _via_structure_signature(footprint)
+
+
 def _parse_model_metadata_records(data: bytes | None) -> list[AltiumPcbModel]:
     return parse_model_records_from_bytes(data)
 
@@ -1597,6 +2112,10 @@ class AltiumPcbLib:
         self.raw_pad_via_library_data: bytes | None = None
         self.raw_layer_kind_mapping_header: bytes | None = None
         self.raw_layer_kind_mapping: bytes | None = None
+        self._layer_kind_mapping_data = PcbLibLayerKindMapping.make_default()
+        self.mechanical_layer_kinds: Mapping[int, MechanicalLayerKind] = (
+            self._layer_kind_mapping_data.mapping
+        )
         self.raw_embedded_fonts: bytes | None = None
         self.raw_textures_header: bytes | None = None
         self.raw_textures_data: bytes | None = None
@@ -1610,7 +2129,7 @@ class AltiumPcbLib:
         self.combine_provenance: dict[str, object] | None = None
         self._authoring_builder: Any | None = None
 
-    def _profile_for_authoring_builder(self) -> object:
+    def _profile_for_authoring_builder(self) -> "PcbLibBuildProfile":
         from .altium_pcblib_builder import PcbLibBuildProfile
 
         if self.filepath is not None and self.filepath.exists():
@@ -1624,6 +2143,7 @@ class AltiumPcbLib:
         from .altium_pcblib_builder import PcbLibBuilder
 
         builder = PcbLibBuilder(profile=self._profile_for_authoring_builder())
+        builder.layer_kind_mapping_data = self._layer_kind_mapping_data
         if self.footprints:
             model_entries = collect_pcblib_embedded_model_entries(
                 self.raw_models_data,
@@ -1659,6 +2179,8 @@ class AltiumPcbLib:
         self.raw_pad_via_library_data = authored.raw_pad_via_library_data
         self.raw_layer_kind_mapping_header = authored.raw_layer_kind_mapping_header
         self.raw_layer_kind_mapping = authored.raw_layer_kind_mapping
+        self._layer_kind_mapping_data = authored._layer_kind_mapping_data
+        self.mechanical_layer_kinds = authored.mechanical_layer_kinds
         self.raw_embedded_fonts = authored.raw_embedded_fonts
         self.raw_textures_header = authored.raw_textures_header
         self.raw_textures_data = authored.raw_textures_data
@@ -1732,6 +2254,87 @@ class AltiumPcbLib:
             revision_guid=revision_guid,
             copy_footprint=copy_footprint,
         )
+
+    def set_mechanical_layer(
+        self,
+        layer: int | str | PcbLayer,
+        *,
+        name: str | None = None,
+        enabled: bool = True,
+    ) -> None:
+        """
+        Set a mechanical layer display name and enabled state.
+
+        Args:
+            layer: Mechanical layer token or number. Supported tokens include
+                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                Mechanical 1 through 16.
+            name: Optional display name. If omitted, the existing layer-table
+                label is preserved, falling back to `Mechanical N`.
+            enabled: Whether the layer is enabled in the PcbLib layer registry.
+        """
+        self._ensure_authoring_builder().set_mechanical_layer(
+            layer,
+            name=name,
+            enabled=enabled,
+        )
+
+    def set_mechanical_layer_pair(
+        self,
+        layer_1: int | str | PcbLayer,
+        layer_2: int | str | PcbLayer,
+        *,
+        pair_index: int | None = None,
+    ) -> None:
+        """
+        Define a mechanical mirror pair used by component side flipping.
+
+        Args:
+            layer_1: First mechanical layer endpoint.
+            layer_2: Second mechanical layer endpoint.
+            pair_index: Optional native `MECHPAIR{N}` index. If omitted, the
+                first unused index is selected.
+        """
+        self._ensure_authoring_builder().set_mechanical_layer_pair(
+            layer_1,
+            layer_2,
+            pair_index=pair_index,
+        )
+
+    def get_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+    ) -> MechanicalLayerKind | None:
+        """
+        Return the semantic kind assigned to a mechanical layer, if present.
+
+        Args:
+            layer: Mechanical layer token, enum, native layer id, or mechanical
+                layer number.
+        """
+        return self.mechanical_layer_kinds.get(
+            coerce_layer_kind_mapping_layer_id(layer)
+        )
+
+    def set_mechanical_layer_kind(
+        self,
+        layer: int | str | PcbLayer,
+        kind: int | str | MechanicalLayerKind,
+    ) -> None:
+        """
+        Set the semantic kind assigned to a mechanical layer.
+
+        Args:
+            layer: Mechanical layer token, enum, native layer id, or mechanical
+                layer number.
+            kind: `MechanicalLayerKind`, enum name, or native kind value.
+        """
+        builder = self._ensure_authoring_builder()
+        builder.set_mechanical_layer_kind(layer, kind)
+        self._layer_kind_mapping_data = builder.layer_kind_mapping_data
+        self.mechanical_layer_kinds = self._layer_kind_mapping_data.mapping
+        self.raw_layer_kind_mapping_header = b"\x01\x00\x00\x00"
+        self.raw_layer_kind_mapping = self._layer_kind_mapping_data.to_bytes()
 
     def add_embedded_model(
         self,
@@ -1916,12 +2519,22 @@ class AltiumPcbLib:
         ):
             cls._load_optional_stream(ole, pcblib, attr_name, stream_path)
 
+        pcblib._sync_layer_kind_mapping_from_raw()
+
         model_num = 0
         while ole.exists(["Library", "Models", str(model_num)]):
             pcblib.raw_models[model_num] = ole.openstream(
                 ["Library", "Models", str(model_num)]
             )
             model_num += 1
+
+    def _sync_layer_kind_mapping_from_raw(self) -> None:
+        data = self.raw_layer_kind_mapping
+        if data is None:
+            self._layer_kind_mapping_data = PcbLibLayerKindMapping.make_default()
+        else:
+            self._layer_kind_mapping_data = PcbLibLayerKindMapping.from_bytes(data)
+        self.mechanical_layer_kinds = self._layer_kind_mapping_data.mapping
 
     @staticmethod
     def _load_section_key_map(
@@ -2063,6 +2676,25 @@ class AltiumPcbLib:
             footprint.parameters.update(
                 _parse_length_prefixed_properties(raw_parameters)
             )
+            footprint._parameter_signature = _footprint_parameter_signature(footprint)
+
+        raw_primitive_parameters = cls._load_optional_stream(
+            ole,
+            footprint,
+            "raw_primitive_parameters",
+            [ole_name, "PrimitiveParameters"],
+        )
+        if raw_primitive_parameters is not None:
+            footprint.primitive_parameter_groups = (
+                _parse_pcblib_primitive_parameter_groups(raw_primitive_parameters)
+            )
+            footprint.footprint_primitive_parameters = {}
+            for group in footprint.primitive_parameter_groups:
+                if _is_footprint_primitive_parameter_group(group):
+                    footprint.footprint_primitive_parameters.update(group.parameters)
+            footprint._primitive_parameter_signature = _primitive_parameter_signature(
+                footprint
+            )
 
         raw_widestrings = cls._load_optional_stream(
             ole, footprint, "raw_widestrings", [ole_name, "WideStrings"]
@@ -2109,6 +2741,57 @@ class AltiumPcbLib:
             "raw_uniqueid_info_header",
             [ole_name, "UniqueIDPrimitiveInformation", "Header"],
         )
+        raw_via_structure_manager = cls._load_optional_stream(
+            ole,
+            footprint,
+            "raw_via_structure_manager",
+            [ole_name, "ViaStructureManager"],
+        )
+        raw_via_structures = cls._load_optional_stream(
+            ole,
+            footprint,
+            "raw_via_structures",
+            [ole_name, "ViaStructures"],
+        )
+        if raw_via_structure_manager is not None and raw_via_structures is not None:
+            try:
+                structure_count, _structure_records = (
+                    parse_pcb_count_prefixed_property_records(raw_via_structure_manager)
+                )
+                link_count, _link_records = parse_pcb_count_prefixed_property_records(
+                    raw_via_structures
+                )
+                structures = parse_via_structure_manager_stream(
+                    raw_via_structure_manager[4:]
+                )
+                links = parse_via_structure_links_stream(raw_via_structures[4:])
+                if structure_count != len(structures) or link_count != len(links):
+                    log.debug(
+                        "PcbLib %s via-structure count mismatch: "
+                        "manager %d/%d, links %d/%d",
+                        footprint.name,
+                        structure_count,
+                        len(structures),
+                        link_count,
+                        len(links),
+                    )
+                footprint.via_structures = list(structures)
+                footprint.via_structure_links = list(links)
+                attach_via_structures_to_vias(
+                    footprint.vias,
+                    structures,
+                    links,
+                    primitive_records=footprint._record_order,
+                )
+                footprint._via_structure_signature = _via_structure_signature(footprint)
+                footprint._via_structure_parse_failed = False
+            except Exception as exc:
+                footprint._via_structure_parse_failed = True
+                log.debug(
+                    "Failed to parse PcbLib via-structure streams for %s: %s",
+                    footprint.name,
+                    exc,
+                )
         footprint._ole_storage_name = ole_name
 
     @classmethod
@@ -2394,6 +3077,10 @@ class AltiumPcbLib:
         storage_name: str,
         primitive_count: int,
     ) -> None:
+        _sync_footprint_parameter_stream(footprint)
+        _sync_footprint_primitive_parameter_stream(footprint)
+        _sync_footprint_via_structure_streams(footprint)
+
         if footprint._record_order:
             writer.add_stream(f"{storage_name}/Data", footprint.serialize_data_stream())
         elif footprint.raw_data is not None:
@@ -2408,6 +3095,11 @@ class AltiumPcbLib:
 
         self._add_optional_stream(
             writer, f"{storage_name}/Parameters", footprint.raw_parameters
+        )
+        self._add_optional_stream(
+            writer,
+            f"{storage_name}/PrimitiveParameters",
+            footprint.raw_primitive_parameters,
         )
         self._add_optional_stream(
             writer, f"{storage_name}/WideStrings", footprint.raw_widestrings
@@ -2444,6 +3136,14 @@ class AltiumPcbLib:
                 if footprint.raw_uniqueid_info is not None
                 else None
             ),
+        )
+        self._add_optional_stream(
+            writer,
+            f"{storage_name}/ViaStructureManager",
+            footprint.raw_via_structure_manager,
+        )
+        self._add_optional_stream(
+            writer, f"{storage_name}/ViaStructures", footprint.raw_via_structures
         )
 
     def _write_counted_footprint_stream(
@@ -2533,6 +3233,7 @@ class AltiumPcbLib:
         from .altium_pcblib_builder import PcbLibBuilder
 
         builder = PcbLibBuilder(profile=self._profile_for_authoring_builder())
+        builder.layer_kind_mapping_data = self._layer_kind_mapping_data
         model_entries = collect_pcblib_embedded_model_entries(
             self.raw_models_data,
             self.raw_models,
@@ -2652,6 +3353,8 @@ class AltiumPcbLib:
         seen_model_signatures: set[tuple] = set()
         used_output_names: set[str] = set()
         collision_counters: dict[str, int] = {}
+        provenance_footprints: list[dict[str, str]] = []
+        provenance_renamed_conflicts: list[dict[str, str]] = []
         provenance: dict[str, object] = {
             "kind": "pcblib_combine",
             "join_policy": "suffix",
@@ -2659,8 +3362,8 @@ class AltiumPcbLib:
             .replace(microsecond=0)
             .isoformat(),
             "inputs": [str(path) for path in paths],
-            "footprints": [],
-            "renamed_conflicts": [],
+            "footprints": provenance_footprints,
+            "renamed_conflicts": provenance_renamed_conflicts,
         }
 
         for path in paths:
@@ -2714,8 +3417,8 @@ class AltiumPcbLib:
                 }
                 if renamed:
                     entry["collision_group"] = original_name
-                    provenance["renamed_conflicts"].append(entry.copy())
-                provenance["footprints"].append(entry)
+                    provenance_renamed_conflicts.append(entry.copy())
+                provenance_footprints.append(entry)
 
         combined = builder.build()
         combined.combine_provenance = provenance

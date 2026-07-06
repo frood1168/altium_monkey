@@ -10,7 +10,8 @@ This sample shows:
 3. `make_sch_harness_entry(...)` with public mil-based offsets and `SchFontSpec`
 4. `make_sch_harness_type(...)` with `location_mils: SchPointMils`
 5. adding the matching harness port and signal harness
-6. matching the reference composition in `output/harness_example_ref.SchDoc`
+6. matching the reference composition in
+   `assets/reference/harness_example_ref.SchDoc`
 
 Only the connector group root is added to the document:
 

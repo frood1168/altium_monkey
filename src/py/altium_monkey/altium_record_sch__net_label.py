@@ -252,7 +252,7 @@ class AltiumSchNetLabel(SingleFontBindableRecordMixin, SchGraphicalObject):
             make_solid_brush,
             svg_coord_to_geometry,
         )
-        if junction_ops:
+        if junction_ops and junction_bounds is not None:
             operations.extend(junction_ops)
             junction_min_x, junction_max_x, junction_min_y, junction_max_y = (
                 junction_bounds
