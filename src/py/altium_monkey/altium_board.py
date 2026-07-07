@@ -378,7 +378,6 @@ class AltiumBoardOutline:
     Board outline geometry.
 
     Primary source: VX0/VY0..VXn/VYn indexed fields in Board6/Data record.
-    Fallback: Reconstruct from keepout-layer tracks/arcs.
 
     The outline is a closed polygon defined by ordered vertices.
     Cutouts are holes in the board (e.g., mounting slots) from regions
@@ -1250,9 +1249,10 @@ class AltiumBoard:
         head-to-tail into an ordered vertex list, and collects regions marked
         as board cutouts.
 
-        Use this when the Board6/Data record has no outline vertices (e.g.,
-        older files or custom workflows) or when extracting an outline from
-        an arbitrary layer.
+        This is an explicit helper for non-canonical layer-geometry inspection.
+        Normal Altium PcbDoc parsing does not use this to populate
+        ``board.outline``; canonical board outline geometry comes from
+        Board6/Data VX/VY fields.
 
         Args:
             tracks: List of AltiumPcbTrack records

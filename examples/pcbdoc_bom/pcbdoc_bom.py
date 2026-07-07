@@ -92,7 +92,7 @@ def _component_row(
             parameters,
             "Manufacturer Part Number",
             "MPN",
-            "cad-reference",
+            "handle",
         ),
         "jlcpcb_part": _first_parameter(parameters, "JLCPCB Part #", "jlc_pn"),
         "category": _first_parameter(parameters, "Category", "classification"),

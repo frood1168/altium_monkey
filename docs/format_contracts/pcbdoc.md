@@ -59,6 +59,10 @@ outline normalization path for point lists, holes, and optional
 they add the anchor pad and native `CustomShapes/*` attachment records around
 the shared region body.
 
+`PcbExtendedVertex.start_angle` and `PcbExtendedVertex.end_angle` are degrees.
+This matches the shape-based-region SVG renderer and the board-outline
+conversion path, which convert these values with degree-based trigonometry.
+
 `add_custom_pad(...)` takes the primary layer body through
 `outline_points_mils` and optional primary holes through `hole_points_mils`.
 Pass `outline_vertices` when the primary body needs native line/arc segment

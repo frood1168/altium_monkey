@@ -3191,10 +3191,11 @@ class AltiumPcbDoc:
                 )
         else:
             if verbose:
-                log.info("  Board outline: falling back to keepout tracks/arcs...")
-            self.board.extract_outline_from_primitives(
-                self.tracks, self.regions, self.arcs
-            )
+                log.warning(
+                    "  Board outline: missing Board6/Data VX/VY vertices; "
+                    "not deriving canonical board outline from layer primitives"
+                )
+            return
         if self.board.outline is None:
             return
         self.board.outline.cutouts = self._collect_board_outline_cutouts()

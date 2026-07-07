@@ -39,8 +39,8 @@ class PcbExtendedVertex:
         self.center_x: int = 0  # Arc center X (internal units)
         self.center_y: int = 0  # Arc center Y (internal units)
         self.radius: int = 0  # Arc radius (internal units)
-        self.start_angle: float = 0.0  # Arc start angle (radians)
-        self.end_angle: float = 0.0  # Arc end angle (radians)
+        self.start_angle: float = 0.0  # Arc start angle (degrees)
+        self.end_angle: float = 0.0  # Arc end angle (degrees)
 
     @property
     def is_round(self) -> bool:

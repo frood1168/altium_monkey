@@ -268,6 +268,20 @@ COMPONENT_GRAPHIC_CHILD_TYPES = (
 )
 
 
+PARENT_BOUND_GEOMETRY_CHILD_TYPES = (AltiumSchSheetEntry, AltiumSchHarnessEntry)
+
+
+def _is_parent_bound_geometry_child(obj: object) -> bool:
+    # Harness entries and sheet entries are not standalone graphics: their
+    # geometry is defined relative to a harness connector or sheet symbol and
+    # their to_geometry methods require parent_* context. Public mirror issue
+    # #18 included a synthetic SchDoc where a harness entry's Additional-stream
+    # OwnerIndex collided with a component index. Altium opens that file but
+    # does not render the orphan entry, so generic/component dispatch should
+    # skip these malformed children instead of trying to recover or draw them.
+    return isinstance(obj, PARENT_BOUND_GEOMETRY_CHILD_TYPES)
+
+
 # Clean SchDoc API - wrapper classes and helper functions
 
 
@@ -1104,6 +1118,8 @@ class AltiumSchDoc(JsonApplyMixin):
             if owner_index is not None and owner_index >= 0:
                 parent_comp = component_by_index.get(owner_index)
                 if parent_comp:
+                    if _is_parent_bound_geometry_child(obj):
+                        continue
                     # Set parent reference for direct owner-linked component children.
                     if hasattr(obj, "parent"):
                         _as_dynamic(obj).parent = parent_comp
@@ -3325,6 +3341,8 @@ class AltiumSchDoc(JsonApplyMixin):
         ):
             if is_component_owned(obj) or is_template_owned(obj):
                 continue
+            if _is_parent_bound_geometry_child(obj):
+                continue
             geometry_record = obj.to_geometry(
                 geometry_ctx,
                 document_id=document_id,
@@ -3350,6 +3368,8 @@ class AltiumSchDoc(JsonApplyMixin):
             objects, key=lambda item: str(getattr(item, "unique_id", ""))
         ):
             if should_skip(obj):
+                continue
+            if _is_parent_bound_geometry_child(obj):
                 continue
             to_geometry = getattr(obj, "to_geometry", None)
             if not callable(to_geometry):
@@ -3847,6 +3867,8 @@ class AltiumSchDoc(JsonApplyMixin):
             getattr(comp, "graphics", []),
             key=lambda obj: str(getattr(obj, "unique_id", "")),
         ):
+            if _is_parent_bound_geometry_child(graphic):
+                continue
             if not record_belongs_to_display_mode(graphic, component_display_mode):
                 continue
             owner_part = getattr(graphic, "owner_part_id", None)
@@ -4709,6 +4731,7 @@ class AltiumSchDoc(JsonApplyMixin):
             COMPILED_COMPILE_MASK_OVERLAY_OPACITY,
             SchCompileMaskRenderMode,
         )
+        from .altium_font_resolver import get_font_resolution_diagnostics
 
         render_hints: dict[str, Any] | None = None
         if resolved_ir_profile == SchIrRenderProfile.ONSCREEN:
@@ -4725,6 +4748,16 @@ class AltiumSchDoc(JsonApplyMixin):
                 "bounds": [list(bounds) for bounds in geometry_ctx.compile_mask_bounds],
                 "background_color": str(geometry_ctx.background_color),
                 "overlay_opacity": COMPILED_COMPILE_MASK_OVERLAY_OPACITY,
+            }
+        font_diagnostics = [
+            diagnostic.to_dict() for diagnostic in get_font_resolution_diagnostics()
+        ]
+        if font_diagnostics:
+            if render_hints is None:
+                render_hints = {}
+            render_hints["font_resolution"] = {
+                "schema": "wn.altium.font_resolution.a0",
+                "diagnostics": font_diagnostics,
             }
         return render_hints
 
@@ -4862,6 +4895,9 @@ class AltiumSchDoc(JsonApplyMixin):
         Use `to_ir()` when you want the named-profile wrapper. `to_geometry()`
         remains the lower-level IR construction entry point.
         """
+        from .altium_font_resolver import clear_font_resolution_diagnostics
+
+        clear_font_resolution_diagnostics()
         units_per_px = 64
         workspace_bottom_px = 1000
         workspace_bottom_units = workspace_bottom_px * units_per_px

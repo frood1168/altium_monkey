@@ -146,6 +146,24 @@ The public docs are Markdown-first for this release:
 The examples are the best starting point for public API usage. They are kept in
 [`examples/`](examples/) and are indexed from `examples/manifest.toml`.
 
+## Schematic SVG Fonts
+
+Schematic SVG rendering uses installed fonts when it can resolve the requested
+Altium font family. On macOS, the resolver searches the standard system font
+locations, including Supplemental fonts. Callers can also set
+`ALTIUM_FONT_DIRS` to one or more additional font directories.
+
+When a common Altium/Windows family is unavailable, schematic rendering can use
+bundled open-source fallback fonts. Arial and Microsoft Sans Serif-style
+families substitute Arimo, Times New Roman-style families substitute Tinos, and
+Courier New or monospace families substitute Cousine. SVG output embeds bundled
+fallback faces when they are used so browser rendering follows the same metrics
+used to place text.
+
+gotIR carries font-resolution diagnostics for substitutions and fallbacks so
+downstream tools can surface a warning instead of silently using a hard
+default.
+
 ## Contributing
 
 This repository is a published mirror. Issues, minimal reproduction cases,
@@ -201,8 +219,9 @@ Known release boundaries include:
    fitted component replacement is not applied semantically yet.
 5. Complex hierarchical channels and `.Annotation` file handling may need
    additional validation.
-6. Windows remains the primary validation platform. Basic macOS operation and
-   baseline font substitution have been checked; Linux coverage remains limited.
+6. Windows remains the primary validation platform. macOS font discovery and
+   bundled schematic font substitution have focused coverage; Linux coverage
+   remains limited and may rely more heavily on bundled substitutions.
 
 See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the full current support boundary.
 

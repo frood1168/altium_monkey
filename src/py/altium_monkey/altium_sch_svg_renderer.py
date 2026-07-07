@@ -2106,6 +2106,9 @@ class SchSvgRenderContext:
 
         def build_expression_parameters() -> dict[str, str]:
             resolved: dict[str, str] = {}
+            for key, value in self.project_parameters.items():
+                resolved[key.lower()] = value
+
             for key, value in self.parameters.items():
                 key_lower = key.lower()
                 if value == "*" and allow_star_project_fallback(key_lower):
@@ -2113,14 +2116,23 @@ class SchSvgRenderContext:
                         self.project_parameters, key_lower
                     )
                     if project_value:
-                        resolved[key] = project_value
+                        resolved[key_lower] = project_value
                         continue
-                resolved[key] = value
+                if value == "" and lookup_case_insensitive(
+                    self.project_parameters, key_lower
+                ):
+                    continue
+                resolved[key_lower] = value
 
             for key, value in system_defaults.items():
                 resolved.setdefault(key, value)
 
             return resolved
+
+        if text.startswith("=") and ("+" in text or "'" in text):
+            from .altium_netlist_common import _evaluate_altium_expression
+
+            return _evaluate_altium_expression(text[1:], build_expression_parameters())
 
         if (
             text.startswith("=")
@@ -2164,15 +2176,6 @@ class SchSvgRenderContext:
                     return project_value
                 if direct_lower in system_defaults:
                     return system_defaults[direct_lower]
-
-        if (
-            self.options.fallback_project_parameters_for_star
-            and text.startswith("=")
-            and ("+" in text or "'" in text)
-        ):
-            from .altium_netlist_common import _evaluate_altium_expression
-
-            return _evaluate_altium_expression(text[1:], build_expression_parameters())
 
         def replace_param(match: re.Match) -> str:
             param_name = match.group(1)
@@ -2574,7 +2577,12 @@ class SchSvgRenderContext:
         """
         return BUS_WIDTH_MILS * self.scale
 
-    def _get_display_font_name(self, font_name: str) -> str:
+    def _get_display_font_name(
+        self,
+        font_name: str,
+        bold: bool = False,
+        italic: bool = False,
+    ) -> str:
         """
         Get the display font name, applying fallback if font is not available.
 
@@ -2588,7 +2596,7 @@ class SchSvgRenderContext:
         Returns:
             font_name if available on system, or FONT_FALLBACK if not
         """
-        resolution = resolve_font_with_style(font_name)
+        resolution = resolve_font_with_style(font_name, bold=bold, italic=italic)
         if resolution.path is not None and resolution.resolved_family is not None:
             return resolution.resolved_family
         # Font not available - use fallback like Altium does
@@ -2641,7 +2649,11 @@ class SchSvgRenderContext:
                         is_italic,
                         bool(font.get("underline", False)),
                     )
-                display_font_name = self._get_display_font_name(font_name)
+                display_font_name = self._get_display_font_name(
+                    font_name,
+                    is_bold,
+                    is_italic,
+                )
                 # Issue 5 Fix: Use font-specific factor for pt-to-px conversion
                 # Different fonts have different Em/Cell ratios:
                 #   Arial: factor ~= 0.895 (close to 8/9)
@@ -2693,7 +2705,11 @@ class SchSvgRenderContext:
                 override = self._get_onscreen_font_override(font_name)
                 if override is not None:
                     return pt_size * float(override["factor"])
-                display_font_name = self._get_display_font_name(font_name)
+                display_font_name = self._get_display_font_name(
+                    font_name,
+                    is_bold,
+                    is_italic,
+                )
                 return self._pt_to_px(
                     pt_size,
                     display_font_name,

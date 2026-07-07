@@ -115,6 +115,20 @@ viewBox by default so comparison lanes can preserve the native export shape.
 Set `SchSvgRenderOptions(include_view_box=False)` when a caller needs the
 normal renderer profile without a root viewBox.
 
+Schematic SVG rendering resolves text fonts before measuring and placing text.
+Installed system fonts are preferred. On macOS, the resolver searches the
+standard system font directories, including Supplemental fonts; callers can add
+directories through `ALTIUM_FONT_DIRS`.
+
+When a requested Altium/Windows family is unavailable, common families fall
+back to bundled open-source fonts: Arimo for Arial and Microsoft Sans
+Serif-style fonts, Tinos for Times New Roman-style fonts, and Cousine for
+Courier New or monospace fonts. Bundled fallback faces are embedded into SVG
+output when used so browser text rendering matches the measured metrics.
+
+`AltiumSchDoc.to_ir(profile="onscreen")` includes font-resolution diagnostics
+for substitutions and fallbacks. Exact system matches are intentionally quiet.
+
 ## Examples
 
 Start with:

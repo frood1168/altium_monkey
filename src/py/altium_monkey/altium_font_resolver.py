@@ -8,10 +8,13 @@ decides which on-disk font file should satisfy a request on the current host.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import struct
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
@@ -46,6 +49,9 @@ class FontResolutionSource(str, Enum):
     EXPLICIT_PATH = "explicit_path"
     ALIAS = "alias"
     TEST_ASSET = "test_asset"
+    CONFIGURED_DIR = "configured_dir"
+    SYSTEM_FONT = "system_font"
+    BUNDLED_FONT = "bundled_font"
     SEARCH_DIR = "search_dir"
     MISSING = "missing"
 
@@ -88,6 +94,9 @@ class FontResolverConfig:
 
     mode: FontResolutionMode | None = None
     search_dirs: tuple[Path, ...] | None = None
+    configured_dirs: tuple[Path, ...] = ()
+    system_dirs: tuple[Path, ...] = ()
+    bundled_dirs: tuple[Path, ...] = ()
     alias_to_path: Mapping[str, Path] = field(default_factory=dict)
     substitutions: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     generic_sans_fallbacks: tuple[str, ...] | None = None
@@ -108,6 +117,22 @@ class FontResolution:
     status: FontResolutionStatus
     source: FontResolutionSource
     tried_families: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        """
+        Return JSON-compatible diagnostic metadata.
+        """
+        return {
+            "requested_family": self.request.family,
+            "requested_bold": self.request.bold,
+            "requested_italic": self.request.italic,
+            "resolved_family": self.resolved_family,
+            "resolved_name": self.resolved_name,
+            "status": self.status.value,
+            "source": self.source.value,
+            "path": None if self.path is None else str(self.path),
+            "tried_families": list(self.tried_families),
+        }
 
 
 def _resolve_test_fonts_dir() -> Path:
@@ -135,6 +160,22 @@ def _resolve_test_fonts_dir() -> Path:
 
 
 TEST_FONTS_DIR = _resolve_test_fonts_dir()
+PACKAGE_FONT_ROOT = Path(__file__).resolve().parent / "data" / "fonts"
+
+
+def get_bundled_font_search_dirs() -> tuple[Path, ...]:
+    """
+    Return package-data font directories used for portable fallback rendering.
+    """
+    croscore_root = PACKAGE_FONT_ROOT / "croscore"
+    return _dedupe_paths(
+        [
+            croscore_root / "arimo",
+            croscore_root / "tinos",
+            croscore_root / "cousine",
+        ]
+    )
+
 
 KNOWN_FONT_FILE_MAP: dict[str, str] = {
     "Arial": "arial.ttf",
@@ -257,7 +298,7 @@ TEST_FONT_FILE_MAP: dict[str, Path] = {
 
 _PORTABLE_FONT_REPLACEMENT_RULES: tuple[FontReplacementRule, ...] = (
     FontReplacementRule("Arial", "Arimo"),
-    FontReplacementRule("Arial Black", "Archivo Black"),
+    FontReplacementRule("Arial Black", "Arimo"),
     FontReplacementRule("Helvetica", "Arimo"),
     FontReplacementRule("Microsoft Sans Serif", "Arimo"),
     FontReplacementRule("Times", "Tinos"),
@@ -272,6 +313,10 @@ ALTIUM_PORTABLE_FONT_REPLACEMENTS: tuple[dict[str, str], ...] = tuple(
 
 DEFAULT_FAMILY_SUBSTITUTIONS: dict[str, tuple[str, ...]] = {
     "Arial": ("Arimo", "Liberation Sans", "DejaVu Sans"),
+    "Arial Black": ("Arimo", "Liberation Sans", "DejaVu Sans"),
+    "Arial Bold": ("Arimo", "Liberation Sans", "DejaVu Sans"),
+    "Arial Italic": ("Arimo", "Liberation Sans", "DejaVu Sans"),
+    "Arial Bold Italic": ("Arimo", "Liberation Sans", "DejaVu Sans"),
     "Times New Roman": ("Tinos", "Liberation Serif", "DejaVu Serif"),
     "Courier New": ("Cousine", "Liberation Mono", "DejaVu Sans Mono"),
     "Microsoft Sans Serif": ("Arimo", "Liberation Sans", "DejaVu Sans"),
@@ -291,12 +336,14 @@ DEFAULT_SERIF_FALLBACKS: tuple[str, ...] = (
     "Liberation Serif",
     "DejaVu Serif",
     "Times New Roman",
+    "Arimo",
 )
 DEFAULT_MONO_FALLBACKS: tuple[str, ...] = (
     "Cousine",
     "Liberation Mono",
     "DejaVu Sans Mono",
     "Courier New",
+    "Arimo",
 )
 
 _KNOWN_FONT_FILE_MAP_NORMALIZED = {
@@ -308,6 +355,8 @@ _TEST_FONT_FILE_MAP_NORMALIZED = {
     for name, path in TEST_FONT_FILE_MAP.items()
 }
 _FONT_RESOLVER_OVERRIDE: FontResolverConfig | None = None
+_FONT_RESOLUTION_DIAGNOSTICS: list[FontResolution] = []
+_FONT_RESOLUTION_DIAGNOSTIC_KEYS: set[tuple[object, ...]] = set()
 
 
 def _normalize_family_name(name: str) -> str:
@@ -316,6 +365,76 @@ def _normalize_family_name(name: str) -> str:
 
 def _normalize_family_key(name: str) -> str:
     return _normalize_family_name(name).lower()
+
+
+def _diagnostic_key(resolution: FontResolution) -> tuple[object, ...]:
+    return (
+        resolution.request.family,
+        resolution.request.bold,
+        resolution.request.italic,
+        resolution.resolved_family,
+        resolution.resolved_name,
+        resolution.status.value,
+        resolution.source.value,
+        None if resolution.path is None else str(resolution.path),
+    )
+
+
+def _record_font_resolution_diagnostic(resolution: FontResolution) -> FontResolution:
+    key = _diagnostic_key(resolution)
+    if key not in _FONT_RESOLUTION_DIAGNOSTIC_KEYS:
+        _FONT_RESOLUTION_DIAGNOSTIC_KEYS.add(key)
+        _FONT_RESOLUTION_DIAGNOSTICS.append(resolution)
+    return resolution
+
+
+def clear_font_resolution_diagnostics() -> None:
+    """
+    Clear process-local font resolution diagnostics.
+    """
+    _FONT_RESOLUTION_DIAGNOSTICS.clear()
+    _FONT_RESOLUTION_DIAGNOSTIC_KEYS.clear()
+
+
+def get_font_resolution_diagnostics() -> tuple[FontResolution, ...]:
+    """
+    Return process-local font resolution diagnostics.
+    """
+    return tuple(_FONT_RESOLUTION_DIAGNOSTICS)
+
+
+def font_resolution_diagnostics_json() -> str:
+    """
+    Return process-local font resolution diagnostics as stable JSON.
+    """
+    return json.dumps(
+        [diagnostic.to_dict() for diagnostic in _FONT_RESOLUTION_DIAGNOSTICS],
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _make_font_resolution(
+    *,
+    request: FontRequest,
+    resolved_family: str | None,
+    resolved_name: str | None,
+    path: Path | None,
+    status: FontResolutionStatus,
+    source: FontResolutionSource,
+    tried_families: tuple[str, ...],
+) -> FontResolution:
+    return _record_font_resolution_diagnostic(
+        FontResolution(
+            request=request,
+            resolved_family=resolved_family,
+            resolved_name=resolved_name,
+            path=path,
+            status=status,
+            source=source,
+            tried_families=tried_families,
+        )
+    )
 
 
 def _dedupe_paths(paths: list[Path]) -> tuple[Path, ...]:
@@ -333,6 +452,182 @@ def _dedupe_paths(paths: list[Path]) -> tuple[Path, ...]:
     return tuple(result)
 
 
+def _path_is_under(path: Path, roots: tuple[Path, ...]) -> bool:
+    resolved_path = path.expanduser().resolve(strict=False)
+    for root in roots:
+        try:
+            resolved_path.relative_to(root.expanduser().resolve(strict=False))
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _source_for_resolved_path(
+    path: Path,
+    config: FontResolverConfig,
+) -> FontResolutionSource:
+    if _path_is_under(path, config.bundled_dirs):
+        return FontResolutionSource.BUNDLED_FONT
+    if _path_is_under(path, config.configured_dirs):
+        return FontResolutionSource.CONFIGURED_DIR
+    if _path_is_under(path, config.system_dirs):
+        return FontResolutionSource.SYSTEM_FONT
+    return FontResolutionSource.SEARCH_DIR
+
+
+def _resolve_child_case_insensitive(search_dir: Path, file_name: str) -> Path | None:
+    candidate = search_dir / file_name
+    if candidate.exists():
+        return candidate
+    try:
+        for child in search_dir.iterdir():
+            if child.name.lower() == file_name.lower() and child.exists():
+                return child
+    except OSError:
+        return None
+    return None
+
+
+def _known_file_candidates(name: str) -> tuple[str, ...]:
+    normalized_name = _normalize_family_name(name)
+    candidates: list[str] = []
+    mapped_name = _KNOWN_FONT_FILE_MAP_NORMALIZED.get(_normalize_family_key(name))
+    if mapped_name is not None:
+        candidates.append(mapped_name)
+    for suffix in (".ttf", ".otf", ".TTF", ".OTF"):
+        candidates.append(f"{normalized_name}{suffix}")
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for candidate in candidates:
+        key = candidate.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(candidate)
+    return tuple(result)
+
+
+def _decode_font_name_record(
+    raw: bytes,
+    *,
+    platform_id: int,
+    encoding_id: int,
+) -> str | None:
+    if not raw:
+        return None
+    encodings: tuple[str, ...]
+    if platform_id in (0, 3):
+        encodings = ("utf-16-be", "utf-8")
+    elif platform_id == 1:
+        encodings = ("mac_roman", "utf-8")
+    else:
+        encodings = ("utf-8", "utf-16-be")
+
+    for encoding in encodings:
+        try:
+            decoded = raw.decode(encoding).replace("\x00", "").strip()
+        except UnicodeDecodeError:
+            continue
+        if decoded:
+            return decoded
+    return None
+
+
+def _font_name_table_names(path: Path) -> tuple[str, ...]:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ()
+    if len(data) < 12 or data[:4] == b"ttcf":
+        return ()
+
+    num_tables = struct.unpack(">H", data[4:6])[0]
+    name_table_offset: int | None = None
+    name_table_length: int | None = None
+    directory_offset = 12
+    for _ in range(num_tables):
+        if directory_offset + 16 > len(data):
+            return ()
+        tag = data[directory_offset : directory_offset + 4]
+        if tag == b"name":
+            name_table_offset = struct.unpack(
+                ">I", data[directory_offset + 8 : directory_offset + 12]
+            )[0]
+            name_table_length = struct.unpack(
+                ">I", data[directory_offset + 12 : directory_offset + 16]
+            )[0]
+            break
+        directory_offset += 16
+    if name_table_offset is None or name_table_length is None:
+        return ()
+    if name_table_offset + name_table_length > len(data):
+        return ()
+
+    table = data[name_table_offset : name_table_offset + name_table_length]
+    if len(table) < 6:
+        return ()
+    record_count = struct.unpack(">H", table[2:4])[0]
+    string_offset = struct.unpack(">H", table[4:6])[0]
+    names: list[str] = []
+    for index in range(record_count):
+        record_offset = 6 + index * 12
+        if record_offset + 12 > len(table):
+            break
+        platform_id, encoding_id, _language_id, name_id, length, offset = struct.unpack(
+            ">HHHHHH", table[record_offset : record_offset + 12]
+        )
+        if name_id not in {1, 2, 4, 16, 17}:
+            continue
+        start = string_offset + offset
+        end = start + length
+        if start < 0 or end > len(table):
+            continue
+        decoded = _decode_font_name_record(
+            table[start:end],
+            platform_id=platform_id,
+            encoding_id=encoding_id,
+        )
+        if decoded is not None:
+            names.append(decoded)
+    return tuple(dict.fromkeys(names))
+
+
+def _iter_font_files(search_dir: Path) -> tuple[Path, ...]:
+    root = search_dir.expanduser()
+    if not root.exists():
+        return ()
+    font_paths: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if Path(filename).suffix.lower() not in {".ttf", ".otf"}:
+                continue
+            font_paths.append(Path(dirpath) / filename)
+    return tuple(font_paths)
+
+
+@lru_cache(maxsize=16)
+def _build_font_name_index(search_dir_keys: tuple[str, ...]) -> dict[str, Path]:
+    index: dict[str, Path] = {}
+    for search_dir_key in search_dir_keys:
+        for font_path in _iter_font_files(Path(search_dir_key)):
+            index.setdefault(_normalize_family_key(font_path.stem), font_path)
+            for name in _font_name_table_names(font_path):
+                index.setdefault(_normalize_family_key(name), font_path)
+    return index
+
+
+def _resolve_indexed_font_path(
+    name: str,
+    search_dirs: tuple[Path, ...],
+) -> Path | None:
+    search_dir_keys = tuple(str(path.expanduser()) for path in search_dirs)
+    if not search_dir_keys:
+        return None
+    return _build_font_name_index(search_dir_keys).get(_normalize_family_key(name))
+
+
 def _style_suffix(bold: bool, italic: bool) -> str:
     if bold and italic:
         return " Bold Italic"
@@ -341,6 +636,26 @@ def _style_suffix(bold: bool, italic: bool) -> str:
     if italic:
         return " Italic"
     return ""
+
+
+def _style_hints_from_family_name(family: str) -> tuple[bool, bool]:
+    key = _normalize_family_key(family)
+    tokens = set(key.replace("-", " ").replace("_", " ").split())
+    bold = bool(
+        tokens.intersection(
+            {
+                "black",
+                "bold",
+                "demibold",
+                "extrabold",
+                "heavy",
+                "semibold",
+                "ultrabold",
+            }
+        )
+    )
+    italic = bool(tokens.intersection({"italic", "oblique"}))
+    return bold, italic
 
 
 def _family_candidates_for_request(
@@ -364,6 +679,13 @@ def get_platform_font_search_dirs(
     Return default font roots for the target platform.
     """
     env = os.environ if environ is None else environ
+    if env.get("ALTIUM_FONT_DISABLE_SYSTEM", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return ()
     system_value = platform.system() if system_name is None else system_name
     paths: list[Path] = []
 
@@ -383,6 +705,7 @@ def get_platform_font_search_dirs(
         paths.extend(
             (
                 Path("/System/Library/Fonts"),
+                Path("/System/Library/Fonts/Supplemental"),
                 Path("/Library/Fonts"),
                 home_path / "Library" / "Fonts",
             )
@@ -431,12 +754,16 @@ def build_default_font_resolver_config(
     except ValueError:
         mode = FontResolutionMode.COMPATIBLE
 
-    search_dirs = get_configured_font_dirs(env) + get_platform_font_search_dirs(
-        system_name, env
-    )
+    configured_dirs = get_configured_font_dirs(env)
+    system_dirs = get_platform_font_search_dirs(system_name, env)
+    bundled_dirs = get_bundled_font_search_dirs()
+    search_dirs = configured_dirs + system_dirs + bundled_dirs
     return FontResolverConfig(
         mode=mode,
         search_dirs=search_dirs,
+        configured_dirs=configured_dirs,
+        system_dirs=system_dirs,
+        bundled_dirs=bundled_dirs,
         substitutions=DEFAULT_FAMILY_SUBSTITUTIONS,
         generic_sans_fallbacks=DEFAULT_SANS_FALLBACKS,
         generic_serif_fallbacks=DEFAULT_SERIF_FALLBACKS,
@@ -520,6 +847,17 @@ def get_effective_font_resolver_config(
         if override.search_dirs is None
         else _dedupe_paths(list(override.search_dirs))
     )
+    configured_dirs = (
+        base.configured_dirs
+        if override.search_dirs is None
+        else override.configured_dirs
+    )
+    system_dirs = (
+        base.system_dirs if override.search_dirs is None else override.system_dirs
+    )
+    bundled_dirs = (
+        base.bundled_dirs if override.search_dirs is None else override.bundled_dirs
+    )
     substitutions = dict(base.substitutions)
     substitutions.update(override.substitutions)
 
@@ -530,6 +868,9 @@ def get_effective_font_resolver_config(
     return FontResolverConfig(
         mode=mode,
         search_dirs=search_dirs,
+        configured_dirs=configured_dirs,
+        system_dirs=system_dirs,
+        bundled_dirs=bundled_dirs,
         alias_to_path=alias_to_path,
         substitutions=substitutions,
         generic_sans_fallbacks=(
@@ -550,23 +891,27 @@ def get_effective_font_resolver_config(
     )
 
 
-def _resolve_known_name_path(name: str, search_dirs: tuple[Path, ...]) -> Path | None:
+def _resolve_known_name_path(
+    name: str, config: FontResolverConfig
+) -> tuple[Path | None, FontResolutionSource]:
     normalized_key = _normalize_family_key(name)
 
     test_font_path = _TEST_FONT_FILE_MAP_NORMALIZED.get(normalized_key)
     if test_font_path is not None and test_font_path.exists():
-        return test_font_path
+        return test_font_path, FontResolutionSource.TEST_ASSET
 
-    file_name = _KNOWN_FONT_FILE_MAP_NORMALIZED.get(normalized_key)
-    if file_name is None:
-        return None
+    search_dirs = config.search_dirs or ()
+    for file_name in _known_file_candidates(name):
+        for search_dir in search_dirs:
+            candidate = _resolve_child_case_insensitive(search_dir, file_name)
+            if candidate is not None:
+                return candidate, _source_for_resolved_path(candidate, config)
 
-    for search_dir in search_dirs:
-        candidate = search_dir / file_name
-        if candidate.exists():
-            return candidate
+    indexed_path = _resolve_indexed_font_path(name, search_dirs)
+    if indexed_path is not None and indexed_path.exists():
+        return indexed_path, _source_for_resolved_path(indexed_path, config)
 
-    return None
+    return None, FontResolutionSource.MISSING
 
 
 def _resolve_font_name_path(
@@ -584,13 +929,9 @@ def _resolve_font_name_path(
         if expanded_alias.exists():
             return expanded_alias, FontResolutionSource.ALIAS
 
-    test_font_path = _TEST_FONT_FILE_MAP_NORMALIZED.get(normalized_key)
-    if test_font_path is not None and test_font_path.exists():
-        return test_font_path, FontResolutionSource.TEST_ASSET
-
-    known_path = _resolve_known_name_path(name, config.search_dirs or ())
+    known_path, known_source = _resolve_known_name_path(name, config)
     if known_path is not None:
-        return known_path, FontResolutionSource.SEARCH_DIR
+        return known_path, known_source
 
     return None, FontResolutionSource.MISSING
 
@@ -640,6 +981,9 @@ def resolve_font(
 
     def resolve_family(
         family: str,
+        *,
+        bold: bool = request.bold,
+        italic: bool = request.italic,
     ) -> tuple[Path | None, str | None, FontResolutionSource, bool]:
         for (
             base_family,
@@ -647,8 +991,8 @@ def resolve_font(
             style_matched,
         ) in _family_candidates_for_request(
             family,
-            request.bold,
-            request.italic,
+            bold,
+            italic,
         ):
             path, source = _resolve_font_name_path(candidate_name, effective_config)
             tried_families.append(candidate_name)
@@ -658,7 +1002,7 @@ def resolve_font(
 
     path, resolved_name, source, style_matched = resolve_family(requested_family)
     if path is not None:
-        return FontResolution(
+        return _make_font_resolution(
             request=request,
             resolved_family=requested_family,
             resolved_name=resolved_name,
@@ -678,14 +1022,21 @@ def resolve_font(
             _normalize_family_key(requested_family), ()
         )
         seen_substitutes: set[str] = set()
+        family_bold_hint, family_italic_hint = _style_hints_from_family_name(
+            requested_family
+        )
         for substitute in substitution_chain:
             normalized_substitute = _normalize_family_name(substitute)
             if normalized_substitute in seen_substitutes:
                 continue
             seen_substitutes.add(normalized_substitute)
-            path, resolved_name, source, _ = resolve_family(normalized_substitute)
+            path, resolved_name, source, _ = resolve_family(
+                normalized_substitute,
+                bold=request.bold or family_bold_hint,
+                italic=request.italic or family_italic_hint,
+            )
             if path is not None:
-                return FontResolution(
+                return _make_font_resolution(
                     request=request,
                     resolved_family=normalized_substitute,
                     resolved_name=resolved_name,
@@ -695,8 +1046,14 @@ def resolve_font(
                     tried_families=tuple(tried_families),
                 )
 
-    if effective_config.mode == FontResolutionMode.BEST_EFFORT:
+    if effective_config.mode in (
+        FontResolutionMode.COMPATIBLE,
+        FontResolutionMode.BEST_EFFORT,
+    ):
         seen_fallbacks: set[str] = set()
+        family_bold_hint, family_italic_hint = _style_hints_from_family_name(
+            requested_family
+        )
         for fallback_family in _generic_fallback_families(
             requested_family, effective_config
         ):
@@ -707,9 +1064,13 @@ def resolve_font(
             ):
                 continue
             seen_fallbacks.add(normalized_fallback)
-            path, resolved_name, source, _ = resolve_family(normalized_fallback)
+            path, resolved_name, source, _ = resolve_family(
+                normalized_fallback,
+                bold=request.bold or family_bold_hint,
+                italic=request.italic or family_italic_hint,
+            )
             if path is not None:
-                return FontResolution(
+                return _make_font_resolution(
                     request=request,
                     resolved_family=normalized_fallback,
                     resolved_name=resolved_name,
@@ -719,7 +1080,7 @@ def resolve_font(
                     tried_families=tuple(tried_families),
                 )
 
-    return FontResolution(
+    return _make_font_resolution(
         request=request,
         resolved_family=None,
         resolved_name=None,

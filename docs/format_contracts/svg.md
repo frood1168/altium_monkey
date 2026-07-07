@@ -72,6 +72,15 @@ JPEG, GIF, SVG, and WebP payloads are embedded with their natural media type.
 Plain BMP payloads are decoded to PNG for browser-compatible SVG output.
 Alpha data is preserved when it exists in the stored image payload.
 
+Schematic text is measured through the font resolver before SVG is emitted.
+Installed system fonts are preferred, and callers can add search roots through
+`ALTIUM_FONT_DIRS`. Common Altium/Windows font families can fall back to
+bundled open-source fonts when unavailable: Arimo for Arial and Microsoft Sans
+Serif-style families, Tinos for Times New Roman-style families, and Cousine for
+Courier New or monospace families. When bundled fallback fonts are used,
+schematic SVG embeds those font faces so browser layout follows the same
+metrics used by the renderer.
+
 ## PCB SVG
 
 PcbDoc and PcbLib SVG output uses millimeter coordinates. PCB SVG filenames and

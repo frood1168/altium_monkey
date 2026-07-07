@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import html
+import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .altium_sch_geometry_oracle import (
@@ -10,6 +13,7 @@ from .altium_sch_geometry_oracle import (
     SchGeometryOpKind,
     SchGeometryRecord,
 )
+from .altium_font_resolver import resolve_font_with_style
 from .altium_sch_svg_renderer import (
     SchCompileMaskRenderMode,
     SchSvgRenderContext,
@@ -19,6 +23,8 @@ from .altium_sch_svg_renderer import (
     svg_ellipse,
     svg_text_or_poly,
 )
+
+FontDiagnosticPayload = dict[str, object]
 
 
 def _identity_affine() -> tuple[float, float, float, float, float, float]:
@@ -283,6 +289,102 @@ class SchGeometrySvgRenderer:
             )
         return compile_mask_bounds, sheet_background_color, overlay_opacity
 
+    def _font_resolution_diagnostics_from_hints(
+        self,
+        document: SchGeometryDocument,
+    ) -> list[FontDiagnosticPayload]:
+        font_hints = (
+            document.render_hints.get("font_resolution")
+            if document.render_hints
+            else None
+        )
+        if not isinstance(font_hints, dict):
+            return []
+        diagnostics = font_hints.get("diagnostics")
+        if not isinstance(diagnostics, list):
+            return []
+        return [
+            {str(key): value for key, value in item.items()}
+            for item in diagnostics
+            if isinstance(item, dict)
+        ]
+
+    def _font_resolution_diagnostics_from_text_ops(
+        self,
+        document: SchGeometryDocument,
+    ) -> list[FontDiagnosticPayload]:
+        diagnostics: list[FontDiagnosticPayload] = []
+        for record in document.records:
+            for op in record.operations:
+                if op.kind_str() != SchGeometryOpKind.STRING.value:
+                    continue
+                font = op.payload.get("font")
+                if not isinstance(font, dict):
+                    continue
+                font_name = str(font.get("name", "") or "")
+                if not font_name:
+                    continue
+                resolution = resolve_font_with_style(
+                    font_name,
+                    bold=bool(font.get("bold", False)),
+                    italic=bool(font.get("italic", False)),
+                )
+                diagnostics.append(resolution.to_dict())
+        return diagnostics
+
+    def _render_font_face_style(self, document: SchGeometryDocument) -> list[str]:
+        diagnostics = [
+            *self._font_resolution_diagnostics_from_hints(document),
+            *self._font_resolution_diagnostics_from_text_ops(document),
+        ]
+        if not diagnostics:
+            return []
+
+        rules: list[str] = []
+        seen: set[tuple[str, bool, bool, str]] = set()
+        for diagnostic in diagnostics:
+            if str(diagnostic.get("source", "")) != "bundled_font":
+                continue
+            path_value = diagnostic.get("path")
+            resolved_family = str(diagnostic.get("resolved_family", "") or "").strip()
+            if not resolved_family or not isinstance(path_value, str):
+                continue
+            font_path = Path(path_value)
+            if not font_path.exists():
+                continue
+            bold = bool(diagnostic.get("requested_bold", False))
+            italic = bool(diagnostic.get("requested_italic", False))
+            key = (resolved_family, bold, italic, str(font_path))
+            if key in seen:
+                continue
+            seen.add(key)
+            encoded_font = base64.b64encode(font_path.read_bytes()).decode("ascii")
+            font_style = "italic" if italic else "normal"
+            font_weight = "700" if bold else "400"
+            rules.append(
+                "@font-face { "
+                f"font-family: {json.dumps(resolved_family)}; "
+                f"font-style: {font_style}; "
+                f"font-weight: {font_weight}; "
+                "font-display: block; "
+                f"src: url('data:font/ttf;base64,{encoded_font}') format('truetype'); "
+                "}"
+            )
+        if not rules:
+            return []
+        return ["<defs>", "<style>", *rules, "</style>", "</defs>"]
+
+    def _resolve_svg_font_family(self, font: FontDiagnosticPayload) -> str:
+        font_name = str(font.get("name", "") or "")
+        if not font_name:
+            return ""
+        resolution = resolve_font_with_style(
+            font_name,
+            bold=bool(font.get("bold", False)),
+            italic=bool(font.get("italic", False)),
+        )
+        return resolution.resolved_family or font_name
+
     def render(self, document: SchGeometryDocument) -> str:
         self._clip_rect_counter = 0
         width_px, height_px, units_per_px, doc_id, workspace_bg = (
@@ -313,6 +415,7 @@ class SchGeometrySvgRenderer:
             ]
         )
         lines.append(f"<svg {' '.join(svg_attrs)}>")
+        lines.extend(self._render_font_face_style(document))
         lines.append('<g id = "scene" >')
 
         lines.append('<g id = "DocumentMainGroup" >')
@@ -1262,6 +1365,7 @@ class SchGeometrySvgRenderer:
         if self.options.text_mode != "native_svg_export":
             raw_text = raw_text.rstrip("\r\n")
         text = html.escape(raw_text)
+        resolved_font_family = self._resolve_svg_font_family(font)
         if self.options.text_as_polygons:
             poly_ctx = self._build_text_render_context(document)
             return [
@@ -1271,7 +1375,7 @@ class SchGeometrySvgRenderer:
                     baseline_y,
                     raw_text,
                     font_size=font_size,
-                    font_family=str(font.get("name", "")),
+                    font_family=resolved_font_family,
                     fill=str(brush.get("color_hex", "#000000")),
                     transform=transform_attr,
                     font_weight="bold" if font.get("bold") else None,
@@ -1285,7 +1389,7 @@ class SchGeometrySvgRenderer:
             f'x="{_fmt_num(baseline_x)}"',
             f'y="{_fmt_num(baseline_y)}"',
             f'font-size="{_fmt_num(font_size)}px"',
-            f'font-family="{html.escape(str(font.get("name", "")))}"',
+            f'font-family="{html.escape(resolved_font_family)}"',
             f'fill="{brush.get("color_hex", "#000000")}"',
         ]
         if font.get("bold"):

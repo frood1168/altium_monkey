@@ -25,6 +25,17 @@ from .altium_serializer import AltiumSerializer, CaseMode, Fields
 from .altium_sch_record_helpers import bound_schematic_owner
 
 
+def _is_parent_bound_geometry_child(obj: object) -> bool:
+    # Keep in sync with altium_schdoc._is_parent_bound_geometry_child without
+    # importing SchDoc-only record classes here. Harness/sheet entries need
+    # parent connector/symbol geometry context and must not be drawn as generic
+    # component graphics.
+    return type(obj).__name__ in (
+        "AltiumSchHarnessEntry",
+        "AltiumSchSheetEntry",
+    )
+
+
 class AltiumSchComponent(SchGraphicalObject):
     """
     COMPONENT record.
@@ -1734,6 +1745,8 @@ class AltiumSchComponent(SchGraphicalObject):
         )
 
         for child_kind, child in component_children:
+            if _is_parent_bound_geometry_child(child):
+                continue
             owner_part = getattr(child, "owner_part_id", None)
             if (
                 owner_part is not None

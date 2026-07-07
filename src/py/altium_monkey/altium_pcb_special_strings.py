@@ -12,6 +12,9 @@ from collections.abc import Mapping
 import re
 
 _PCB_SPECIAL_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])\.([A-Za-z_][A-Za-z0-9_]*)")
+_QUOTED_PCB_SPECIAL_TOKEN_RE = re.compile(
+    r"(?P<quote>['\"])\.(?P<token>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)"
+)
 
 
 def normalize_project_parameters(
@@ -121,6 +124,13 @@ def _parse_plus_concat_terms(text: str) -> list[tuple[str, str]] | None:
 
 
 def _substitute_tokens_only(text: str, params_ci: dict[str, str]) -> str:
+    def _replace_quoted(match: re.Match[str]) -> str:
+        token = match.group("token")
+        resolved = _resolve_token(token, params_ci)
+        if resolved is None:
+            return match.group(0)
+        return resolved
+
     def _replace(match: re.Match[str]) -> str:
         token = match.group(1)
         resolved = _resolve_token(token, params_ci)
@@ -128,6 +138,7 @@ def _substitute_tokens_only(text: str, params_ci: dict[str, str]) -> str:
             return match.group(0)
         return resolved
 
+    text = _QUOTED_PCB_SPECIAL_TOKEN_RE.sub(_replace_quoted, text)
     return _PCB_SPECIAL_TOKEN_RE.sub(_replace, text)
 
 

@@ -4,7 +4,7 @@ Version family: `a0`/`a1`
 
 This directory documents the JSON-shaped contracts emitted directly by
 `altium-monkey`. These contracts are Altium-oriented API payloads. They are not
-the generic cross-CAD `wn.design.a0` data-model contract.
+the generic cross-CAD `design_a0` data-model contract.
 
 ## Bundled Entry Points
 

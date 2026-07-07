@@ -32,8 +32,8 @@ def _extended_vertex(
     *,
     center_mils: tuple[float, float] | None = None,
     radius_mils: float = 0.0,
-    start_angle: float = 0.0,
-    end_angle: float = 0.0,
+    start_angle_degrees: float = 0.0,
+    end_angle_degrees: float = 0.0,
 ) -> PcbExtendedVertex:
     vertex = PcbExtendedVertex()
     vertex.x = _iu(x_mils)
@@ -46,8 +46,8 @@ def _extended_vertex(
     vertex.center_x = _iu(center_mils[0])
     vertex.center_y = _iu(center_mils[1])
     vertex.radius = _iu(radius_mils)
-    vertex.start_angle = float(start_angle)
-    vertex.end_angle = float(end_angle)
+    vertex.start_angle = float(start_angle_degrees)
+    vertex.end_angle = float(end_angle_degrees)
     return vertex
 
 
@@ -59,10 +59,10 @@ def _capsule_outline(
 ) -> list[PcbExtendedVertex]:
     cx, cy = center_mils
     radius_mils = math.hypot(half_width_mils, half_height_mils)
-    right_start_angle = math.atan2(-half_height_mils, half_width_mils)
-    right_end_angle = math.atan2(half_height_mils, half_width_mils)
-    left_start_angle = math.atan2(half_height_mils, -half_width_mils)
-    left_end_angle = math.atan2(-half_height_mils, -half_width_mils)
+    right_start_angle = math.degrees(math.atan2(-half_height_mils, half_width_mils))
+    right_end_angle = math.degrees(math.atan2(half_height_mils, half_width_mils))
+    left_start_angle = math.degrees(math.atan2(half_height_mils, -half_width_mils))
+    left_end_angle = math.degrees(math.atan2(-half_height_mils, -half_width_mils))
 
     return [
         _extended_vertex(cx - half_width_mils, cy - half_height_mils),
@@ -71,8 +71,8 @@ def _capsule_outline(
             cy - half_height_mils,
             center_mils=(cx, cy),
             radius_mils=radius_mils,
-            start_angle=right_start_angle,
-            end_angle=right_end_angle,
+            start_angle_degrees=right_start_angle,
+            end_angle_degrees=right_end_angle,
         ),
         _extended_vertex(cx + half_width_mils, cy + half_height_mils),
         _extended_vertex(
@@ -80,15 +80,19 @@ def _capsule_outline(
             cy + half_height_mils,
             center_mils=(cx, cy),
             radius_mils=radius_mils,
-            start_angle=left_start_angle,
-            end_angle=left_end_angle,
+            start_angle_degrees=left_start_angle,
+            end_angle_degrees=left_end_angle,
         ),
     ]
 
 
 def _outline_summary(shape_region: object) -> dict[str, object]:
     outline = list(getattr(shape_region, "outline", []) or [])
-    if len(outline) > 1 and outline[0].x == outline[-1].x and outline[0].y == outline[-1].y:
+    if (
+        len(outline) > 1
+        and outline[0].x == outline[-1].x
+        and outline[0].y == outline[-1].y
+    ):
         outline = outline[:-1]
     return {
         "layer": int(getattr(shape_region, "layer", 0)),
@@ -105,7 +109,9 @@ def _custom_pad_manifest(pcbdoc: AltiumPcbDoc) -> dict[str, object]:
     return {
         "designator": pad.designator,
         "has_custom_shape": custom_shape is not None,
-        "anchor_pad_index": None if custom_shape is None else custom_shape.anchor_pad_index,
+        "anchor_pad_index": None
+        if custom_shape is None
+        else custom_shape.anchor_pad_index,
         "hole_shape": int(pad.hole_shape),
         "hole_size_mils": round(float(pad.hole_size) / 10000.0, 6),
         "plated": bool(pad.is_plated),

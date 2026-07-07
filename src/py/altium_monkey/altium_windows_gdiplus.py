@@ -7,6 +7,13 @@ import logging
 log = logging.getLogger(__name__)
 
 
+def _ctypes_windll() -> object | None:
+    """
+    Return ctypes.windll on Windows hosts.
+    """
+    return getattr(ctypes, "windll", None)
+
+
 class RectF(Structure):
     """
     GDI+ RectF structure.
@@ -73,8 +80,11 @@ class GdiplusTextMeasurer:
         Initialize GDI+ resources.
         """
         try:
-            self._gdiplus = ctypes.windll.gdiplus
-            gdi32 = ctypes.windll.gdi32
+            windll = _ctypes_windll()
+            if windll is None:
+                return False
+            self._gdiplus = getattr(windll, "gdiplus")
+            gdi32 = getattr(windll, "gdi32")
 
             # GDI+ Startup
             self._token = ctypes.c_ulong()
@@ -204,7 +214,9 @@ class GdiplusTextMeasurer:
             if self._graphics:
                 self._gdiplus.GdipDeleteGraphics(self._graphics)
             if self._hdc:
-                ctypes.windll.gdi32.DeleteDC(self._hdc)
+                windll = _ctypes_windll()
+                if windll is not None:
+                    getattr(windll, "gdi32").DeleteDC(self._hdc)
             if self._token:
                 self._gdiplus.GdiplusShutdown(self._token)
         except Exception:

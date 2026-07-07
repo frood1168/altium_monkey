@@ -1,3 +1,80 @@
+# altium-monkey 2026.07.06 Release Notes
+
+Package version: `2026.7.6`
+
+`2026.07.06` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.6`.
+
+This release improves schematic font portability for SVG, gotIR, and
+downstream viewers, fixes Altium-style parameter expression substitution, and
+hardens schematic rendering against malformed parent-bound child records.
+
+## Schematic Font Resolution
+
+Schematic SVG and gotIR rendering now resolves common Altium/Windows font
+families more reliably on macOS. The resolver searches standard macOS system
+font locations, including Supplemental fonts, and also accepts explicit font
+directories through `ALTIUM_FONT_DIRS`.
+
+When a requested family is not available from the system, the package can use
+bundled open-source fallback fonts:
+
+- Arial and Microsoft Sans Serif-style families route to Arimo.
+- Times New Roman-style families route to Tinos.
+- Courier New and monospace families route to Cousine.
+
+The fallback bundle includes regular, bold, italic, and bold-italic faces where
+available. Heavy or styled family names such as Arial Black now route to the
+closest bundled Arimo style instead of falling through to hard default metrics.
+
+Schematic SVG output embeds bundled fallback font faces when they are used, so
+browser rendering stays aligned with the font metrics used during geometry
+generation.
+
+## Font Diagnostics In gotIR
+
+Schematic geometry IR now carries font-resolution diagnostics for substitutions
+and fallbacks. Exact system matches remain quiet, while bundled substitutions,
+generic fallbacks, and hard fallbacks are surfaced for downstream tooling.
+
+This lets CLI tools and viewers warn when a rendered sheet used Arimo, Tinos,
+or Cousine in place of the originally requested Altium font family.
+
+## Special-String And Formula Substitution
+
+PCB special-string substitution now handles quoted parameter expressions such
+as `'.PartNumberPCB'-'.Revision'.'.RevisionMinor'` without emitting Altium
+expression quote delimiters in resolved SVG or IPC text.
+
+Schematic text formula substitution now handles Altium-style expressions such
+as `=Revision+'.'+RevisionMinor` and
+`=title+' pcb  Rev ' + PcbRevision+'.'+PcbRevisionMinor`, resolving project and
+document parameters instead of emitting expression fragments.
+
+## Schematic Rendering Robustness
+
+Schematic SVG and gotIR rendering now skips malformed parent-bound harness or
+sheet entries whose owner index collides with a component. This matches Altium
+behavior for the public synthetic repro and avoids a `TypeError` from generic
+component geometry dispatch.
+
+## Public Example Fix
+
+The `pcbdoc_add_custom_pad_region_outline` public example now computes
+`PcbExtendedVertex.start_angle` and `PcbExtendedVertex.end_angle` in degrees,
+matching Altium Monkey's shape-based-region renderer and PcbDoc board-outline
+behavior.
+
+## Validation
+
+This release was checked with focused font-resolution, PCB special-string,
+schematic parameter-substitution, public repro, and private schematic
+dispatch tests. Release validation also covers package formatting/lint,
+release-note hygiene, public export, wheel build, clean install, and public
+test execution.
+
+---
+
 # altium-monkey 2026.07.01 Release Notes
 
 Package version: `2026.7.1`
