@@ -165,6 +165,36 @@ def _encode_rgba_png_pillow_style(
     return bytes(png)
 
 
+def _encode_rgba_png(
+    rgba_pixels: bytes,
+    width: int,
+    height: int,
+) -> bytes:
+    """
+    Encode RGBA pixels as PNG, preferring Pillow's native encoder.
+
+    Pillow's C encoder is much faster than the pure-Python filter loop.
+    Output bytes may differ from the pure-Python encoder, but decoded pixels
+    are identical; all parity/oracle test surfaces compare decoded pixels,
+    not IDAT bytes. The pure-Python encoder remains the fallback if Pillow
+    is unavailable.
+    """
+    if width <= 0 or height <= 0 or len(rgba_pixels) != width * height * 4:
+        raise ValueError("invalid RGBA PNG buffer dimensions")
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return _encode_rgba_png_pillow_style(rgba_pixels, width, height)
+
+    import io
+
+    image = Image.frombytes("RGBA", (width, height), rgba_pixels)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
 def _save_rgba_image_as_stable_png(img: _RgbaImageBuffer) -> bytes:
     if img.mode != "RGBA":
         img = img.convert("RGBA")
@@ -509,7 +539,7 @@ class AltiumSchImage(CornerMilsMixin, SchGraphicalObject):
             rgba_bmp = decode_bmp_rgba(source_data)
             if rgba_bmp is not None:
                 width, height, rgba_pixels = rgba_bmp
-                return _encode_rgba_png_pillow_style(rgba_pixels, width, height)
+                return _encode_rgba_png(rgba_pixels, width, height)
 
         # Convert using PIL
         import io

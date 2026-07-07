@@ -1,3 +1,58 @@
+# altium-monkey 2026.07.07 Release Notes
+
+Package version: `2026.7.7`
+
+`2026.07.07` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.7`.
+
+This release significantly speeds up schematic rendering on text-heavy
+sheets and fixes schematic SVG text placement for styled and missing font
+families to match Altium's native SVG export.
+
+## Schematic Rendering Performance
+
+Schematic `to_ir` and `to_svg` are significantly faster on text-heavy
+sheets:
+
+- Default-path font resolution results are now cached. The cache is
+  invalidated automatically when the resolver configuration or the font
+  environment changes.
+- Embedded BMP images are converted to PNG through Pillow's native encoder
+  instead of a pure-Python encoder. Decoded image pixels are unchanged;
+  embedded PNG payload bytes inside SVG output may differ from previous
+  releases.
+
+Measured on a 77-sheet Windows corpus, `to_ir` went from 612.9s to 46.8s
+and `to_svg` from 764.6s to 51.4s. A macOS project measured 19.9x faster
+`to_ir` and 22.2x faster `to_svg` against the published 2026.7.6 wheel.
+
+New module-level font resolver utilities:
+`altium_monkey.altium_font_resolver.clear_font_resolution_result_cache()`,
+`font_resolution_result_cache_stats()`, and `FontResolutionCacheStats`.
+
+## Schematic SVG Text Fidelity For Styled And Missing Fonts
+
+Styled text (bold/italic) in families that ship a single font file, such as
+Arial Black and Bahnschrift, now measures with that family's own metrics
+instead of a generic fallback. This removes a 2-7 px vertical text drift
+against Altium's native SVG export for styled labels.
+
+When a requested font family is not available at all, schematic SVG output
+now emits `Microsoft Sans Serif` as the font family, matching how Altium's
+own export resolves unknown families. Named substitutions such as Arial to
+bundled Arimo keep reporting the substituted family.
+
+## Validation
+
+This release was checked against Altium native SVG export references for
+141 schematic rendering cases, gotIR oracle positioning lanes, and
+before/after corpus timing sweeps on Windows plus a macOS review pass
+covering resolver behavior on macOS font directories. Release validation
+also covers package formatting/lint, release-note hygiene, public export,
+wheel build, clean install, and public test execution.
+
+---
+
 # altium-monkey 2026.07.06 Release Notes
 
 Package version: `2026.7.6`

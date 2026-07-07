@@ -135,6 +135,17 @@ class FontResolution:
         }
 
 
+@dataclass(frozen=True)
+class FontResolutionCacheStats:
+    """
+    Counters for the process-local default-path resolution result cache.
+    """
+
+    hits: int
+    misses: int
+    size: int
+
+
 def _resolve_test_fonts_dir() -> Path:
     package_fonts_dir = (
         Path(__file__).resolve().parents[3] / "tests" / "common" / "assets" / "fonts"
@@ -357,6 +368,47 @@ _TEST_FONT_FILE_MAP_NORMALIZED = {
 _FONT_RESOLVER_OVERRIDE: FontResolverConfig | None = None
 _FONT_RESOLUTION_DIAGNOSTICS: list[FontResolution] = []
 _FONT_RESOLUTION_DIAGNOSTIC_KEYS: set[tuple[object, ...]] = set()
+_FONT_RESOLUTION_RESULT_CACHE: dict[tuple[object, ...], FontResolution] = {}
+_FONT_RESOLUTION_RESULT_CACHE_HITS: int = 0
+_FONT_RESOLUTION_RESULT_CACHE_MISSES: int = 0
+
+# The default resolver configuration is rebuilt from os.environ on every
+# lookup, so cached default-path results are only valid while these
+# environment inputs are unchanged. They participate in the cache key.
+_RESOLVER_ENV_FINGERPRINT_VARS: tuple[str, ...] = (
+    "ALTIUM_FONT_MODE",
+    "ALTIUM_FONT_DIRS",
+    "ALTIUM_FONT_DISABLE_SYSTEM",
+    "LOCALAPPDATA",
+    "HOME",
+    "USERPROFILE",
+)
+
+
+def _default_resolver_env_fingerprint() -> tuple[str | None, ...]:
+    return tuple(os.environ.get(name) for name in _RESOLVER_ENV_FINGERPRINT_VARS)
+
+
+def clear_font_resolution_result_cache() -> None:
+    """
+    Clear the process-local default-path font resolution result cache.
+    """
+    global _FONT_RESOLUTION_RESULT_CACHE_HITS
+    global _FONT_RESOLUTION_RESULT_CACHE_MISSES
+    _FONT_RESOLUTION_RESULT_CACHE.clear()
+    _FONT_RESOLUTION_RESULT_CACHE_HITS = 0
+    _FONT_RESOLUTION_RESULT_CACHE_MISSES = 0
+
+
+def font_resolution_result_cache_stats() -> FontResolutionCacheStats:
+    """
+    Return hit/miss/size counters for the default-path result cache.
+    """
+    return FontResolutionCacheStats(
+        hits=_FONT_RESOLUTION_RESULT_CACHE_HITS,
+        misses=_FONT_RESOLUTION_RESULT_CACHE_MISSES,
+        size=len(_FONT_RESOLUTION_RESULT_CACHE),
+    )
 
 
 def _normalize_family_name(name: str) -> str:
@@ -784,6 +836,10 @@ def set_default_font_resolver_config(config: FontResolverConfig | None) -> None:
     """
     global _FONT_RESOLVER_OVERRIDE
     _FONT_RESOLVER_OVERRIDE = config
+    # reset_default_font_resolver_config() and configure_font_resolver() both
+    # funnel through here, so this is the single invalidation point for the
+    # default-path result cache.
+    clear_font_resolution_result_cache()
 
 
 def reset_default_font_resolver_config() -> None:
@@ -965,7 +1021,49 @@ def resolve_font(
 ) -> FontResolution:
     """
     Resolve a logical font request to an on-disk font file.
+
+    Default-path lookups (no explicit ``config``, ``environ``, or
+    ``system_name``) are served from a process-local result cache keyed by
+    the request and the resolver-relevant environment variables. The cache
+    is cleared by :func:`set_default_font_resolver_config` and
+    :func:`clear_font_resolution_result_cache`.
     """
+    global _FONT_RESOLUTION_RESULT_CACHE_HITS
+    global _FONT_RESOLUTION_RESULT_CACHE_MISSES
+    if config is not None or environ is not None or system_name is not None:
+        return _resolve_font_uncached(
+            request,
+            config,
+            environ=environ,
+            system_name=system_name,
+        )
+
+    cache_key: tuple[object, ...] = (
+        request.family,
+        request.bold,
+        request.italic,
+        _default_resolver_env_fingerprint(),
+    )
+    cached = _FONT_RESOLUTION_RESULT_CACHE.get(cache_key)
+    if cached is not None:
+        _FONT_RESOLUTION_RESULT_CACHE_HITS += 1
+        # Re-record so diagnostics behave exactly as the uncached path,
+        # including after clear_font_resolution_diagnostics().
+        return _record_font_resolution_diagnostic(cached)
+
+    _FONT_RESOLUTION_RESULT_CACHE_MISSES += 1
+    resolution = _resolve_font_uncached(request)
+    _FONT_RESOLUTION_RESULT_CACHE[cache_key] = resolution
+    return resolution
+
+
+def _resolve_font_uncached(
+    request: FontRequest,
+    config: FontResolverConfig | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+    system_name: str | None = None,
+) -> FontResolution:
     effective_config = get_effective_font_resolver_config(
         config,
         environ=environ,

@@ -366,23 +366,20 @@ def _measure_text_height_ttf(
     Measure text height using the resolved TrueType face.
     """
     try:
-        from .altium_ttf_metrics import get_font, get_font_path
+        from .altium_font_resolver import resolve_font_with_style
+        from .altium_ttf_metrics import get_font
 
-        variant_name = font_name
-        if bold and italic:
-            variant_name = f"{font_name} Bold Italic"
-        elif bold:
-            variant_name = f"{font_name} Bold"
-        elif italic:
-            variant_name = f"{font_name} Italic"
-
-        font_path = get_font_path(variant_name)
-        if not font_path:
-            font_path = get_font_path(font_name)
-        if not font_path:
+        # Resolve with explicit style flags so single-file families
+        # (e.g. Arial Black, Bahnschrift) keep their own metrics via the
+        # resolver's style fallback instead of generic-fallbacking through
+        # a guessed "<family> Bold/Italic" name. This keeps the text-box
+        # height equal to the FONT record size, which the SVG baseline
+        # formula (anchor - record_size + trunc(px_size)) depends on.
+        resolution = resolve_font_with_style(font_name, bold=bold, italic=italic)
+        if resolution.path is None:
             return None
 
-        font = get_font(font_path)
+        font = get_font(str(resolution.path))
 
         if use_altium_algorithm:
             factor = font.get_factor()

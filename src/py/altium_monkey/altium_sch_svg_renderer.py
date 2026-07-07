@@ -2586,18 +2586,28 @@ class SchSvgRenderContext:
         """
         Get the display font name, applying fallback if font is not available.
 
-        Per Altium's native implementation: when the requested font is not installed,
-        Altium catches the exception and falls back to GenericFontFamilies.SansSerif,
-        which maps to "Microsoft Sans Serif" on Windows.
+        Per Altium's native implementation: the GDI+ Font constructor silently
+        resolves a family that is not installed to "Microsoft Sans Serif", so
+        both the exported font-family attribute and the metrics come from that
+        fallback face. Mirror that here whenever the resolver could not find
+        the requested family (generic fallback or miss). Named substitutions
+        (metric-compatible replacements such as Arial -> Arimo on systems
+        without Arial) keep the substituted family.
 
         Args:
             font_name: Original font name from the file
 
         Returns:
-            font_name if available on system, or FONT_FALLBACK if not
+            The resolved family, or FONT_FALLBACK when the family is missing.
         """
+        from .altium_font_resolver import FontResolutionStatus
+
         resolution = resolve_font_with_style(font_name, bold=bold, italic=italic)
-        if resolution.path is not None and resolution.resolved_family is not None:
+        if (
+            resolution.path is not None
+            and resolution.resolved_family is not None
+            and resolution.status != FontResolutionStatus.GENERIC_FALLBACK
+        ):
             return resolution.resolved_family
         # Font not available - use fallback like Altium does
         return FONT_FALLBACK
