@@ -76,7 +76,6 @@ class AltiumSchArc(PrimaryRadiusMilsMixin, SchGraphicalObject):
         self._has_start_angle: bool = False
         self._has_end_angle: bool = False
         self._has_line_width: bool = False
-        self._radius_mils_explicit: bool = False
         # Store original string format to preserve formatting (e.g., '360.000')
         self._start_angle_str: str | None = None
         self._end_angle_str: str | None = None
@@ -109,7 +108,6 @@ class AltiumSchArc(PrimaryRadiusMilsMixin, SchGraphicalObject):
         radius_val, self._has_radius = s.read_int(record, Fields.RADIUS, default=0)
         self.radius = radius_val  # Descriptor handles type enforcement
         self.radius_frac = radius_frac_val
-        self._radius_mils_explicit = False
 
         # Parse line width
         line_width_val, self._has_line_width = s.read_int(
@@ -143,20 +141,19 @@ class AltiumSchArc(PrimaryRadiusMilsMixin, SchGraphicalObject):
         radius = cast(int, self.radius)
         radius_frac = cast(int, self.radius_frac)
 
-        wrote_radius = (radius != 0 or self._has_radius) and (
-            self._has_radius or radius != 10 or radius_frac != 0
-        )
+        # Native serialization omits only zero whole radii, so any nonzero
+        # whole (including the new-object default of 10) must be written or
+        # authored values such as 100.0 mils would reparse as 0.
+        wrote_radius = radius != 0 or self._has_radius
         if wrote_radius:
             s.write_int(record, Fields.RADIUS, radius, raw)
         else:
             s.remove_field(record, Fields.RADIUS)
 
-        wrote_radius_frac = (
-            self._radius_mils_explicit
-            and radius_frac != 0
-            and (radius != 0 or self._has_radius)
-        )
-        if wrote_radius_frac:
+        # Native serialization always writes the fractional radius part when
+        # it is nonzero, even with a zero/omitted whole Radius. Arcs follow
+        # the same coord whole/fraction write rule as ellipse radii.
+        if radius_frac != 0:
             s.write_int(record, Fields.RADIUS_FRAC, radius_frac, raw)
         else:
             s.remove_field(record, Fields.RADIUS_FRAC)

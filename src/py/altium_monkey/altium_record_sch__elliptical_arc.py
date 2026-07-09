@@ -35,7 +35,6 @@ class AltiumSchEllipticalArc(SecondaryRadiusMilsMixin, AltiumSchArc):
         self.secondary_radius_frac: int = 0
         self._has_secondary_radius: bool = False
         self._has_secondary_radius_base: bool = False
-        self._secondary_radius_mils_explicit: bool = False
 
     @property
     def record_type(self) -> SchRecordType:
@@ -66,7 +65,6 @@ class AltiumSchEllipticalArc(SecondaryRadiusMilsMixin, AltiumSchArc):
         self._has_secondary_radius = (
             self._has_secondary_radius_base or has_secondary_radius_frac
         )
-        self._secondary_radius_mils_explicit = False
 
     def serialize_to_record(self) -> dict[str, Any]:
         record = super().serialize_to_record()
@@ -76,13 +74,18 @@ class AltiumSchEllipticalArc(SecondaryRadiusMilsMixin, AltiumSchArc):
         s = AltiumSerializer(mode)
         raw = self._raw_record
 
-        if not self._radius_mils_explicit:
-            s.remove_field(record, Fields.RADIUS_FRAC)
-
-        if self._has_secondary_radius_base or self.secondary_radius != 10:
+        # Mirror the arc primary-radius guard: native serialization omits
+        # only zero whole radii, so any nonzero whole (including the
+        # new-object default of 10) must be written or authored values such
+        # as 100.0 mils would reparse as 0.
+        wrote_secondary = self.secondary_radius != 0 or self._has_secondary_radius_base
+        if wrote_secondary:
             s.write_int(record, Fields.SECONDARY_RADIUS, self.secondary_radius, raw)
+        else:
+            s.remove_field(record, Fields.SECONDARY_RADIUS)
 
-        if self._secondary_radius_mils_explicit and self.secondary_radius_frac:
+        # Nonzero fractional radii always serialize; see the arc record notes.
+        if self.secondary_radius_frac:
             s.write_int(
                 record,
                 Fields.SECONDARY_RADIUS_FRAC,

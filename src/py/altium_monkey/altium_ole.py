@@ -25,14 +25,14 @@ from typing import Any, BinaryIO
 # Constants
 # =============================================================================
 
-OLE_MAGIC = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
+OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 # Special sector values
 MAXREGSECT = 0xFFFFFFFA  # Maximum regular sector
-DIFSECT = 0xFFFFFFFC     # DIFAT sector
-FATSECT = 0xFFFFFFFD     # FAT sector
+DIFSECT = 0xFFFFFFFC  # DIFAT sector
+FATSECT = 0xFFFFFFFD  # FAT sector
 ENDOFCHAIN = 0xFFFFFFFE  # End of chain
-FREESECT = 0xFFFFFFFF    # Free sector
+FREESECT = 0xFFFFFFFF  # Free sector
 
 # Directory entry types
 STGTY_EMPTY = 0
@@ -55,13 +55,26 @@ ALTIUM_CLSID = "F11B58A9-94DD-4D1F-8408-D28E027CC9D8"
 # CLSID as bytes (little-endian format for OLE)
 # CLSID format: {DWORD-WORD-WORD-BYTE[8]}
 # Stored as: DWORD LE, WORD LE, WORD LE, 8 bytes
-ALTIUM_CLSID_BYTES = bytes([
-    0xA9, 0x58, 0x1B, 0xF1,  # F11B58A9 as LE DWORD
-    0xDD, 0x94,              # 94DD as LE WORD
-    0x1F, 0x4D,              # 4D1F as LE WORD
-    0x84, 0x08,              # 8408 (big endian - not swapped)
-    0xD2, 0x8E, 0x02, 0x7C, 0xC9, 0xD8  # D28E027CC9D8
-])
+ALTIUM_CLSID_BYTES = bytes(
+    [
+        0xA9,
+        0x58,
+        0x1B,
+        0xF1,  # F11B58A9 as LE DWORD
+        0xDD,
+        0x94,  # 94DD as LE WORD
+        0x1F,
+        0x4D,  # 4D1F as LE WORD
+        0x84,
+        0x08,  # 8408 (big endian - not swapped)
+        0xD2,
+        0x8E,
+        0x02,
+        0x7C,
+        0xC9,
+        0xD8,  # D28E027CC9D8
+    ]
+)
 
 OleFileSource = str | Path | bytes | BinaryIO
 
@@ -70,52 +83,55 @@ OleFileSource = str | Path | bytes | BinaryIO
 # CLSID Utilities
 # =============================================================================
 
+
 def clsid_to_bytes(clsid_str: str) -> bytes:
     """
     Convert a CLSID string to bytes in OLE format.
-    
+
     Args:
         clsid_str: CLSID like "F11B58A9-94DD-4D1F-8408-D28E027CC9D8"
-    
+
     Returns:
         16-byte CLSID in OLE format (mixed endianness)
     """
     # Remove dashes
-    clsid = clsid_str.replace('-', '')
+    clsid = clsid_str.replace("-", "")
 
     # Parse parts (OLE uses mixed endianness)
     # First 3 parts are little-endian, last 2 parts are big-endian
-    return bytes([
-        # DWORD (little-endian)
-        int(clsid[6:8], 16),
-        int(clsid[4:6], 16),
-        int(clsid[2:4], 16),
-        int(clsid[0:2], 16),
-        # WORD (little-endian)
-        int(clsid[10:12], 16),
-        int(clsid[8:10], 16),
-        # WORD (little-endian)
-        int(clsid[14:16], 16),
-        int(clsid[12:14], 16),
-        # 8 bytes (big-endian / as-is)
-        int(clsid[16:18], 16),
-        int(clsid[18:20], 16),
-        int(clsid[20:22], 16),
-        int(clsid[22:24], 16),
-        int(clsid[24:26], 16),
-        int(clsid[26:28], 16),
-        int(clsid[28:30], 16),
-        int(clsid[30:32], 16),
-    ])
+    return bytes(
+        [
+            # DWORD (little-endian)
+            int(clsid[6:8], 16),
+            int(clsid[4:6], 16),
+            int(clsid[2:4], 16),
+            int(clsid[0:2], 16),
+            # WORD (little-endian)
+            int(clsid[10:12], 16),
+            int(clsid[8:10], 16),
+            # WORD (little-endian)
+            int(clsid[14:16], 16),
+            int(clsid[12:14], 16),
+            # 8 bytes (big-endian / as-is)
+            int(clsid[16:18], 16),
+            int(clsid[18:20], 16),
+            int(clsid[20:22], 16),
+            int(clsid[22:24], 16),
+            int(clsid[24:26], 16),
+            int(clsid[26:28], 16),
+            int(clsid[28:30], 16),
+            int(clsid[30:32], 16),
+        ]
+    )
 
 
 def bytes_to_clsid(data: bytes) -> str:
     """
     Convert 16 bytes of CLSID data to string format.
-    
+
     Args:
         data: 16 bytes of CLSID in OLE format
-    
+
     Returns:
         CLSID string like "F11B58A9-94DD-4D1F-8408-D28E027CC9D8"
     """
@@ -135,29 +151,31 @@ def bytes_to_clsid(data: bytes) -> str:
 # Data Classes
 # =============================================================================
 
+
 @dataclass
 class OleDirEntry:
     """
     Parsed directory entry.
     """
-    sid: int                      # Entry index (sector ID)
-    name: str                     # Entry name (decoded)
-    name_raw: bytes               # Raw UTF-16LE name
-    entry_type: int               # 0=empty, 1=storage, 2=stream, 5=root
-    color: int                    # Red-black tree color
-    sid_left: int                 # Left sibling
-    sid_right: int                # Right sibling
-    sid_child: int                # First child (for storages)
-    clsid: bytes                  # Class ID (16 bytes)
+
+    sid: int  # Entry index (sector ID)
+    name: str  # Entry name (decoded)
+    name_raw: bytes  # Raw UTF-16LE name
+    entry_type: int  # 0=empty, 1=storage, 2=stream, 5=root
+    color: int  # Red-black tree color
+    sid_left: int  # Left sibling
+    sid_right: int  # Right sibling
+    sid_child: int  # First child (for storages)
+    clsid: bytes  # Class ID (16 bytes)
     user_flags: int
     create_time: int
     modify_time: int
-    start_sector: int             # First sector of stream
-    size: int                     # Stream size in bytes
+    start_sector: int  # First sector of stream
+    size: int  # Stream size in bytes
 
     # Computed
-    is_mini: bool = False         # True if stored in mini stream
-    path: str = ""                # Full path like "Symbol/Data"
+    is_mini: bool = False  # True if stored in mini stream
+    path: str = ""  # Full path like "Symbol/Data"
 
     @property
     def is_stream(self) -> bool:
@@ -176,16 +194,17 @@ class OleDirEntry:
 # AltiumOleFile Class
 # =============================================================================
 
+
 class AltiumOleFile:
     """
     Unified OLE reader/writer for Altium files.
-    
+
     Usage (read):
         with AltiumOleFile("component.SchLib") as ole:
             for path in ole.listdir():
                 print(path)
             data = ole.openstream("FileHeader")
-    
+
     Usage (write/round-trip):
         with AltiumOleFile("input.SchLib") as ole:
             data = ole.openstream("Symbol/Data")
@@ -197,7 +216,7 @@ class AltiumOleFile:
     def __init__(self, filename: OleFileSource | None = None) -> None:
         """
         Initialize OLE file.
-        
+
         Args:
             filename: Path to file, bytes content, or file-like object
         """
@@ -213,6 +232,11 @@ class AltiumOleFile:
         self._minifat: list[int] = []
         self._directory: list[OleDirEntry] = []
         self._root: OleDirEntry | None = None
+
+        # Cached root mini stream bytes. Built lazily by _read_mini_sector and
+        # invalidated wherever the parse state or the root chain bytes can
+        # change: open(), close(), and _write_mini_stream_inplace().
+        self._mini_stream_cache: bytes | None = None
 
         # Directory index by path
         self._path_index: dict[str, int] = {}
@@ -232,23 +256,26 @@ class AltiumOleFile:
         if filename is not None:
             self.open(filename)
 
-    def open(self, filename: OleFileSource) -> 'AltiumOleFile':
+    def open(self, filename: OleFileSource) -> "AltiumOleFile":
         """
         Open and parse an OLE file.
-        
+
         Args:
             filename: Path, bytes, or file-like object
-        
+
         Returns:
             self for chaining
         """
+        # A fresh parse invalidates any cached mini stream
+        self._mini_stream_cache = None
+
         # Load data
         if isinstance(filename, (str, Path)):
             self._filepath = Path(filename)
             self._data = bytearray(self._filepath.read_bytes())
         elif isinstance(filename, bytes):
             self._data = bytearray(filename)
-        elif hasattr(filename, 'read'):
+        elif hasattr(filename, "read"):
             self._data = bytearray(filename.read())
         else:
             raise ValueError(f"Unsupported filename type: {type(filename)}")
@@ -293,11 +320,11 @@ class AltiumOleFile:
         # Offset 0x1E: major version (2 bytes) - 3 or 4
         # Offset 0x1E: byte order (2 bytes) - 0xFFFE = little-endian
         # Offset 0x1E: sector shift (2 bytes) - 9 = 512, 12 = 4096
-        struct.unpack_from('<H', header, 0x18)[0]
-        major_ver = struct.unpack_from('<H', header, 0x1A)[0]
-        struct.unpack_from('<H', header, 0x1C)[0]
-        sector_shift = struct.unpack_from('<H', header, 0x1E)[0]
-        mini_sector_shift = struct.unpack_from('<H', header, 0x20)[0]
+        struct.unpack_from("<H", header, 0x18)[0]
+        major_ver = struct.unpack_from("<H", header, 0x1A)[0]
+        struct.unpack_from("<H", header, 0x1C)[0]
+        sector_shift = struct.unpack_from("<H", header, 0x1E)[0]
+        mini_sector_shift = struct.unpack_from("<H", header, 0x20)[0]
 
         self._dll_version = major_ver
         self._sector_size = 1 << sector_shift
@@ -313,18 +340,18 @@ class AltiumOleFile:
         # 0x48: number of DIFAT sectors (4 bytes)
         # 0x4C: DIFAT array (109 entries * 4 bytes = 436 bytes)
 
-        struct.unpack_from('<I', header, 0x2C)[0]
-        self._first_dir_sector = struct.unpack_from('<I', header, 0x30)[0]
-        self._mini_cutoff = struct.unpack_from('<I', header, 0x38)[0]
-        self._first_minifat_sector = struct.unpack_from('<I', header, 0x3C)[0]
-        self._num_minifat_sectors = struct.unpack_from('<I', header, 0x40)[0]
-        self._first_difat_sector = struct.unpack_from('<I', header, 0x44)[0]
-        self._num_difat_sectors = struct.unpack_from('<I', header, 0x48)[0]
+        struct.unpack_from("<I", header, 0x2C)[0]
+        self._first_dir_sector = struct.unpack_from("<I", header, 0x30)[0]
+        self._mini_cutoff = struct.unpack_from("<I", header, 0x38)[0]
+        self._first_minifat_sector = struct.unpack_from("<I", header, 0x3C)[0]
+        self._num_minifat_sectors = struct.unpack_from("<I", header, 0x40)[0]
+        self._first_difat_sector = struct.unpack_from("<I", header, 0x44)[0]
+        self._num_difat_sectors = struct.unpack_from("<I", header, 0x48)[0]
 
         # Read DIFAT from header (109 entries)
         self._header_difat = []
         for i in range(109):
-            sector = struct.unpack_from('<I', header, 0x4C + i * 4)[0]
+            sector = struct.unpack_from("<I", header, 0x4C + i * 4)[0]
             self._header_difat.append(sector)
 
     def _parse_fat(self) -> None:
@@ -353,19 +380,19 @@ class AltiumOleFile:
                 # Last 4 bytes point to next DIFAT sector
                 num_entries = (self._sector_size // 4) - 1
                 for i in range(num_entries):
-                    sector = struct.unpack_from('<I', difat_data, i * 4)[0]
+                    sector = struct.unpack_from("<I", difat_data, i * 4)[0]
                     if sector != FREESECT and sector < MAXREGSECT:
                         fat_sectors.append(sector)
 
                 # Next DIFAT sector
-                difat_sector = struct.unpack_from('<I', difat_data, num_entries * 4)[0]
+                difat_sector = struct.unpack_from("<I", difat_data, num_entries * 4)[0]
 
         # Read FAT from FAT sectors
         for fat_sector in fat_sectors:
             fat_data = self._read_sector(fat_sector)
             # Each sector contains sector_size/4 FAT entries
             for i in range(self._sector_size // 4):
-                entry = struct.unpack_from('<I', fat_data, i * 4)[0]
+                entry = struct.unpack_from("<I", fat_data, i * 4)[0]
                 self._fat.append(entry)
 
     def _parse_minifat(self) -> None:
@@ -383,7 +410,7 @@ class AltiumOleFile:
         while sector != ENDOFCHAIN and sector < MAXREGSECT and count < 10000:
             minifat_data = self._read_sector(sector)
             for i in range(self._sector_size // 4):
-                entry = struct.unpack_from('<I', minifat_data, i * 4)[0]
+                entry = struct.unpack_from("<I", minifat_data, i * 4)[0]
                 self._minifat.append(entry)
 
             # Next sector
@@ -406,7 +433,7 @@ class AltiumOleFile:
         num_entries = len(dir_data) // DIR_ENTRY_SIZE
         for sid in range(num_entries):
             offset = sid * DIR_ENTRY_SIZE
-            entry_data = dir_data[offset:offset + DIR_ENTRY_SIZE]
+            entry_data = dir_data[offset : offset + DIR_ENTRY_SIZE]
 
             if len(entry_data) < DIR_ENTRY_SIZE:
                 break
@@ -438,23 +465,23 @@ class AltiumOleFile:
         # 0x7C: size high (4 bytes)
 
         name_raw = data[0x00:0x40]
-        name_len = struct.unpack_from('<H', data, 0x40)[0]
+        name_len = struct.unpack_from("<H", data, 0x40)[0]
         entry_type = data[0x42]
         color = data[0x43]
-        sid_left = struct.unpack_from('<I', data, 0x44)[0]
-        sid_right = struct.unpack_from('<I', data, 0x48)[0]
-        sid_child = struct.unpack_from('<I', data, 0x4C)[0]
+        sid_left = struct.unpack_from("<I", data, 0x44)[0]
+        sid_right = struct.unpack_from("<I", data, 0x48)[0]
+        sid_child = struct.unpack_from("<I", data, 0x4C)[0]
         clsid = data[0x50:0x60]
-        user_flags = struct.unpack_from('<I', data, 0x60)[0]
-        create_time = struct.unpack_from('<Q', data, 0x64)[0]
-        modify_time = struct.unpack_from('<Q', data, 0x6C)[0]
-        start_sector = struct.unpack_from('<I', data, 0x74)[0]
-        size_low = struct.unpack_from('<I', data, 0x78)[0]
-        size_high = struct.unpack_from('<I', data, 0x7C)[0]
+        user_flags = struct.unpack_from("<I", data, 0x60)[0]
+        create_time = struct.unpack_from("<Q", data, 0x64)[0]
+        modify_time = struct.unpack_from("<Q", data, 0x6C)[0]
+        start_sector = struct.unpack_from("<I", data, 0x74)[0]
+        size_low = struct.unpack_from("<I", data, 0x78)[0]
+        size_high = struct.unpack_from("<I", data, 0x7C)[0]
 
         # Decode name (UTF-16LE, excluding null terminator)
         if name_len > 2:
-            name = name_raw[:name_len - 2].decode('utf-16-le', errors='replace')
+            name = name_raw[: name_len - 2].decode("utf-16-le", errors="replace")
         else:
             name = ""
 
@@ -465,7 +492,7 @@ class AltiumOleFile:
             size = size_low
 
         # Determine if mini stream
-        is_mini = (entry_type == STGTY_STREAM and size < self._mini_cutoff)
+        is_mini = entry_type == STGTY_STREAM and size < self._mini_cutoff
 
         return OleDirEntry(
             sid=sid,
@@ -559,20 +586,21 @@ class AltiumOleFile:
         Read a single sector.
         """
         if sector >= MAXREGSECT:
-            return b'\x00' * self._sector_size
+            return b"\x00" * self._sector_size
 
         # Sector 0 starts after the 512-byte header
         data = self._require_data()
         offset = HEADER_SIZE + sector * self._sector_size
-        return bytes(data[offset:offset + self._sector_size])
+        return bytes(data[offset : offset + self._sector_size])
 
-    def _read_stream_by_sector(self, start_sector: int, size: int | None = None,
-                               use_fat: bool = True) -> bytes:
+    def _read_stream_by_sector(
+        self, start_sector: int, size: int | None = None, use_fat: bool = True
+    ) -> bytes:
         """
         Read stream data following FAT or MiniFAT chain.
         """
         if start_sector == ENDOFCHAIN or start_sector >= MAXREGSECT:
-            return b''
+            return b""
 
         data = []
         sector = start_sector
@@ -593,7 +621,7 @@ class AltiumOleFile:
                 break
             count += 1
 
-        result = b''.join(data)
+        result = b"".join(data)
         if size is not None:
             result = result[:size]
         return result
@@ -603,19 +631,22 @@ class AltiumOleFile:
         Read a mini sector from the mini stream.
         """
         if self._root is None:
-            return b'\x00' * self._mini_sector_size
+            return b"\x00" * self._mini_sector_size
 
-        # Mini stream is stored as root entry's data
-        # First, get the root's sector chain
-        mini_stream = self._read_stream_by_sector(
-            self._root.start_sector,
-            self._root.size,
-            use_fat=True
-        )
+        # The mini stream is stored as the root entry's data. Build it once and
+        # cache it: rebuilding it per call makes reading M mini sectors O(M**2),
+        # which dominates load time for large libraries where most streams sit
+        # below the mini cutoff.
+        mini_stream = self._mini_stream_cache
+        if mini_stream is None:
+            mini_stream = self._read_stream_by_sector(
+                self._root.start_sector, self._root.size, use_fat=True
+            )
+            self._mini_stream_cache = mini_stream
 
         # Read mini sector from mini stream
         offset = mini_sector * self._mini_sector_size
-        return mini_stream[offset:offset + self._mini_sector_size]
+        return mini_stream[offset : offset + self._mini_sector_size]
 
     def _get_sector_chain(self, start_sector: int, use_fat: bool = True) -> list[int]:
         """
@@ -643,11 +674,11 @@ class AltiumOleFile:
     def listdir(self, streams: bool = True, storages: bool = False) -> list[list[str]]:
         """
         List directory entries.
-        
+
         Args:
             streams: Include streams
             storages: Include storages
-        
+
         Returns:
             List of paths as lists of path components
         """
@@ -666,7 +697,7 @@ class AltiumOleFile:
                 include = True
 
             if include and entry.path:
-                result.append(entry.path.split('/'))
+                result.append(entry.path.split("/"))
 
         return result
 
@@ -675,13 +706,13 @@ class AltiumOleFile:
         Check if a path exists.
         """
         if isinstance(path, list):
-            path = '/'.join(path)
+            path = "/".join(path)
         return path in self._path_index
 
     def get_type(self, path: str | list[str]) -> int:
         """
         Get entry type (for olefile API compatibility).
-        
+
         Returns:
             0: Empty/not found
             1: Storage
@@ -689,7 +720,7 @@ class AltiumOleFile:
             5: Root storage
         """
         if isinstance(path, list):
-            path = '/'.join(path)
+            path = "/".join(path)
 
         if path not in self._path_index:
             return 0  # STGTY_EMPTY
@@ -702,7 +733,7 @@ class AltiumOleFile:
         Get stream size.
         """
         if isinstance(path, list):
-            path = '/'.join(path)
+            path = "/".join(path)
 
         if path not in self._path_index:
             raise ValueError(f"Path not found: {path}")
@@ -713,13 +744,13 @@ class AltiumOleFile:
     def openstream(self, path: str | list[str]) -> bytes:
         """
         Read stream data.
-        
+
         Args:
             path: Stream path as string or list
-        
+
         Returns:
             Stream data as bytes
-        
+
         Note:
             This method is lenient about entry types - it will attempt to read
             data from any entry that has a valid start sector and size, not just
@@ -727,7 +758,7 @@ class AltiumOleFile:
             handles Altium's non-standard OLE usage.
         """
         if isinstance(path, list):
-            path = '/'.join(path)
+            path = "/".join(path)
 
         if path not in self._path_index:
             raise ValueError(f"Stream not found: {path}")
@@ -740,21 +771,17 @@ class AltiumOleFile:
             raise ValueError(f"Not a stream (storage with no data): {path}")
 
         if entry.size == 0:
-            return b''
+            return b""
 
         if entry.is_mini:
             # Read from mini stream
             return self._read_stream_by_sector(
-                entry.start_sector,
-                entry.size,
-                use_fat=False
+                entry.start_sector, entry.size, use_fat=False
             )
         else:
             # Read from regular sectors
             return self._read_stream_by_sector(
-                entry.start_sector,
-                entry.size,
-                use_fat=True
+                entry.start_sector, entry.size, use_fat=True
             )
 
     @property
@@ -785,16 +812,16 @@ class AltiumOleFile:
     def modify_stream(self, path: str | list[str], data: bytes) -> None:
         """
         Mark a stream for modification.
-        
+
         Args:
             path: Stream path
             data: New stream data (must be same size as original)
-        
+
         Raises:
             ValueError: If stream not found or size mismatch
         """
         if isinstance(path, list):
-            path = '/'.join(path)
+            path = "/".join(path)
 
         if path not in self._path_index:
             raise ValueError(f"Stream not found: {path}")
@@ -812,7 +839,7 @@ class AltiumOleFile:
     def write(self, filepath: str | Path) -> None:
         """
         Write OLE file with modifications.
-        
+
         Args:
             filepath: Output file path
         """
@@ -850,7 +877,9 @@ class AltiumOleFile:
             if chunk_size <= 0:
                 break
 
-            file_data[file_offset:file_offset + chunk_size] = data[offset:offset + chunk_size]
+            file_data[file_offset : file_offset + chunk_size] = data[
+                offset : offset + chunk_size
+            ]
             offset += chunk_size
 
     def _write_mini_stream_inplace(self, entry: OleDirEntry, data: bytes) -> None:
@@ -859,6 +888,9 @@ class AltiumOleFile:
         """
         if self._root is None:
             return
+
+        # The root chain bytes are about to change; drop the read cache
+        self._mini_stream_cache = None
 
         # Get mini stream chain
         mini_chain = self._get_sector_chain(entry.start_sector, use_fat=False)
@@ -878,13 +910,17 @@ class AltiumOleFile:
                 break
 
             containing_sector = root_chain[containing_idx]
-            file_offset = HEADER_SIZE + containing_sector * self._sector_size + offset_in_sector
+            file_offset = (
+                HEADER_SIZE + containing_sector * self._sector_size + offset_in_sector
+            )
 
             chunk_size = min(self._mini_sector_size, len(data) - offset)
             if chunk_size <= 0:
                 break
 
-            file_data[file_offset:file_offset + chunk_size] = data[offset:offset + chunk_size]
+            file_data[file_offset : file_offset + chunk_size] = data[
+                offset : offset + chunk_size
+            ]
             offset += chunk_size
 
     # =========================================================================
@@ -901,8 +937,9 @@ class AltiumOleFile:
         self._directory = []
         self._path_index = {}
         self._modifications = {}
+        self._mini_stream_cache = None
 
-    def __enter__(self) -> 'AltiumOleFile':
+    def __enter__(self) -> "AltiumOleFile":
         return self
 
     def __exit__(
@@ -918,12 +955,13 @@ class AltiumOleFile:
 # Utility Functions
 # =============================================================================
 
+
 def is_ole_file(filename: str | Path | bytes) -> bool:
     """
     Check if a file is an OLE file.
     """
     if isinstance(filename, (str, Path)):
-        with open(filename, 'rb') as f:
+        with open(filename, "rb") as f:
             header = f.read(8)
     else:
         header = filename[:8]
@@ -935,16 +973,18 @@ def is_ole_file(filename: str | Path | bytes) -> bool:
 # AltiumOleWriter - Creates new OLE files
 # =============================================================================
 
+
 @dataclass
 class _WriterEntry:
     """
     Internal directory entry for writer.
     """
+
     name: str
     path: str
     entry_type: int  # STGTY_STREAM, STGTY_STORAGE, STGTY_ROOT
-    data: bytes = b''
-    clsid: bytes = field(default_factory=lambda: b'\x00' * 16)
+    data: bytes = b""
+    clsid: bytes = field(default_factory=lambda: b"\x00" * 16)
 
     # Tree links (set during build)
     sid: int = -1
@@ -962,7 +1002,7 @@ class _WriterEntry:
 class AltiumOleWriter:
     """
     Creates new OLE files for Altium formats.
-    
+
     Features:
     - Version 3 format (512-byte sectors)
     - Altium CLSID by default
@@ -973,7 +1013,7 @@ class AltiumOleWriter:
     def __init__(self, clsid: bytes | None = None) -> None:
         """
         Initialize writer.
-        
+
         Args:
             clsid: Root entry CLSID (defaults to Altium CLSID)
         """
@@ -989,72 +1029,78 @@ class AltiumOleWriter:
     def add_stream(self, path: str, data: bytes) -> None:
         """
         Add a stream to the file.
-        
+
         Args:
             path: Stream path (e.g., "FileHeader" or "Symbol/Data")
             data: Stream data
         """
         # Normalize path
-        path = path.replace('\\', '/')
+        path = path.replace("\\", "/")
 
         # Extract and create storage paths
-        parts = path.split('/')
+        parts = path.split("/")
         for i in range(len(parts) - 1):
-            storage_path = '/'.join(parts[:i + 1])
+            storage_path = "/".join(parts[: i + 1])
             self._storages.add(storage_path)
 
         self._streams[path] = data
 
-    def addEntry(self, path: str, data: bytes | None = None, storage: bool = False) -> None:
+    def addEntry(
+        self, path: str, data: bytes | None = None, storage: bool = False
+    ) -> None:
         """
         Compatibility method matching OleWriter API.
-        
+
         Args:
             path: Entry path
             data: Stream data (ignored for storages)
             storage: If True, creates a storage instead of stream
         """
         if storage:
-            self._storages.add(path.replace('\\', '/'))
+            self._storages.add(path.replace("\\", "/"))
         else:
-            self.add_stream(path, data or b'')
+            self.add_stream(path, data or b"")
 
     def editEntry(self, path: str | list[str], data: bytes | None = None) -> None:
         """
         Edit an existing stream entry (for compatibility with OleWriter API).
-        
+
         Args:
             path: Entry path (can be string or list)
             data: New stream data
         """
         # Normalize path
         if isinstance(path, list):
-            path = '/'.join(path)
-        path = path.replace('\\', '/')
+            path = "/".join(path)
+        path = path.replace("\\", "/")
 
         if path in self._streams:
             if data is not None:
                 self._streams[path] = data
         else:
             # If doesn't exist yet, add it
-            self.add_stream(path, data or b'')
+            self.add_stream(path, data or b"")
 
     def fromOleFile(self, ole: Any) -> None:
         """
         Copy all streams and storages from an existing OLE file.
-        
+
         Args:
             ole: AltiumOleFile or olefile.OleFileIO instance (already open)
         """
         # Copy CLSID from root entry
-        if hasattr(ole, 'root') and ole.root:
-            clsid = getattr(ole.root, 'clsid', None)
+        if hasattr(ole, "root") and ole.root:
+            clsid = getattr(ole.root, "clsid", None)
             if clsid:
-                self._clsid = clsid_to_bytes(clsid) if isinstance(clsid, str) else (clsid or self._clsid)
+                self._clsid = (
+                    clsid_to_bytes(clsid)
+                    if isinstance(clsid, str)
+                    else (clsid or self._clsid)
+                )
 
         # List all entries
         for path in ole.listdir(streams=True, storages=True):
-            path_str = '/'.join(path)
+            path_str = "/".join(path)
 
             # Get entry info
             try:
@@ -1095,7 +1141,7 @@ class AltiumOleWriter:
     def write(self, filepath: str | Path) -> None:
         """
         Write the OLE file to disk.
-        
+
         Args:
             filepath: Output file path
         """
@@ -1131,28 +1177,32 @@ class AltiumOleWriter:
         # Collect all storages (including implicit ones)
         all_storages = set(self._storages)
         for path in self._streams:
-            parts = path.split('/')
+            parts = path.split("/")
             for i in range(len(parts) - 1):
-                all_storages.add('/'.join(parts[:i + 1]))
+                all_storages.add("/".join(parts[: i + 1]))
 
         # Add storages
         for path in sorted(all_storages):
-            name = path.split('/')[-1]
-            entries.append(_WriterEntry(
-                name=name,
-                path=path,
-                entry_type=STGTY_STORAGE,
-            ))
+            name = path.split("/")[-1]
+            entries.append(
+                _WriterEntry(
+                    name=name,
+                    path=path,
+                    entry_type=STGTY_STORAGE,
+                )
+            )
 
         # Add streams
         for path, data in sorted(self._streams.items()):
-            name = path.split('/')[-1]
-            entries.append(_WriterEntry(
-                name=name,
-                path=path,
-                entry_type=STGTY_STREAM,
-                data=data,
-            ))
+            name = path.split("/")[-1]
+            entries.append(
+                _WriterEntry(
+                    name=name,
+                    path=path,
+                    entry_type=STGTY_STREAM,
+                    data=data,
+                )
+            )
 
         # Assign SIDs
         for i, entry in enumerate(entries):
@@ -1175,8 +1225,8 @@ class AltiumOleWriter:
                 continue
 
             # Get parent path
-            if '/' in entry.path:
-                parent_path = '/'.join(entry.path.split('/')[:-1])
+            if "/" in entry.path:
+                parent_path = "/".join(entry.path.split("/")[:-1])
             else:
                 parent_path = ""  # Root's children
 
@@ -1192,7 +1242,9 @@ class AltiumOleWriter:
             # Find parent entry
             parent = None
             for entry in entries:
-                if entry.path == parent_path or (parent_path == "" and entry.entry_type == STGTY_ROOT):
+                if entry.path == parent_path or (
+                    parent_path == "" and entry.entry_type == STGTY_ROOT
+                ):
                     parent = entry
                     break
 
@@ -1207,8 +1259,9 @@ class AltiumOleWriter:
             if root_child:
                 parent.child_sid = root_child.sid
 
-    def _build_balanced_tree(self, children: list[_WriterEntry],
-                             lo: int, hi: int) -> _WriterEntry | None:
+    def _build_balanced_tree(
+        self, children: list[_WriterEntry], lo: int, hi: int
+    ) -> _WriterEntry | None:
         """
         Build balanced binary tree recursively.
         """
@@ -1235,25 +1288,25 @@ class AltiumOleWriter:
         Calculate sector layout for the file.
         """
         layout = {
-            'dir_sectors': 0,
-            'fat_sectors': 0,
-            'difat_sectors': 0,
-            'minifat_sectors': 0,
-            'mini_stream_sectors': 0,
-            'large_entries': [],
-            'mini_entries': [],
+            "dir_sectors": 0,
+            "fat_sectors": 0,
+            "difat_sectors": 0,
+            "minifat_sectors": 0,
+            "mini_stream_sectors": 0,
+            "large_entries": [],
+            "mini_entries": [],
         }
 
         # Classify entries
         for entry in entries:
             if entry.entry_type == STGTY_STREAM:
                 if entry.is_mini and len(entry.data) > 0:
-                    layout['mini_entries'].append(entry)
+                    layout["mini_entries"].append(entry)
                 elif len(entry.data) > 0:
-                    layout['large_entries'].append(entry)
+                    layout["large_entries"].append(entry)
 
         # Calculate directory sectors
-        layout['dir_sectors'] = self._ceil_div(len(entries), 4)  # 4 entries per sector
+        layout["dir_sectors"] = self._ceil_div(len(entries), 4)  # 4 entries per sector
 
         # Calculate mini stream sectors
         #
@@ -1276,28 +1329,29 @@ class AltiumOleWriter:
         # CORRECT: Sum the mini sectors needed for each entry individually:
         mini_sectors_needed = sum(
             self._ceil_div(len(e.data), self._mini_sector_size)
-            for e in layout['mini_entries']
+            for e in layout["mini_entries"]
         )
-        layout['mini_stream_sectors'] = self._ceil_div(
-            mini_sectors_needed * self._mini_sector_size,
-            self._sector_size
+        layout["mini_stream_sectors"] = self._ceil_div(
+            mini_sectors_needed * self._mini_sector_size, self._sector_size
         )
 
         # Calculate mini FAT sectors
-        layout['minifat_sectors'] = self._ceil_div(mini_sectors_needed, 128)  # 128 entries per sector
+        layout["minifat_sectors"] = self._ceil_div(
+            mini_sectors_needed, 128
+        )  # 128 entries per sector
 
         # Calculate large stream sectors
         large_sectors = 0
-        for entry in layout['large_entries']:
+        for entry in layout["large_entries"]:
             large_sectors += self._ceil_div(len(entry.data), self._sector_size)
-        layout['large_stream_sectors'] = large_sectors
+        layout["large_stream_sectors"] = large_sectors
 
         # Total non-FAT sectors excluding DIFAT (which depends on FAT count).
         nonfat_base = (
-            layout['dir_sectors'] +
-            layout['minifat_sectors'] +
-            layout['mini_stream_sectors'] +
-            large_sectors
+            layout["dir_sectors"]
+            + layout["minifat_sectors"]
+            + layout["mini_stream_sectors"]
+            + large_sectors
         )
 
         # FAT/DIFAT sizing is coupled:
@@ -1314,8 +1368,8 @@ class AltiumOleWriter:
         else:  # pragma: no cover - defensive guard
             raise RuntimeError("Failed to converge FAT/DIFAT sector sizing")
 
-        layout['fat_sectors'] = fat_sectors
-        layout['difat_sectors'] = self._ceil_div(max(0, fat_sectors - 109), 127)
+        layout["fat_sectors"] = fat_sectors
+        layout["difat_sectors"] = self._ceil_div(max(0, fat_sectors - 109), 127)
 
         return layout
 
@@ -1333,11 +1387,11 @@ class AltiumOleWriter:
         """
         # Calculate sector positions
         fat_start = 0
-        difat_start = fat_start + layout['fat_sectors']
-        dir_start = difat_start + layout['difat_sectors']
-        minifat_start = dir_start + layout['dir_sectors']
-        ministream_start = minifat_start + layout['minifat_sectors']
-        large_start = ministream_start + layout['mini_stream_sectors']
+        difat_start = fat_start + layout["fat_sectors"]
+        dir_start = difat_start + layout["difat_sectors"]
+        minifat_start = dir_start + layout["dir_sectors"]
+        ministream_start = minifat_start + layout["minifat_sectors"]
+        large_start = ministream_start + layout["mini_stream_sectors"]
 
         # Assign start sectors to entries
         self._assign_sectors(entries, layout, ministream_start, large_start)
@@ -1349,8 +1403,17 @@ class AltiumOleWriter:
         data.extend(self._build_header(layout, dir_start, minifat_start, difat_start))
 
         # 2. FAT sectors
-        data.extend(self._build_fat(entries, layout, dir_start, minifat_start,
-                                    ministream_start, large_start, difat_start))
+        data.extend(
+            self._build_fat(
+                entries,
+                layout,
+                dir_start,
+                minifat_start,
+                ministream_start,
+                large_start,
+                difat_start,
+            )
+        )
 
         # 3. DIFAT sectors (only when FAT > 109 sectors)
         data.extend(self._build_difat(layout, difat_start))
@@ -1369,31 +1432,37 @@ class AltiumOleWriter:
 
         return bytes(data)
 
-    def _assign_sectors(self, entries: list[_WriterEntry], layout: dict,
-                       ministream_start: int, large_start: int) -> None:
+    def _assign_sectors(
+        self,
+        entries: list[_WriterEntry],
+        layout: dict,
+        ministream_start: int,
+        large_start: int,
+    ) -> None:
         """
         Assign start sectors to stream entries.
         """
         # Mini stream entries - start sector is mini sector index
         mini_sector = 0
-        for entry in layout['mini_entries']:
+        for entry in layout["mini_entries"]:
             entry.start_sector = mini_sector
             mini_sector += self._ceil_div(len(entry.data), self._mini_sector_size)
 
         # Large stream entries
         current_sector = large_start
-        for entry in layout['large_entries']:
+        for entry in layout["large_entries"]:
             entry.start_sector = current_sector
             current_sector += self._ceil_div(len(entry.data), self._sector_size)
 
         # Root entry points to mini stream
-        if layout['mini_stream_sectors'] > 0:
+        if layout["mini_stream_sectors"] > 0:
             entries[0].start_sector = ministream_start
         else:
             entries[0].start_sector = ENDOFCHAIN
 
-    def _build_header(self, layout: dict, dir_start: int, minifat_start: int,
-                      difat_start: int) -> bytes:
+    def _build_header(
+        self, layout: dict, dir_start: int, minifat_start: int, difat_start: int
+    ) -> bytes:
         """
         Build 512-byte OLE header.
         """
@@ -1405,109 +1474,115 @@ class AltiumOleWriter:
         # CLSID (16 bytes at offset 8) - leave as zeros
 
         # Minor version (offset 0x18)
-        struct.pack_into('<H', header, 0x18, 0x003E)
+        struct.pack_into("<H", header, 0x18, 0x003E)
 
         # Major version (offset 0x1A) - version 3
-        struct.pack_into('<H', header, 0x1A, 0x0003)
+        struct.pack_into("<H", header, 0x1A, 0x0003)
 
         # Byte order (offset 0x1C) - little endian
-        struct.pack_into('<H', header, 0x1C, 0xFFFE)
+        struct.pack_into("<H", header, 0x1C, 0xFFFE)
 
         # Sector shift (offset 0x1E) - 9 = 512 bytes
-        struct.pack_into('<H', header, 0x1E, 0x0009)
+        struct.pack_into("<H", header, 0x1E, 0x0009)
 
         # Mini sector shift (offset 0x20) - 6 = 64 bytes
-        struct.pack_into('<H', header, 0x20, 0x0006)
+        struct.pack_into("<H", header, 0x20, 0x0006)
 
         # Reserved (6 bytes at 0x22)
 
         # Number of directory sectors (offset 0x28) - must be 0 for v3
-        struct.pack_into('<I', header, 0x28, 0)
+        struct.pack_into("<I", header, 0x28, 0)
 
         # Number of FAT sectors (offset 0x2C)
-        struct.pack_into('<I', header, 0x2C, layout['fat_sectors'])
+        struct.pack_into("<I", header, 0x2C, layout["fat_sectors"])
 
         # First directory sector (offset 0x30)
-        struct.pack_into('<I', header, 0x30, dir_start)
+        struct.pack_into("<I", header, 0x30, dir_start)
 
         # Transaction signature (offset 0x34)
-        struct.pack_into('<I', header, 0x34, 0)
+        struct.pack_into("<I", header, 0x34, 0)
 
         # Mini stream cutoff (offset 0x38)
-        struct.pack_into('<I', header, 0x38, self._mini_cutoff)
+        struct.pack_into("<I", header, 0x38, self._mini_cutoff)
 
         # First mini FAT sector (offset 0x3C)
-        if layout['minifat_sectors'] > 0:
-            struct.pack_into('<I', header, 0x3C, minifat_start)
+        if layout["minifat_sectors"] > 0:
+            struct.pack_into("<I", header, 0x3C, minifat_start)
         else:
-            struct.pack_into('<I', header, 0x3C, ENDOFCHAIN)
+            struct.pack_into("<I", header, 0x3C, ENDOFCHAIN)
 
         # Number of mini FAT sectors (offset 0x40)
-        struct.pack_into('<I', header, 0x40, layout['minifat_sectors'])
+        struct.pack_into("<I", header, 0x40, layout["minifat_sectors"])
 
         # First DIFAT sector (offset 0x44)
-        if layout['difat_sectors'] > 0:
-            struct.pack_into('<I', header, 0x44, difat_start)
+        if layout["difat_sectors"] > 0:
+            struct.pack_into("<I", header, 0x44, difat_start)
         else:
-            struct.pack_into('<I', header, 0x44, ENDOFCHAIN)
+            struct.pack_into("<I", header, 0x44, ENDOFCHAIN)
 
         # Number of DIFAT sectors (offset 0x48)
-        struct.pack_into('<I', header, 0x48, layout['difat_sectors'])
+        struct.pack_into("<I", header, 0x48, layout["difat_sectors"])
 
         # DIFAT array (109 entries starting at 0x4C)
         for i in range(109):
-            if i < layout['fat_sectors']:
-                struct.pack_into('<I', header, 0x4C + i * 4, i)
+            if i < layout["fat_sectors"]:
+                struct.pack_into("<I", header, 0x4C + i * 4, i)
             else:
-                struct.pack_into('<I', header, 0x4C + i * 4, FREESECT)
+                struct.pack_into("<I", header, 0x4C + i * 4, FREESECT)
 
         return bytes(header)
 
-    def _build_fat(self, entries: list[_WriterEntry], layout: dict,
-                   dir_start: int, minifat_start: int,
-                   ministream_start: int, large_start: int,
-                   difat_start: int) -> bytes:
+    def _build_fat(
+        self,
+        entries: list[_WriterEntry],
+        layout: dict,
+        dir_start: int,
+        minifat_start: int,
+        ministream_start: int,
+        large_start: int,
+        difat_start: int,
+    ) -> bytes:
         """
         Build FAT sectors.
         """
         # Initialize FAT
-        fat = [FREESECT] * (layout['fat_sectors'] * 128)
+        fat = [FREESECT] * (layout["fat_sectors"] * 128)
 
         # FAT sectors are marked as FATSECT
-        for i in range(layout['fat_sectors']):
+        for i in range(layout["fat_sectors"]):
             fat[i] = FATSECT
 
         # DIFAT sectors are marked as DIFSECT
-        for i in range(layout['difat_sectors']):
+        for i in range(layout["difat_sectors"]):
             fat[difat_start + i] = DIFSECT
 
         # Directory chain
-        for i in range(layout['dir_sectors']):
+        for i in range(layout["dir_sectors"]):
             sector = dir_start + i
-            if i < layout['dir_sectors'] - 1:
+            if i < layout["dir_sectors"] - 1:
                 fat[sector] = sector + 1
             else:
                 fat[sector] = ENDOFCHAIN
 
         # Mini FAT chain
-        for i in range(layout['minifat_sectors']):
+        for i in range(layout["minifat_sectors"]):
             sector = minifat_start + i
-            if i < layout['minifat_sectors'] - 1:
+            if i < layout["minifat_sectors"] - 1:
                 fat[sector] = sector + 1
             else:
                 fat[sector] = ENDOFCHAIN
 
         # Mini stream chain (root entry data)
-        for i in range(layout['mini_stream_sectors']):
+        for i in range(layout["mini_stream_sectors"]):
             sector = ministream_start + i
-            if i < layout['mini_stream_sectors'] - 1:
+            if i < layout["mini_stream_sectors"] - 1:
                 fat[sector] = sector + 1
             else:
                 fat[sector] = ENDOFCHAIN
 
         # Large stream chains
         current_sector = large_start
-        for entry in layout['large_entries']:
+        for entry in layout["large_entries"]:
             sectors_needed = self._ceil_div(len(entry.data), self._sector_size)
             for i in range(sectors_needed):
                 if i < sectors_needed - 1:
@@ -1518,8 +1593,8 @@ class AltiumOleWriter:
 
         # Build FAT data
         fat_data = bytearray()
-        for entry in fat[:layout['fat_sectors'] * 128]:
-            fat_data.extend(struct.pack('<I', entry))
+        for entry in fat[: layout["fat_sectors"] * 128]:
+            fat_data.extend(struct.pack("<I", entry))
 
         return bytes(fat_data)
 
@@ -1527,11 +1602,11 @@ class AltiumOleWriter:
         """
         Build DIFAT sectors when FAT requires more than 109 sector pointers.
         """
-        difat_sectors = layout.get('difat_sectors', 0)
+        difat_sectors = layout.get("difat_sectors", 0)
         if difat_sectors <= 0:
-            return b''
+            return b""
 
-        fat_sectors = int(layout['fat_sectors'])
+        fat_sectors = int(layout["fat_sectors"])
         extra_fat = list(range(109, fat_sectors))
         payload = bytearray()
         cursor = 0
@@ -1543,21 +1618,22 @@ class AltiumOleWriter:
             for j in range(entries_per_sector):
                 idx = cursor + j
                 value = extra_fat[idx] if idx < len(extra_fat) else FREESECT
-                struct.pack_into('<I', sector, j * 4, value)
+                struct.pack_into("<I", sector, j * 4, value)
 
             if i < difat_sectors - 1:
                 next_difat = difat_start + i + 1
             else:
                 next_difat = ENDOFCHAIN
-            struct.pack_into('<I', sector, entries_per_sector * 4, next_difat)
+            struct.pack_into("<I", sector, entries_per_sector * 4, next_difat)
 
             payload.extend(sector)
             cursor += entries_per_sector
 
         return bytes(payload)
 
-    def _build_directory(self, entries: list[_WriterEntry], layout: dict,
-                        ministream_start: int) -> bytes:
+    def _build_directory(
+        self, entries: list[_WriterEntry], layout: dict, ministream_start: int
+    ) -> bytes:
         """
         Build directory sectors.
         """
@@ -1567,11 +1643,11 @@ class AltiumOleWriter:
             entry_data = bytearray(DIR_ENTRY_SIZE)
 
             # Name (64 bytes UTF-16LE with null terminator)
-            name_bytes = entry.name.encode('utf-16-le')[:62]
-            entry_data[0:len(name_bytes)] = name_bytes
+            name_bytes = entry.name.encode("utf-16-le")[:62]
+            entry_data[0 : len(name_bytes)] = name_bytes
 
             # Name length (including null terminator)
-            struct.pack_into('<H', entry_data, 0x40, len(name_bytes) + 2)
+            struct.pack_into("<H", entry_data, 0x40, len(name_bytes) + 2)
 
             # Entry type
             entry_data[0x42] = entry.entry_type
@@ -1580,40 +1656,44 @@ class AltiumOleWriter:
             entry_data[0x43] = entry.color
 
             # Left sibling
-            struct.pack_into('<I', entry_data, 0x44, entry.left_sid)
+            struct.pack_into("<I", entry_data, 0x44, entry.left_sid)
 
             # Right sibling
-            struct.pack_into('<I', entry_data, 0x48, entry.right_sid)
+            struct.pack_into("<I", entry_data, 0x48, entry.right_sid)
 
             # Child
-            struct.pack_into('<I', entry_data, 0x4C, entry.child_sid)
+            struct.pack_into("<I", entry_data, 0x4C, entry.child_sid)
 
             # CLSID
             entry_data[0x50:0x60] = entry.clsid
 
             # User flags (offset 0x60)
-            struct.pack_into('<I', entry_data, 0x60, 0)
+            struct.pack_into("<I", entry_data, 0x60, 0)
 
             # Create time (offset 0x64)
-            struct.pack_into('<Q', entry_data, 0x64, 0)
+            struct.pack_into("<Q", entry_data, 0x64, 0)
 
             # Modify time (offset 0x6C)
-            struct.pack_into('<Q', entry_data, 0x6C, 0)
+            struct.pack_into("<Q", entry_data, 0x6C, 0)
 
             # Start sector (offset 0x74)
-            struct.pack_into('<I', entry_data, 0x74, entry.start_sector)
+            struct.pack_into("<I", entry_data, 0x74, entry.start_sector)
 
             # Size (offset 0x78)
             if entry.entry_type == STGTY_ROOT:
                 # Root entry size is mini stream size (sum of padded entry sizes)
                 total_mini_sectors = 0
-                for e in layout['mini_entries']:
-                    total_mini_sectors += self._ceil_div(len(e.data), self._mini_sector_size)
-                struct.pack_into('<Q', entry_data, 0x78, total_mini_sectors * self._mini_sector_size)
+                for e in layout["mini_entries"]:
+                    total_mini_sectors += self._ceil_div(
+                        len(e.data), self._mini_sector_size
+                    )
+                struct.pack_into(
+                    "<Q", entry_data, 0x78, total_mini_sectors * self._mini_sector_size
+                )
             elif entry.entry_type == STGTY_STREAM:
-                struct.pack_into('<Q', entry_data, 0x78, len(entry.data))
+                struct.pack_into("<Q", entry_data, 0x78, len(entry.data))
             else:
-                struct.pack_into('<Q', entry_data, 0x78, 0)
+                struct.pack_into("<Q", entry_data, 0x78, 0)
 
             dir_data.extend(entry_data)
 
@@ -1622,9 +1702,9 @@ class AltiumOleWriter:
             # Empty directory entry
             empty = bytearray(DIR_ENTRY_SIZE)
             empty[0x42] = STGTY_EMPTY
-            struct.pack_into('<I', empty, 0x44, FREESECT)
-            struct.pack_into('<I', empty, 0x48, FREESECT)
-            struct.pack_into('<I', empty, 0x4C, FREESECT)
+            struct.pack_into("<I", empty, 0x44, FREESECT)
+            struct.pack_into("<I", empty, 0x48, FREESECT)
+            struct.pack_into("<I", empty, 0x4C, FREESECT)
             dir_data.extend(empty)
 
         return bytes(dir_data)
@@ -1633,17 +1713,17 @@ class AltiumOleWriter:
         """
         Build mini FAT sectors.
         """
-        if layout['minifat_sectors'] == 0:
-            return b''
+        if layout["minifat_sectors"] == 0:
+            return b""
 
         # Calculate total mini sectors needed
-        total_mini_size = sum(len(e.data) for e in layout['mini_entries'])
+        total_mini_size = sum(len(e.data) for e in layout["mini_entries"])
         self._ceil_div(total_mini_size, self._mini_sector_size)
 
         # Build mini FAT
         minifat = []
         current_sector = 0
-        for entry in layout['mini_entries']:
+        for entry in layout["mini_entries"]:
             sectors_needed = self._ceil_div(len(entry.data), self._mini_sector_size)
             for i in range(sectors_needed):
                 if i < sectors_needed - 1:
@@ -1659,7 +1739,7 @@ class AltiumOleWriter:
         # Build data
         minifat_data = bytearray()
         for entry in minifat:
-            minifat_data.extend(struct.pack('<I', entry))
+            minifat_data.extend(struct.pack("<I", entry))
 
         return bytes(minifat_data)
 
@@ -1667,20 +1747,20 @@ class AltiumOleWriter:
         """
         Build mini stream (concatenated small stream data).
         """
-        if layout['mini_stream_sectors'] == 0:
-            return b''
+        if layout["mini_stream_sectors"] == 0:
+            return b""
 
         mini_data = bytearray()
-        for entry in layout['mini_entries']:
+        for entry in layout["mini_entries"]:
             mini_data.extend(entry.data)
             # Pad to mini sector boundary
             remainder = len(entry.data) % self._mini_sector_size
             if remainder:
-                mini_data.extend(b'\x00' * (self._mini_sector_size - remainder))
+                mini_data.extend(b"\x00" * (self._mini_sector_size - remainder))
 
         # Pad to sector boundary
         while len(mini_data) % self._sector_size != 0:
-            mini_data.extend(b'\x00' * self._mini_sector_size)
+            mini_data.extend(b"\x00" * self._mini_sector_size)
 
         return bytes(mini_data)
 
@@ -1689,11 +1769,11 @@ class AltiumOleWriter:
         Build large stream data.
         """
         large_data = bytearray()
-        for entry in layout['large_entries']:
+        for entry in layout["large_entries"]:
             large_data.extend(entry.data)
             # Pad to sector boundary
             remainder = len(entry.data) % self._sector_size
             if remainder:
-                large_data.extend(b'\x00' * (self._sector_size - remainder))
+                large_data.extend(b"\x00" * (self._sector_size - remainder))
 
         return bytes(large_data)

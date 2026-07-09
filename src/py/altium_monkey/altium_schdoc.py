@@ -282,6 +282,26 @@ def _is_parent_bound_geometry_child(obj: object) -> bool:
     return isinstance(obj, PARENT_BOUND_GEOMETRY_CHILD_TYPES)
 
 
+def _font_resolution_hint_sort_key(diagnostic: dict[str, object]) -> tuple[object, ...]:
+    # Canonical ordering for render_hints.font_resolution diagnostics: the
+    # resolver dedupe key (tried_families excluded). Both the Python and C++
+    # IR builders emit this order so the hint does not depend on the order in
+    # which each render pass first touches a font.
+    def optional_text(value: object) -> tuple[bool, str]:
+        return (value is not None, "" if value is None else str(value))
+
+    return (
+        str(diagnostic["requested_family"]),
+        bool(diagnostic["requested_bold"]),
+        bool(diagnostic["requested_italic"]),
+        optional_text(diagnostic["resolved_family"]),
+        optional_text(diagnostic["resolved_name"]),
+        str(diagnostic["status"]),
+        str(diagnostic["source"]),
+        optional_text(diagnostic["path"]),
+    )
+
+
 # Clean SchDoc API - wrapper classes and helper functions
 
 
@@ -4749,9 +4769,10 @@ class AltiumSchDoc(JsonApplyMixin):
                 "background_color": str(geometry_ctx.background_color),
                 "overlay_opacity": COMPILED_COMPILE_MASK_OVERLAY_OPACITY,
             }
-        font_diagnostics = [
-            diagnostic.to_dict() for diagnostic in get_font_resolution_diagnostics()
-        ]
+        font_diagnostics = sorted(
+            (diagnostic.to_dict() for diagnostic in get_font_resolution_diagnostics()),
+            key=_font_resolution_hint_sort_key,
+        )
         if font_diagnostics:
             if render_hints is None:
                 render_hints = {}

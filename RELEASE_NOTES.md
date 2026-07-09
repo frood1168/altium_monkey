@@ -1,3 +1,50 @@
+# altium-monkey 2026.07.09 Release Notes
+
+Package version: `2026.7.9`
+
+`2026.07.09` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.9`.
+
+This release speeds up reading of large libraries and documents through an
+OLE reader cache and fixes schematic arc radius round-trip fidelity.
+
+## OLE Reader Performance
+
+The OLE reader now caches the compound-file root mini stream instead of
+rebuilding it for every mini-sector read, dramatically speeding up parsing
+of large libraries and documents with many small streams. The reporting
+user measured a library load drop from ~17s to ~4s. No behavior change;
+write paths are unaffected. Thanks to @reid-p for the report and proposed
+fix (issue #19).
+
+## Schematic Arc Radius Round-Trip
+
+Schematic arc and elliptical-arc radii now round-trip exactly:
+
+- Fractional radius storage (`Radius_Frac` / `SecondaryRadius_Frac`) is
+  preserved on save instead of being dropped.
+- Authored radii of exactly 100.0 mils, or 100.x mils via `add_arc` /
+  `add_elliptical_arc` / the `radius_mils` properties, no longer reparse
+  as 0 after save.
+- The fix applies to arc, elliptical arc, and pie chart records.
+
+## Schematic IR Diagnostics
+
+Schematic IR `render_hints.font_resolution` diagnostics are now emitted in
+a canonical sorted order (by requested family/style and resolution result)
+instead of first-use order, so the hint is stable across render pipelines.
+
+## Validation
+
+This release was checked with cache rebuild-count and write-path safety
+regression tests, arc radius round-trip regressions in Python and C++,
+corpus-backed symbol-extraction and component round-trip lanes, and the
+full L0/L3 strata. Release validation also covers package formatting/lint,
+release-note hygiene, public export, wheel build, clean install, and
+public test execution.
+
+---
+
 # altium-monkey 2026.07.07 Release Notes
 
 Package version: `2026.7.7`

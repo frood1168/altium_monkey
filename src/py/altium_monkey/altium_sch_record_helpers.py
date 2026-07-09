@@ -144,7 +144,6 @@ class PrimaryRadiusMilsMixin:
         whole, frac = _public_mils_to_coord_scalar(value)
         self.radius = whole
         self.radius_frac = frac
-        setattr(self, "_radius_mils_explicit", True)
 
 
 class SecondaryRadiusMilsMixin:
@@ -176,7 +175,6 @@ class SecondaryRadiusMilsMixin:
         whole, frac = _public_mils_to_coord_scalar(value)
         self.secondary_radius = whole
         self.secondary_radius_frac = frac
-        setattr(self, "_secondary_radius_mils_explicit", True)
 
 
 def _coord_scalar_to_public_mils(
