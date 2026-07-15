@@ -198,6 +198,7 @@ KNOWN_FONT_FILE_MAP: dict[str, str] = {
     "Arial Narrow Italic": "arialni.ttf",
     "Arial Narrow Bold Italic": "arialnbi.ttf",
     "Arial Black": "ariblk.ttf",
+    "Archivo Black": "archivoblack-regular.ttf",
     "Arial Rounded MT Bold": "ARLRDBD.TTF",
     "Times New Roman": "times.ttf",
     "Times New Roman Bold": "timesbd.ttf",
@@ -309,7 +310,7 @@ TEST_FONT_FILE_MAP: dict[str, Path] = {
 
 _PORTABLE_FONT_REPLACEMENT_RULES: tuple[FontReplacementRule, ...] = (
     FontReplacementRule("Arial", "Arimo"),
-    FontReplacementRule("Arial Black", "Arimo"),
+    FontReplacementRule("Arial Black", "Archivo Black"),
     FontReplacementRule("Helvetica", "Arimo"),
     FontReplacementRule("Microsoft Sans Serif", "Arimo"),
     FontReplacementRule("Times", "Tinos"),
@@ -324,7 +325,7 @@ ALTIUM_PORTABLE_FONT_REPLACEMENTS: tuple[dict[str, str], ...] = tuple(
 
 DEFAULT_FAMILY_SUBSTITUTIONS: dict[str, tuple[str, ...]] = {
     "Arial": ("Arimo", "Liberation Sans", "DejaVu Sans"),
-    "Arial Black": ("Arimo", "Liberation Sans", "DejaVu Sans"),
+    "Arial Black": ("Archivo Black", "Arimo", "Liberation Sans", "DejaVu Sans"),
     "Arial Bold": ("Arimo", "Liberation Sans", "DejaVu Sans"),
     "Arial Italic": ("Arimo", "Liberation Sans", "DejaVu Sans"),
     "Arial Bold Italic": ("Arimo", "Liberation Sans", "DejaVu Sans"),

@@ -4663,6 +4663,7 @@ class AltiumSchDoc(JsonApplyMixin):
             base_render_options = replace(
                 SchSvgRenderOptions.onscreen(),
                 image_background_to_alpha=False,
+                fallback_project_parameters_for_star=False,
             )
 
         requested_render_options = render_options or base_render_options

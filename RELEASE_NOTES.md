@@ -1,3 +1,41 @@
+# altium-monkey 2026.07.15 Release Notes
+
+Package version: `2026.7.15`
+
+`2026.07.15` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.15`.
+
+This customer-delivery hotfix restores project-backed schematic title-block
+substitution on the default onscreen IR/SVG path used by downstream schematic
+viewers and exporters.
+
+## Schematic Title-Block Parameters
+
+Schematic `to_ir(profile="onscreen")` and `to_svg(...,
+options=SchSvgRenderOptions.onscreen(), project_parameters=...)` now resolve
+project-backed template/title-block labels such as `=PCB_PART_NUMBER`,
+`=PCB_CODENAME`, `=PCB_MIXDOWN`, and schematic `*` placeholders such as
+`=ENGINEER` when the matching project parameter is available.
+
+If a schematic `*` placeholder has no matching project value, it remains a
+literal `*`. Explicit schematic parameter values still take precedence over
+project parameters, and the strict native/oracle profile remains available for
+native-export comparison behavior.
+
+This fixes missing title-block values in downstream onscreen consumers such as
+`viz sch` and `altium_cruncher sc svg` without requiring viewer-side
+workarounds.
+
+## Validation
+
+This release was checked with focused schematic parameter-substitution tests,
+template/title-block geometry tests, native C++ parity checks, and a USB token
+real-world corpus acceptance check covering onscreen IR and SVG output.
+Release validation also covers package formatting/lint, release-note hygiene,
+public export, wheel build, clean install, and public test execution.
+
+---
+
 # altium-monkey 2026.07.09 Release Notes
 
 Package version: `2026.7.9`

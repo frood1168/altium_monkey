@@ -1,10 +1,10 @@
 """
 Public Altium Python package.
 
-Core runtime code lives under ``tools/altium_monkey/src/py/altium_monkey``.
-Private test helpers may live in the external WN test-suite repo and remain
-importable as ``altium_monkey.tests`` for existing private test and oracle
-scripts when ``WN_TEST_SUITES_ROOT`` is set.
+Core runtime code lives under ``src/py/altium_monkey``.
+Private test helpers live in the repo-level ``tests`` package in the private
+development checkout and remain importable as ``altium_monkey.tests`` for
+existing private test and oracle scripts.
 """
 
 # ruff: noqa: E402
@@ -86,12 +86,15 @@ _ALTIUM_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def _append_private_test_package_paths() -> None:
     """
-    Keep external private test helpers importable as ``altium_monkey.tests``.
+    Keep private test helpers importable as ``altium_monkey.tests``.
     """
     candidates = [_ALTIUM_REPO_ROOT]
-    suites_root = os.environ.get("WN_TEST_SUITES_ROOT")
-    if suites_root:
-        candidates.append(Path(suites_root).expanduser() / "suites" / "altium_monkey")
+
+    legacy_suites_root = os.environ.get("WN_TEST_SUITES_ROOT")
+    if legacy_suites_root:
+        candidates.append(
+            Path(legacy_suites_root).expanduser() / "suites" / "altium_monkey"
+        )
 
     for candidate in candidates:
         if not (candidate / "tests").exists():

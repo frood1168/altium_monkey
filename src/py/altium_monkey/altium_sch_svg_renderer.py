@@ -23,9 +23,9 @@ FONT_FALLBACK = "Microsoft Sans Serif"
 
 # Native Altium SVG export resolves a narrow set of system/title-block
 # placeholders through project context even when the schematic parameter table
-# stores '*' as the value. Keep this narrower than the review/default
+# stores '*' as the value. Keep this narrower than the onscreen/review
 # project-fallback contract so ordinary schematic '*' parameters still remain
-# literal on the strict native/on-screen lanes.
+# literal on the strict native/oracle lanes.
 NATIVE_SYSTEM_STAR_PROJECT_FALLBACKS = {
     "currenttime",
     "currentdate",
@@ -126,9 +126,9 @@ class SchSvgRenderOptions:
     substitute_parameters: bool = True
 
     # Project-parameter fallback mode for schematic values explicitly set to '*'
-    # True = schematic '*' may be replaced by the project-level value
-    # False = schematic '*' remains literal (matches on-screen/oracle behavior)
-    fallback_project_parameters_for_star: bool = False
+    # True = schematic '*' may be replaced when a project-level value exists
+    # False = schematic '*' remains literal (strict native/oracle behavior)
+    fallback_project_parameters_for_star: bool = True
 
     # Compile-mask rendering mode.
     # ORACLE_RAW: match raw/oracle export behavior.
@@ -189,7 +189,7 @@ class SchSvgRenderOptions:
             junction_z_order=SchJunctionZOrder.ALWAYS_ON_TOP,
             junction_color_override=junction_color,
             truncate_font_size_for_baseline=False,  # Use float for better visual quality
-            fallback_project_parameters_for_star=False,
+            fallback_project_parameters_for_star=True,
             compile_mask_render_mode=compile_mask_render_mode,
         )
 
@@ -248,7 +248,7 @@ class SchSvgRenderOptions:
             junction_color_override=junction_color,
             truncate_font_size_for_baseline=False,
             text_as_polygons=True,
-            fallback_project_parameters_for_star=False,
+            fallback_project_parameters_for_star=True,
             compile_mask_render_mode=compile_mask_render_mode,
         )
 
@@ -2185,8 +2185,9 @@ class SchSvgRenderContext:
             schematic_value = lookup_case_insensitive(self.parameters, param_lower)
 
             # 2. Handle '*' as optional fallback to project parameters.
-            # Native SVG export resolves '*' through project parameters, while
-            # the on-screen geometry/oracle path keeps the schematic '*' literal.
+            # Onscreen/review output resolves '*' through project parameters
+            # when available. The strict native/oracle path keeps schematic '*'
+            # literal except for the native system fallback names above.
             if schematic_value == "*":
                 if allow_star_project_fallback(param_lower) and self.project_parameters:
                     project_value = lookup_case_insensitive(
