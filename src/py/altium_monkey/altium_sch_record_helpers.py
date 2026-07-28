@@ -235,6 +235,25 @@ def _basic_entry_distance_to_native_units(
     return int(value) * 10.0 + int(frac1) / 100000.0
 
 
+def _basic_entry_distance_to_rounded_native_units(
+    value: int | float | str | object,
+    frac1: int | float | str = 0,
+) -> int:
+    """
+    Convert basic-entry DistanceFromTop storage to an integer hotspot offset.
+
+    Netlist endpoint matching uses integer schematic coordinates. Use explicit
+    half-away-from-zero rounding here; Python's built-in ``round()`` uses
+    tie-to-even behavior and must not define this public connectivity path.
+    """
+    if not isinstance(value, (int, float, str)):
+        frac1 = getattr(value, "distance_from_top_frac1", frac1)
+        value = getattr(value, "distance_from_top")
+    numerator = int(value) * 1_000_000 + int(frac1)
+    magnitude = (abs(numerator) + 50_000) // 100_000
+    return int(magnitude if numerator >= 0 else -magnitude)
+
+
 def _public_mils_to_basic_entry_distance(value: float) -> tuple[int, int]:
     """
     Convert public mils to Altium basic-entry DistanceFromTop storage.

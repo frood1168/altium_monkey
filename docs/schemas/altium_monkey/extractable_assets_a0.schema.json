@@ -1,0 +1,802 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wavenumber-eng.github.io/altium-monkey/schemas/altium_monkey/extractable_assets_a0.schema.json",
+  "title": "Altium Monkey extractable asset inventory A0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_kind", "source_path", "assets"],
+  "properties": {
+    "schema": {
+      "const": "altium_monkey.extractable_assets.a0"
+    },
+    "source_kind": {
+      "$ref": "#/$defs/sourceKind"
+    },
+    "source_path": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/assetSummary"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source_kind": {
+            "const": "pcbdoc"
+          }
+        },
+        "required": ["source_kind"]
+      },
+      "then": {
+        "properties": {
+          "assets": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pcbdocAssetSummary"
+                },
+                {
+                  "$ref": "#/$defs/pcbdocSourceRef"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_kind": {
+            "const": "pcblib"
+          }
+        },
+        "required": ["source_kind"]
+      },
+      "then": {
+        "properties": {
+          "assets": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/pcblibAssetSummary"
+                },
+                {
+                  "$ref": "#/$defs/pcblibSourceRef"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_kind": {
+            "const": "schdoc"
+          }
+        },
+        "required": ["source_kind"]
+      },
+      "then": {
+        "properties": {
+          "assets": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/schdocAssetSummary"
+                },
+                {
+                  "$ref": "#/$defs/schdocSourceRef"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_kind": {
+            "const": "schlib"
+          }
+        },
+        "required": ["source_kind"]
+      },
+      "then": {
+        "properties": {
+          "assets": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/schlibAssetSummary"
+                },
+                {
+                  "$ref": "#/$defs/schlibSourceRef"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "assetKind": {
+      "type": "string",
+      "enum": [
+        "embedded_model",
+        "embedded_font",
+        "opaque_embedded",
+        "pcb_footprint",
+        "sch_symbol"
+      ]
+    },
+    "sourceKind": {
+      "type": "string",
+      "enum": ["pcbdoc", "pcblib", "schdoc", "schlib"]
+    },
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "nullableInteger": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "nullableSha256": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ]
+    },
+    "emptyExtras": {
+      "type": "object",
+      "maxProperties": 0
+    },
+    "assetSummaryBase": {
+      "type": "object",
+      "required": [
+        "ref",
+        "kind",
+        "name",
+        "extraction_filename",
+        "native_extension",
+        "can_extract",
+        "payload_available",
+        "payload_sha256",
+        "details",
+        "extras"
+      ],
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/assetRefBase"
+        },
+        "kind": {
+          "$ref": "#/$defs/assetKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "extraction_filename": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "native_extension": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "can_extract": {
+          "type": "boolean"
+        },
+        "payload_available": {
+          "type": "boolean"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "details": {
+          "type": "object"
+        },
+        "extras": {
+          "$ref": "#/$defs/emptyExtras"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "payload_available": {
+                "const": false
+              }
+            },
+            "required": ["payload_available"]
+          },
+          "then": {
+            "properties": {
+              "payload_sha256": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "assetSummary": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/embeddedModelAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/embeddedFontAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/opaqueEmbeddedAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/pcbFootprintAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/schSymbolAssetSummary"
+        }
+      ]
+    },
+    "pcbdocAssetSummary": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/embeddedModelAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/embeddedFontAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/pcbFootprintAssetSummary"
+        }
+      ]
+    },
+    "pcblibAssetSummary": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/embeddedModelAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/opaqueEmbeddedAssetSummary"
+        },
+        {
+          "$ref": "#/$defs/pcbFootprintAssetSummary"
+        }
+      ]
+    },
+    "schdocAssetSummary": {
+      "$ref": "#/$defs/schSymbolAssetSummary"
+    },
+    "schlibAssetSummary": {
+      "$ref": "#/$defs/schSymbolAssetSummary"
+    },
+    "assetRefBase": {
+      "type": "object",
+      "required": [
+        "source_kind",
+        "source_path",
+        "kind",
+        "key",
+        "index",
+        "name",
+        "source_instance_id"
+      ],
+      "properties": {
+        "source_kind": {
+          "$ref": "#/$defs/sourceKind"
+        },
+        "source_path": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "kind": {
+          "$ref": "#/$defs/assetKind"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "source_instance_id": {
+          "$ref": "#/$defs/nullableString"
+        }
+      }
+    },
+    "embeddedModelAssetRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetRefBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "embedded_model"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "embeddedFontAssetRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetRefBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "embedded_font"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "opaqueEmbeddedAssetRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetRefBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "opaque_embedded"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "pcbFootprintAssetRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetRefBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "pcb_footprint"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "schSymbolAssetRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetRefBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "sch_symbol"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "pcbdocSourceRef": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "object",
+          "properties": {
+            "source_kind": {
+              "const": "pcbdoc"
+            }
+          },
+          "required": ["source_kind"]
+        }
+      }
+    },
+    "pcblibSourceRef": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "object",
+          "properties": {
+            "source_kind": {
+              "const": "pcblib"
+            }
+          },
+          "required": ["source_kind"]
+        }
+      }
+    },
+    "schdocSourceRef": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "object",
+          "properties": {
+            "source_kind": {
+              "const": "schdoc"
+            }
+          },
+          "required": ["source_kind"]
+        }
+      }
+    },
+    "schlibSourceRef": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "object",
+          "properties": {
+            "source_kind": {
+              "const": "schlib"
+            }
+          },
+          "required": ["source_kind"]
+        }
+      }
+    },
+    "embeddedAssetReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_object_kind",
+        "source_object_index",
+        "asset_kind",
+        "asset_index",
+        "asset_id",
+        "role"
+      ],
+      "properties": {
+        "source_object_kind": {
+          "type": "string"
+        },
+        "source_object_index": {
+          "type": ["integer", "null"],
+          "minimum": -1
+        },
+        "asset_kind": {
+          "type": "string",
+          "enum": ["model", "font", "opaque"]
+        },
+        "asset_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "asset_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "role": {
+          "$ref": "#/$defs/nullableString"
+        }
+      }
+    },
+    "embeddedModelAssetSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetSummaryBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "embedded_model"
+            },
+            "ref": {
+              "$ref": "#/$defs/embeddedModelAssetRef"
+            },
+            "details": {
+              "$ref": "#/$defs/embeddedModelDetails"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "embeddedFontAssetSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetSummaryBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "embedded_font"
+            },
+            "ref": {
+              "$ref": "#/$defs/embeddedFontAssetRef"
+            },
+            "details": {
+              "$ref": "#/$defs/embeddedFontDetails"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "opaqueEmbeddedAssetSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetSummaryBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "opaque_embedded"
+            },
+            "ref": {
+              "$ref": "#/$defs/opaqueEmbeddedAssetRef"
+            },
+            "details": {
+              "$ref": "#/$defs/opaqueEmbeddedDetails"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "pcbFootprintAssetSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetSummaryBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "pcb_footprint"
+            },
+            "ref": {
+              "$ref": "#/$defs/pcbFootprintAssetRef"
+            },
+            "details": {
+              "$ref": "#/$defs/pcbFootprintDetails"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "schSymbolAssetSummary": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assetSummaryBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "sch_symbol"
+            },
+            "ref": {
+              "$ref": "#/$defs/schSymbolAssetRef"
+            },
+            "details": {
+              "$ref": "#/$defs/schSymbolDetails"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "embeddedModelDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_format",
+        "id",
+        "compressed_size",
+        "decompressed_size",
+        "is_embedded",
+        "references"
+      ],
+      "properties": {
+        "model_format": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "compressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decompressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "is_embedded": {
+          "type": "boolean"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/embeddedAssetReference"
+          }
+        }
+      }
+    },
+    "embeddedFontDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "style",
+        "compressed_size",
+        "decompressed_size",
+        "raw_size",
+        "support_status"
+      ],
+      "properties": {
+        "style": {
+          "type": "string"
+        },
+        "compressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decompressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "support_status": {
+          "type": "string"
+        }
+      }
+    },
+    "opaqueEmbeddedDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_size", "support_status", "reason"],
+      "properties": {
+        "raw_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "support_status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "pcbFootprintDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern",
+        "occurrence",
+        "component_indices",
+        "component_designators",
+        "component_count",
+        "source_footprint_library",
+        "pad_count",
+        "primitive_count"
+      ],
+      "properties": {
+        "pattern": {
+          "type": "string"
+        },
+        "occurrence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "component_indices": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "component_designators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "component_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_footprint_library": {
+          "type": "string"
+        },
+        "pad_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "primitive_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "schSymbolDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "display_name",
+        "safe_name",
+        "component_count",
+        "component_designators",
+        "selected_designator",
+        "lib_reference",
+        "design_item_id",
+        "original_name",
+        "description",
+        "pin_count",
+        "object_count",
+        "part_count"
+      ],
+      "properties": {
+        "display_name": {
+          "type": "string"
+        },
+        "safe_name": {
+          "type": "string"
+        },
+        "component_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "component_designators": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selected_designator": {
+          "type": "string"
+        },
+        "lib_reference": {
+          "type": "string"
+        },
+        "design_item_id": {
+          "type": "string"
+        },
+        "original_name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "pin_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "object_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "part_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

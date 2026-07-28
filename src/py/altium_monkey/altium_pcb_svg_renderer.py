@@ -7,8 +7,8 @@ composition so record-level to_svg() implementations can plug in incrementally.
 
 from __future__ import annotations
 
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
-from collections.abc import Sequence
 import hashlib
 import html
 import inspect
@@ -54,10 +54,14 @@ class PcbSvgRenderOptions:
     Top-level rendering options for PCB SVG output.
     """
 
-    visible_layers: set[PcbLayer] | None = None
-    # Optional explicit render order for composed board output.
-    # Items not present in visible_layers are ignored.
-    layer_render_order: list[PcbLayer] | None = None
+    # Select renderable native layers. When this is an ordered sequence and
+    # layer_render_order is unset, composed board output preserves that order.
+    visible_layers: Collection[PcbLayer] | None = None
+    # Optional explicit native-layer render order for composed board output.
+    # Items outside the selected/discovered visible layer set are ignored, and
+    # unmentioned visible layers append by deterministic layer-id order. Derived
+    # groups such as DRILLS render after native layer groups.
+    layer_render_order: Sequence[PcbLayer] | None = None
     layer_colors: dict[PcbLayer, str] = field(default_factory=dict)
     # If set, all PCB layers render in this single color for board + per-layer outputs.
     all_layers_color_override: str | None = None
@@ -74,6 +78,9 @@ class PcbSvgRenderOptions:
     show_board_outline: bool = True
     show_empty_layers: bool = False
     include_metadata: bool = True
+    # Add the newer consumer-facing render-layer registry to the enrichment
+    # payload. Default off so existing SVG metadata payloads remain stable.
+    include_render_layer_metadata: bool = False
     stage: str = "viz"  # validation | viz | export
     group_mode: str = "layer"  # layer | net | component | object
     precision: int = 4
@@ -126,6 +133,23 @@ class PcbSvgRenderOptions:
     # Emit drill holes in a dedicated synthetic layer group (`layer-DRILLS`)
     # instead of interleaving them inside copper layer groups.
     drill_holes_as_layer_group: bool = True
+    # Optional renderer-owned pad designator overlay. Default off so existing
+    # PCB/PcbLib SVG output remains unchanged.
+    show_pad_designators: bool = False
+    pad_designator_font_family: str = "monospace"
+    pad_designator_fill: str = "#111111"
+    pad_designator_max_font_size_mm: float | None = None
+    pad_designator_padding_ratio: float = 0.20
+    # "top" emits composed-SVG labels after all rendered layers so mask/paste
+    # layers do not obscure them; "layer" keeps labels inside the owning layer.
+    pad_designator_overlay_z_order: str = "top"
+    # Optional renderer-owned 0,0 origin/datum overlay. Default off so existing
+    # PCB/PcbLib SVG output remains unchanged.
+    show_origin_datum: bool = False
+    origin_datum_color: str = "#00AEEF"
+    origin_datum_stroke_width_mm: float = 0.08
+    origin_datum_marker_size_mm: float = 1.2
+    origin_datum_marker_style: str = "circle_cross"
 
 
 @dataclass
@@ -280,6 +304,33 @@ class PcbSvgRenderContext:
             f'data-layer-role="{self.layer_role(layer_id_i)}"',
         ]
 
+    def render_layer_metadata_entries(self) -> list[dict[str, object]]:
+        """
+        Build the additive consumer-facing render-layer registry.
+        """
+        entries: list[dict[str, object]] = []
+        for layer_id in self.all_layer_ids:
+            layer_id_i = int(layer_id)
+            entry: dict[str, object] = {
+                "id": layer_id_i,
+                "key": self.layer_key(layer_id_i),
+                "name": self.layer_name(layer_id_i),
+                "display_name": self.layer_display_name(layer_id_i),
+                "role": self.layer_role(layer_id_i),
+            }
+            if layer_id_i == PCB_SVG_DRILLS_LAYER_ID:
+                entry.update(
+                    {
+                        "kind": "derived",
+                        "source": "renderer",
+                        "derived_from": ["pad-hole", "via-hole"],
+                    }
+                )
+            else:
+                entry.update({"kind": "native", "source": "altium"})
+            entries.append(entry)
+        return entries
+
     def relationship_metadata_attrs(
         self,
         *,
@@ -384,6 +435,20 @@ class PcbSvgRenderContext:
         """
         included_ids_sorted = sorted({int(layer_id) for layer_id in included_layer_ids})
 
+        layers_payload: dict[str, object] = {
+            "all_layer_ids": [int(layer_id) for layer_id in self.all_layer_ids],
+            "layer_id_to_key": {
+                str(layer_id): self.layer_key(layer_id)
+                for layer_id in self.all_layer_ids
+            },
+            "layer_id_to_name": {
+                str(layer_id): self.layer_name(layer_id)
+                for layer_id in self.all_layer_ids
+            },
+        }
+        if self.options.include_render_layer_metadata:
+            layers_payload["render_layers"] = self.render_layer_metadata_entries()
+
         payload: dict[str, object] = {
             "schema": SVG_ENRICHMENT_SCHEMA_ID,
             "source": {"pcbdoc_file": pcbdoc_filename or ""},
@@ -407,17 +472,7 @@ class PcbSvgRenderContext:
                 "included_layer_ids": included_ids_sorted,
                 "includes_board_outline": bool(includes_board_outline),
             },
-            "layers": {
-                "all_layer_ids": [int(layer_id) for layer_id in self.all_layer_ids],
-                "layer_id_to_key": {
-                    str(layer_id): self.layer_key(layer_id)
-                    for layer_id in self.all_layer_ids
-                },
-                "layer_id_to_name": {
-                    str(layer_id): self.layer_name(layer_id)
-                    for layer_id in self.all_layer_ids
-                },
-            },
+            "layers": layers_payload,
             "lookup": {
                 "net_index_to_name": {
                     str(idx): name
@@ -455,6 +510,7 @@ class _PcbSvgLayerCacheEntry:
     layer_color: str
     base_primitives: tuple[str, ...]
     drill_primitives: tuple[str, ...]
+    overlay_primitives: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -779,12 +835,6 @@ class PcbSvgRenderer:
             render_cache,
             drill_source_layers=drill_source_layers,
         )
-        active_layer_ids, view_kind = self._resolve_render_view(
-            ctx,
-            layers,
-            drill_group_primitives,
-        )
-        svg_attrs = self._build_svg_document_attrs(ctx, pcbdoc, view_kind)
         board_clip_id, board_clip_path_d = self._resolve_board_clip_definition(
             ctx,
             pcbdoc,
@@ -802,13 +852,39 @@ class PcbSvgRenderer:
             pcbdoc,
         )
 
+        outline_group: list[str] = []
+        if include_board_outline and self.options.show_board_outline:
+            outline_group = self._render_board_outline(
+                ctx,
+                pcbdoc.board.outline if pcbdoc.board else None,
+                stroke_color=layer_color_override or self.options.board_outline_color,
+            )
+
+        rendered_layer_lines = self._render_requested_layers(
+            ctx,
+            pcbdoc,
+            layers,
+            layer_color_override,
+            render_cache,
+            board_clip_id=board_clip_id,
+            layer_hole_masks=layer_hole_masks,
+        )
+        active_layer_ids = self._rendered_layer_ids_from_layer_lines(
+            layers,
+            rendered_layer_lines,
+        )
+        if drill_group_primitives:
+            active_layer_ids.append(PCB_SVG_DRILLS_LAYER_ID)
+        active_layer_ids, view_kind = self._resolve_render_view(ctx, active_layer_ids)
+        svg_attrs = self._build_svg_document_attrs(ctx, pcbdoc, view_kind)
+
         lines = [f"<svg {' '.join(svg_attrs)}>"]
         self._append_svg_metadata(
             lines,
             ctx,
             view_kind,
             active_layer_ids,
-            include_board_outline=include_board_outline,
+            includes_board_outline=bool(outline_group),
             pcbdoc=pcbdoc,
         )
         self._append_svg_defs(
@@ -821,26 +897,10 @@ class PcbSvgRenderer:
         )
         lines.append(f"  <g {' '.join(self._build_scene_attrs(ctx))}>")
 
-        if include_board_outline and self.options.show_board_outline:
-            outline_group = self._render_board_outline(
-                ctx,
-                pcbdoc.board.outline if pcbdoc.board else None,
-                stroke_color=layer_color_override or self.options.board_outline_color,
-            )
-            if outline_group:
-                lines.extend(outline_group)
+        if outline_group:
+            lines.extend(outline_group)
 
-        lines.extend(
-            self._render_requested_layers(
-                ctx,
-                pcbdoc,
-                layers,
-                layer_color_override,
-                render_cache,
-                board_clip_id=board_clip_id,
-                layer_hole_masks=layer_hole_masks,
-            )
-        )
+        lines.extend(rendered_layer_lines)
 
         if drill_group_primitives:
             drill_layer_clip = (
@@ -862,6 +922,17 @@ class PcbSvgRenderer:
 
         if extra_scene:
             lines.extend(extra_scene)
+
+        lines.extend(
+            self._render_top_pad_designator_overlay_group(
+                ctx,
+                pcbdoc,
+                layers,
+                render_cache,
+                board_clip_id=board_clip_id,
+            )
+        )
+        lines.extend(self._render_top_origin_datum_overlay_group(ctx))
 
         lines.append("  </g>")
         lines.append("</svg>")
@@ -932,15 +1003,24 @@ class PcbSvgRenderer:
             layer,
         )
 
+    @staticmethod
+    def _rendered_layer_ids_from_layer_lines(
+        layers: list[PcbLayer],
+        layer_lines: list[str],
+    ) -> list[int]:
+        rendered_text = "\n".join(layer_lines)
+        return [
+            int(layer.value)
+            for layer in layers
+            if f'id="layer-{layer.to_json_name()}"' in rendered_text
+        ]
+
     def _resolve_render_view(
         self,
         ctx: PcbSvgRenderContext,
-        layers: list[PcbLayer],
-        drill_group_primitives: list[str],
+        active_layer_ids: list[int],
     ) -> tuple[list[int], str]:
-        active_layer_ids = sorted({int(layer.value) for layer in layers})
-        if drill_group_primitives:
-            active_layer_ids = sorted({*active_layer_ids, PCB_SVG_DRILLS_LAYER_ID})
+        active_layer_ids = sorted({int(layer_id) for layer_id in active_layer_ids})
 
         if not active_layer_ids:
             return active_layer_ids, "board_outline_only"
@@ -1093,7 +1173,7 @@ class PcbSvgRenderer:
         view_kind: str,
         active_layer_ids: list[int],
         *,
-        include_board_outline: bool,
+        includes_board_outline: bool,
         pcbdoc: "AltiumPcbDoc",
     ) -> None:
         if not self.options.include_metadata:
@@ -1102,9 +1182,7 @@ class PcbSvgRenderer:
         enrichment_payload = ctx.enrichment_metadata_payload(
             view_kind=view_kind,
             included_layer_ids=active_layer_ids,
-            includes_board_outline=bool(
-                include_board_outline and self.options.show_board_outline
-            ),
+            includes_board_outline=includes_board_outline,
             pcbdoc_filename=pcbdoc.filepath.name if pcbdoc.filepath else None,
         )
         payload_json = json.dumps(
@@ -1250,6 +1328,11 @@ class PcbSvgRenderer:
             cache_entry.layer_color,
             cache_entry.base_primitives,
             [] if self.options.drill_holes_as_layer_group else layer_drill_primitives,
+            (
+                []
+                if self._pad_designator_overlays_render_top()
+                else cache_entry.overlay_primitives
+            ),
             clip_path_id=clip_path_id,
             mask_id=mask_id,
         )
@@ -1265,11 +1348,13 @@ class PcbSvgRenderer:
         mask_id: str | None,
     ) -> list[str]:
         if self.options.drill_holes_as_layer_group:
-            layer_color, base_primitives, _ = self._collect_layer_primitives(
-                ctx,
-                pcbdoc,
-                layer,
-                layer_color_override,
+            layer_color, base_primitives, _, overlay_primitives = (
+                self._collect_layer_primitives(
+                    ctx,
+                    pcbdoc,
+                    layer,
+                    layer_color_override,
+                )
             )
             return self._render_layer_group_from_primitives(
                 ctx,
@@ -1277,6 +1362,7 @@ class PcbSvgRenderer:
                 layer_color,
                 base_primitives,
                 [],
+                [] if self._pad_designator_overlays_render_top() else overlay_primitives,
                 clip_path_id=clip_path_id,
                 mask_id=mask_id,
             )
@@ -1288,6 +1374,177 @@ class PcbSvgRenderer:
             clip_path_id=clip_path_id,
             mask_id=mask_id,
         )
+
+    def _render_top_pad_designator_overlay_group(
+        self,
+        ctx: PcbSvgRenderContext,
+        pcbdoc: "AltiumPcbDoc",
+        layers: list[PcbLayer],
+        render_cache: _PcbSvgRenderCache | None,
+        *,
+        board_clip_id: str | None,
+    ) -> list[str]:
+        if not self._pad_designator_overlays_render_top():
+            return []
+
+        overlay_primitives: list[str] = []
+        for layer in layers:
+            if not layer.is_copper():
+                continue
+            cache_entry = (
+                render_cache.layer_entries.get(layer.value)
+                if render_cache is not None
+                else None
+            )
+            if cache_entry is not None:
+                overlay_primitives.extend(cache_entry.overlay_primitives)
+            else:
+                overlay_primitives.extend(
+                    self._render_pad_designator_overlay_for_layer(ctx, pcbdoc, layer)
+                )
+        if not overlay_primitives:
+            return []
+
+        attrs = [
+            'id="pcb-pad-designator-overlays"',
+            'class="pcb-pad-designator-overlays"',
+        ]
+        if board_clip_id:
+            attrs.append(f'clip-path="url(#{html.escape(board_clip_id)})"')
+        if self.options.include_metadata:
+            attrs.extend(
+                [
+                    'data-overlay-container="pad-designator"',
+                    'data-overlay-z-order="top"',
+                ]
+            )
+
+        lines = [f"    <g {' '.join(attrs)}>"]
+        for primitive in overlay_primitives:
+            lines.append(f"      {primitive}")
+        lines.append("    </g>")
+        return lines
+
+    def _pad_designator_overlays_render_top(self) -> bool:
+        if not self.options.show_pad_designators:
+            return False
+        return (
+            str(self.options.pad_designator_overlay_z_order).strip().lower()
+            in {"top", "above_layers", "above-layers", "front"}
+        )
+
+    def _render_top_origin_datum_overlay_group(
+        self,
+        ctx: PcbSvgRenderContext,
+    ) -> list[str]:
+        if not self.options.show_origin_datum:
+            return []
+
+        cx = ctx.x_to_svg(0.0)
+        cy = ctx.y_to_svg(0.0)
+        marker_size = max(float(self.options.origin_datum_marker_size_mm), 0.05)
+        radius = marker_size * 0.5
+        cross_radius = radius * 1.35
+        stroke_width = max(float(self.options.origin_datum_stroke_width_mm), 0.0)
+        color = html.escape(str(self.options.origin_datum_color))
+        marker_style = self._normalized_origin_datum_marker_style(
+            self.options.origin_datum_marker_style
+        )
+        show_circle = marker_style in {"circle", "circle_cross"}
+        show_cross = marker_style in {"cross", "circle_cross"}
+
+        attrs = [
+            'id="pcb-origin-datum-overlay"',
+            'class="pcb-origin-datum-overlay"',
+            'pointer-events="none"',
+        ]
+        if self.options.include_metadata:
+            attrs.extend(
+                [
+                    'data-overlay-kind="origin-datum"',
+                    'data-overlay-role="reference-datum"',
+                    'data-overlay-z-order="top"',
+                    'data-origin-x-mils="0"',
+                    'data-origin-y-mils="0"',
+                    f'data-origin-svg-x-mm="{ctx.fmt(cx)}"',
+                    f'data-origin-svg-y-mm="{ctx.fmt(cy)}"',
+                    f'data-marker-style="{marker_style}"',
+                    f'data-marker-size-mm="{ctx.fmt(marker_size)}"',
+                ]
+            )
+
+        common_attrs = [
+            'fill="none"',
+            f'stroke="{color}"',
+            f'stroke-width="{ctx.fmt(stroke_width)}"',
+            'stroke-linecap="round"',
+            'vector-effect="non-scaling-stroke"',
+        ]
+        circle_attrs = [
+            'class="pcb-origin-datum-circle"',
+            f'cx="{ctx.fmt(cx)}"',
+            f'cy="{ctx.fmt(cy)}"',
+            f'r="{ctx.fmt(radius)}"',
+            *common_attrs,
+        ]
+        horizontal_attrs = [
+            'class="pcb-origin-datum-cross pcb-origin-datum-cross-horizontal"',
+            f'x1="{ctx.fmt(cx - cross_radius)}"',
+            f'y1="{ctx.fmt(cy)}"',
+            f'x2="{ctx.fmt(cx + cross_radius)}"',
+            f'y2="{ctx.fmt(cy)}"',
+            *common_attrs,
+        ]
+        vertical_attrs = [
+            'class="pcb-origin-datum-cross pcb-origin-datum-cross-vertical"',
+            f'x1="{ctx.fmt(cx)}"',
+            f'y1="{ctx.fmt(cy - cross_radius)}"',
+            f'x2="{ctx.fmt(cx)}"',
+            f'y2="{ctx.fmt(cy + cross_radius)}"',
+            *common_attrs,
+        ]
+        if not show_circle:
+            circle_attrs.append('style="display:none"')
+        if not show_cross:
+            horizontal_attrs.append('style="display:none"')
+            vertical_attrs.append('style="display:none"')
+        if self.options.include_metadata:
+            circle_attrs.extend(
+                [
+                    'data-primitive="origin-datum-circle"',
+                    'data-overlay-kind="origin-datum"',
+                    'data-marker-part="circle"',
+                ]
+            )
+            horizontal_attrs.extend(
+                [
+                    'data-primitive="origin-datum-cross"',
+                    'data-overlay-kind="origin-datum"',
+                    'data-marker-part="cross-horizontal"',
+                ]
+            )
+            vertical_attrs.extend(
+                [
+                    'data-primitive="origin-datum-cross"',
+                    'data-overlay-kind="origin-datum"',
+                    'data-marker-part="cross-vertical"',
+                ]
+            )
+
+        return [
+            f"    <g {' '.join(attrs)}>",
+            f"      <circle {' '.join(circle_attrs)}/>",
+            f"      <line {' '.join(horizontal_attrs)}/>",
+            f"      <line {' '.join(vertical_attrs)}/>",
+            "    </g>",
+        ]
+
+    @staticmethod
+    def _normalized_origin_datum_marker_style(marker_style: str) -> str:
+        normalized = str(marker_style or "").strip().lower().replace("-", "_")
+        if normalized in {"circle", "cross", "circle_cross"}:
+            return normalized
+        return "circle_cross"
 
     def _render_drill_layer_group(
         self,
@@ -1337,7 +1594,7 @@ class PcbSvgRenderer:
         layer_entries: dict[int, _PcbSvgLayerCacheEntry] = {}
         hole_mask_elements: dict[int, tuple[str, ...]] = {}
         for layer in layers:
-            layer_color, base_primitives, drill_primitives = (
+            layer_color, base_primitives, drill_primitives, overlay_primitives = (
                 self._collect_layer_primitives(
                     ctx,
                     pcbdoc,
@@ -1349,6 +1606,7 @@ class PcbSvgRenderer:
                 layer_color=layer_color,
                 base_primitives=tuple(base_primitives),
                 drill_primitives=tuple(drill_primitives),
+                overlay_primitives=tuple(overlay_primitives),
             )
 
             if self.options.clip_holes_from_copper and layer.is_copper():
@@ -1838,6 +2096,25 @@ class PcbSvgRenderer:
                 for vertex in cutout:
                     self._update_bounds_point(bounds, vertex.x_mils, vertex.y_mils)
 
+    def _update_origin_datum_bounds(self, bounds: dict[str, float | None]) -> None:
+        if not self.options.show_origin_datum:
+            return
+
+        marker_size_mils = (
+            max(float(self.options.origin_datum_marker_size_mm), 0.05) / _MIL_TO_MM
+        )
+        stroke_width_mils = (
+            max(float(self.options.origin_datum_stroke_width_mm), 0.0) / _MIL_TO_MM
+        )
+        radius_mils = marker_size_mils * 0.5 * 1.35 + stroke_width_mils
+        self._update_bounds_box(
+            bounds,
+            -radius_mils,
+            -radius_mils,
+            radius_mils,
+            radius_mils,
+        )
+
     def _compute_bounds_mils(
         self, pcbdoc: "AltiumPcbDoc"
     ) -> tuple[float, float, float, float]:
@@ -1858,6 +2135,7 @@ class PcbSvgRenderer:
         self._update_shapebased_region_bounds(bounds, pcbdoc)
         self._update_text_bounds(bounds, pcbdoc)
         self._update_polygon_overlay_bounds(bounds, pcbdoc)
+        self._update_origin_datum_bounds(bounds)
 
         min_x = bounds["min_x"]
         min_y = bounds["min_y"]
@@ -1890,7 +2168,13 @@ class PcbSvgRenderer:
         *,
         force_all: bool = False,
     ) -> list[PcbLayer]:
-        visible = set() if force_all else set(self.options.visible_layers or [])
+        requested_visible_layers = None if force_all else self.options.visible_layers
+        visible_layer_order = self._visible_layer_order_hint(requested_visible_layers)
+        visible = (
+            set()
+            if requested_visible_layers is None
+            else set(self._coerced_layers(requested_visible_layers))
+        )
         if not visible:
             resolved = self._resolved_layer_stack_safe(pcbdoc)
             stackup_copper_layers = self._stackup_copper_layers(pcbdoc)
@@ -1915,7 +2199,30 @@ class PcbSvgRenderer:
 
         if not visible:
             visible = {PcbLayer.TOP, PcbLayer.BOTTOM}
-        return self._order_visible_layers(visible, force_all=force_all)
+        return self._order_visible_layers(
+            visible,
+            force_all=force_all,
+            visible_layer_order=visible_layer_order,
+        )
+
+    @staticmethod
+    def _coerced_layers(layers: Collection[PcbLayer]) -> list[PcbLayer]:
+        return [
+            layer if isinstance(layer, PcbLayer) else PcbLayer(int(layer))
+            for layer in layers
+        ]
+
+    def _visible_layer_order_hint(
+        self,
+        visible_layers: Collection[PcbLayer] | None,
+    ) -> list[PcbLayer] | None:
+        if self.options.layer_render_order or not isinstance(visible_layers, Sequence):
+            return None
+        ordered: list[PcbLayer] = []
+        for layer in self._coerced_layers(visible_layers):
+            if layer not in ordered:
+                ordered.append(layer)
+        return ordered
 
     def _collect_visible_primitive_layers(
         self,
@@ -2094,12 +2401,23 @@ class PcbSvgRenderer:
         visible: set[PcbLayer],
         *,
         force_all: bool,
+        visible_layer_order: list[PcbLayer] | None,
     ) -> list[PcbLayer]:
         if not force_all and self.options.layer_render_order:
             ordered_layers: list[PcbLayer] = []
             for layer in self.options.layer_render_order:
+                if not isinstance(layer, PcbLayer):
+                    layer = PcbLayer(int(layer))
                 if layer in visible and layer not in ordered_layers:
                     ordered_layers.append(layer)
+            for layer in sorted(visible, key=lambda item: item.value):
+                if layer not in ordered_layers:
+                    ordered_layers.append(layer)
+            return ordered_layers
+        if not force_all and visible_layer_order:
+            ordered_layers = [
+                layer for layer in visible_layer_order if layer in visible
+            ]
             for layer in sorted(visible, key=lambda item: item.value):
                 if layer not in ordered_layers:
                     ordered_layers.append(layer)
@@ -2140,11 +2458,13 @@ class PcbSvgRenderer:
         clip_path_id: str | None = None,
         mask_id: str | None = None,
     ) -> list[str]:
-        layer_color, base_primitives, drill_primitives = self._collect_layer_primitives(
-            ctx,
-            pcbdoc,
-            layer,
-            layer_color_override,
+        layer_color, base_primitives, drill_primitives, overlay_primitives = (
+            self._collect_layer_primitives(
+                ctx,
+                pcbdoc,
+                layer,
+                layer_color_override,
+            )
         )
         return self._render_layer_group_from_primitives(
             ctx,
@@ -2152,6 +2472,7 @@ class PcbSvgRenderer:
             layer_color,
             base_primitives,
             drill_primitives,
+            overlay_primitives,
             clip_path_id=clip_path_id,
             mask_id=mask_id,
         )
@@ -2162,9 +2483,9 @@ class PcbSvgRenderer:
         pcbdoc: "AltiumPcbDoc",
         layer: PcbLayer,
         layer_color_override: str | None = None,
-    ) -> tuple[str, list[str], list[str]]:
+    ) -> tuple[str, list[str], list[str], list[str]]:
         """
-        Collect non-hole and drill-hole primitives for a layer.
+        Collect non-hole, drill-hole, and overlay primitives for a layer.
         """
         layer_color = (
             layer_color_override
@@ -2200,7 +2521,12 @@ class PcbSvgRenderer:
             )
 
         drill_primitives = self._render_drill_holes_for_layer(ctx, pcbdoc, layer)
-        return layer_color, base_primitives, drill_primitives
+        overlay_primitives = self._render_pad_designator_overlay_for_layer(
+            ctx,
+            pcbdoc,
+            layer,
+        )
+        return layer_color, base_primitives, drill_primitives, overlay_primitives
 
     def _render_layer_group_from_primitives(
         self,
@@ -2209,6 +2535,7 @@ class PcbSvgRenderer:
         layer_color: str,
         base_primitives: list[str] | tuple[str, ...],
         drill_primitives: list[str] | tuple[str, ...],
+        overlay_primitives: list[str] | tuple[str, ...],
         *,
         clip_path_id: str | None = None,
         mask_id: str | None = None,
@@ -2223,7 +2550,9 @@ class PcbSvgRenderer:
             and drill_mode == "overlay"
             and bool(drill_primitives)
         )
-        total_primitive_count = len(base_primitives) + len(drill_primitives)
+        total_primitive_count = (
+            len(base_primitives) + len(drill_primitives) + len(overlay_primitives)
+        )
         if total_primitive_count == 0 and not self.options.show_empty_layers:
             return []
 
@@ -2276,10 +2605,28 @@ class PcbSvgRenderer:
                 )
             if overlay_group_attrs:
                 lines.append("      </g>")
+            if overlay_primitives:
+                label_group_attrs: list[str] = []
+                if clip_path_id:
+                    label_group_attrs.append(
+                        f'clip-path="url(#{html.escape(clip_path_id)})"'
+                    )
+                if label_group_attrs:
+                    lines.append(f"      <g {' '.join(label_group_attrs)}>")
+                for primitive in overlay_primitives:
+                    lines.append(
+                        f"        {primitive}"
+                        if label_group_attrs
+                        else f"      {primitive}"
+                    )
+                if label_group_attrs:
+                    lines.append("      </g>")
         else:
             for primitive in base_primitives:
                 lines.append(f"      {primitive}")
             for primitive in drill_primitives:
+                lines.append(f"      {primitive}")
+            for primitive in overlay_primitives:
                 lines.append(f"      {primitive}")
         lines.append("    </g>")
         return lines
@@ -2440,6 +2787,152 @@ class PcbSvgRenderer:
             layer_color,
             render_holes=False,
         )
+
+    def _render_pad_designator_overlay_for_layer(
+        self,
+        ctx: PcbSvgRenderContext,
+        pcbdoc: "AltiumPcbDoc",
+        layer: PcbLayer,
+    ) -> list[str]:
+        if not self.options.show_pad_designators:
+            return []
+        if not layer.is_copper():
+            return []
+
+        labels: list[str] = []
+        for pad in getattr(pcbdoc, "pads", []) or []:
+            if self._should_skip_primitive_for_svg(pad):
+                continue
+            label = str(getattr(pad, "designator", "") or "").strip()
+            if not label:
+                continue
+            label_element = self._pad_designator_label_element(ctx, pad, layer, label)
+            if label_element:
+                labels.append(label_element)
+        if not labels:
+            return []
+
+        attrs = ['class="pcb-pad-designator-overlay"']
+        if self.options.include_metadata:
+            attrs.extend(
+                [
+                    'data-overlay-kind="pad-designator"',
+                    'data-overlay-role="review-annotation"',
+                ]
+            )
+            attrs.extend(ctx.layer_metadata_attrs(layer.value))
+        lines = [f"<g {' '.join(attrs)}>"]
+        lines.extend(f"  {label}" for label in labels)
+        lines.append("</g>")
+        return ["\n".join(lines)]
+
+    def _pad_designator_label_element(
+        self,
+        ctx: PcbSvgRenderContext,
+        pad: object,
+        layer: PcbLayer,
+        label: str,
+    ) -> str | None:
+        if not self._pad_designator_should_render_on_layer(pad, layer):
+            return None
+
+        source_layer = pad._source_layer()  # noqa: SLF001
+        geometry = pad._pad_svg_geometry_state(  # noqa: SLF001
+            ctx,
+            layer=layer,
+            source_layer=source_layer,
+        )
+        if geometry is None:
+            return None
+
+        font_size = self._pad_designator_font_size_mm(
+            label,
+            width_mm=float(geometry["width_mm"]),
+            height_mm=float(geometry["height_mm"]),
+        )
+        if font_size is None:
+            return None
+
+        attrs = [
+            'class="pcb-pad-designator-label"',
+            f'x="{ctx.fmt(float(geometry["cx"]))}"',
+            f'y="{ctx.fmt(float(geometry["cy"]))}"',
+            f'font-family="{html.escape(self.options.pad_designator_font_family)}"',
+            f'font-size="{ctx.fmt(font_size)}"',
+            'text-anchor="middle"',
+            'dominant-baseline="central"',
+            'pointer-events="none"',
+            f'fill="{html.escape(str(self.options.pad_designator_fill))}"',
+        ]
+        if self.options.include_metadata:
+            escaped_label = html.escape(label)
+            attrs.extend(
+                [
+                    'data-primitive="pad-designator-label"',
+                    'data-overlay-kind="pad-designator"',
+                    f'data-pad-designator="{escaped_label}"',
+                    f'data-pad-number="{escaped_label}"',
+                ]
+            )
+            attrs.extend(ctx.layer_metadata_attrs(layer.value))
+            attrs.extend(
+                ctx.relationship_metadata_attrs(
+                    net_index=getattr(pad, "net_index", None),
+                    component_index=getattr(pad, "component_index", None),
+                )
+            )
+            element_id_attr = ctx.primitive_id_attr(
+                "pad",
+                pad,
+                layer_id=layer.value,
+                role="designator-label",
+            )
+            if element_id_attr:
+                attrs.append(element_id_attr)
+
+        return f"<text {' '.join(attrs)}>{html.escape(label)}</text>"
+
+    def _pad_designator_should_render_on_layer(
+        self,
+        pad: object,
+        layer: PcbLayer,
+    ) -> bool:
+        if not layer.is_copper():
+            return False
+        try:
+            if not pad._should_render_on_layer(  # noqa: SLF001
+                layer
+            ) and not pad._should_force_svg_copper_render(layer):  # noqa: SLF001
+                return False
+            width_iu, height_iu = pad._layer_size(layer)  # noqa: SLF001
+        except Exception:
+            return False
+        return int(width_iu) > 0 and int(height_iu) > 0
+
+    def _pad_designator_font_size_mm(
+        self,
+        label: str,
+        *,
+        width_mm: float,
+        height_mm: float,
+    ) -> float | None:
+        padding_ratio = max(
+            0.0, min(float(self.options.pad_designator_padding_ratio), 0.45)
+        )
+        available_w = max(float(width_mm) * (1.0 - padding_ratio), 0.0)
+        available_h = max(float(height_mm) * (1.0 - padding_ratio), 0.0)
+        if available_w <= 0.0 or available_h <= 0.0:
+            return None
+
+        glyph_count = max(len(label), 1)
+        width_limited = available_w / max(glyph_count * 0.62, 1.0)
+        height_limited = available_h * 0.72
+        font_size = min(width_limited, height_limited)
+        max_size = self.options.pad_designator_max_font_size_mm
+        if max_size is not None:
+            font_size = min(font_size, max(float(max_size), 0.0))
+
+        return font_size
 
     def _render_vias_for_layer(
         self,

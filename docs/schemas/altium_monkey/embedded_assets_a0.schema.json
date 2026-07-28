@@ -1,0 +1,446 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wavenumber-eng.github.io/altium-monkey/schemas/altium_monkey/embedded_assets_a0.schema.json",
+  "title": "Altium Monkey PCB embedded asset inventory A0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "source_kind", "source_path", "models", "fonts", "opaque_assets"],
+  "properties": {
+    "schema": {
+      "const": "altium_monkey.pcb.embedded_assets.a0"
+    },
+    "source_kind": {
+      "$ref": "#/$defs/sourceKind"
+    },
+    "source_path": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/modelSummary"
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fontSummary"
+      }
+    },
+    "opaque_assets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/opaqueSummary"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source_kind": {
+            "const": "pcbdoc"
+          }
+        },
+        "required": ["source_kind"]
+      },
+      "then": {
+        "properties": {
+          "models": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/modelSummary"
+                },
+                {
+                  "$ref": "#/$defs/pcbdocSource"
+                }
+              ]
+            }
+          },
+          "fonts": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/fontSummary"
+                },
+                {
+                  "$ref": "#/$defs/pcbdocSource"
+                }
+              ]
+            }
+          },
+          "opaque_assets": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_kind": {
+            "const": "pcblib"
+          }
+        },
+        "required": ["source_kind"]
+      },
+      "then": {
+        "properties": {
+          "models": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/modelSummary"
+                },
+                {
+                  "$ref": "#/$defs/pcblibSource"
+                }
+              ]
+            }
+          },
+          "fonts": {
+            "maxItems": 0
+          },
+          "opaque_assets": {
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/opaqueSummary"
+                },
+                {
+                  "$ref": "#/$defs/pcblibSource"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sourceKind": {
+      "type": "string",
+      "enum": ["pcbdoc", "pcblib"]
+    },
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "nullableInteger": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "nullableSha256": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ]
+    },
+    "pcbdocSource": {
+      "properties": {
+        "source_kind": {
+          "const": "pcbdoc"
+        }
+      }
+    },
+    "pcblibSource": {
+      "properties": {
+        "source_kind": {
+          "const": "pcblib"
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_object_kind",
+        "source_object_index",
+        "asset_kind",
+        "asset_index",
+        "asset_id",
+        "role"
+      ],
+      "properties": {
+        "source_object_kind": {
+          "type": "string",
+          "enum": ["component_body", "footprint", "pcb_component", "unknown"]
+        },
+        "source_object_index": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "asset_kind": {
+          "const": "model"
+        },
+        "asset_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "asset_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "role": {
+          "$ref": "#/$defs/nullableString"
+        }
+      }
+    },
+    "modelSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "index",
+        "source_kind",
+        "source_path",
+        "name",
+        "id",
+        "extraction_filename",
+        "model_format",
+        "is_embedded",
+        "compressed_size",
+        "decompressed_size",
+        "payload_available",
+        "payload_sha256",
+        "altium_checksum",
+        "references"
+      ],
+      "properties": {
+        "kind": {
+          "const": "model"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_kind": {
+          "$ref": "#/$defs/sourceKind"
+        },
+        "source_path": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "name": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "extraction_filename": {
+          "type": "string"
+        },
+        "model_format": {
+          "type": "string",
+          "enum": ["step", "parasolid_text", "parasolid_binary", "solidworks", "unknown"]
+        },
+        "is_embedded": {
+          "type": "boolean"
+        },
+        "compressed_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decompressed_size": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "payload_available": {
+          "type": "boolean"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "altium_checksum": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "payload_available": {
+                "const": false
+              }
+            },
+            "required": ["payload_available"]
+          },
+          "then": {
+            "properties": {
+              "decompressed_size": {
+                "const": null
+              },
+              "payload_sha256": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    "fontSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "index",
+        "source_kind",
+        "source_path",
+        "family_name",
+        "style",
+        "extraction_filename",
+        "compressed_size",
+        "decompressed_size",
+        "raw_size",
+        "payload_available",
+        "payload_sha256",
+        "support_status"
+      ],
+      "properties": {
+        "kind": {
+          "const": "font"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_kind": {
+          "$ref": "#/$defs/sourceKind"
+        },
+        "source_path": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "family_name": {
+          "type": "string"
+        },
+        "style": {
+          "type": "string"
+        },
+        "extraction_filename": {
+          "type": "string"
+        },
+        "compressed_size": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "decompressed_size": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "raw_size": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "payload_available": {
+          "type": "boolean"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "support_status": {
+          "type": "string",
+          "enum": ["supported", "opaque", "unsupported"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "payload_available": {
+                "const": false
+              }
+            },
+            "required": ["payload_available"]
+          },
+          "then": {
+            "properties": {
+              "decompressed_size": {
+                "const": null
+              },
+              "payload_sha256": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    },
+    "opaqueSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "index",
+        "source_kind",
+        "source_path",
+        "stream_name",
+        "extraction_filename",
+        "raw_size",
+        "payload_available",
+        "payload_sha256",
+        "support_status",
+        "reason"
+      ],
+      "properties": {
+        "kind": {
+          "const": "opaque"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_kind": {
+          "$ref": "#/$defs/sourceKind"
+        },
+        "source_path": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "stream_name": {
+          "type": "string"
+        },
+        "extraction_filename": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "raw_size": {
+          "$ref": "#/$defs/nullableInteger"
+        },
+        "payload_available": {
+          "type": "boolean"
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/nullableSha256"
+        },
+        "support_status": {
+          "type": "string",
+          "enum": ["opaque", "unsupported"]
+        },
+        "reason": {
+          "$ref": "#/$defs/nullableString"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "payload_available": {
+                "const": false
+              }
+            },
+            "required": ["payload_available"]
+          },
+          "then": {
+            "properties": {
+              "payload_sha256": {
+                "const": null
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

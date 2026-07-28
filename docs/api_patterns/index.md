@@ -87,7 +87,16 @@ preserves that order when placing a symbol into a schematic.
 
 For PcbDoc and PcbLib authoring, use the high-level `add_*` methods. They keep
 the record lists, net tables, embedded model streams, layer references, and
-authoring metadata synchronized. Save with `save(...)` when finished.
+authoring metadata synchronized. Current PCB `layer=` arguments are
+legacy-layer-first; see [PCB layers](pcb_layers.md) before working with V7
+saved layer ids, Mechanical 17+ metadata, or AD 26.8.1 extended signal-layer
+metadata. Save with `save(...)` when finished.
+
+For single-item inspection and extraction, use
+[`asset_inventory(...)`](extractable_assets.md). `AltiumPcbDoc`,
+`AltiumPcbLib`, `AltiumSchDoc`, and `AltiumSchLib` can return typed selectable
+assets and stable `AltiumAssetRef` handles for one footprint, symbol, embedded
+model, embedded font, or opaque embedded payload.
 
 ## ObjectCollection
 
@@ -164,19 +173,21 @@ Stable public patterns:
 - `AltiumSchDoc.from_file(...)`, `schdoc.add_object(...)`,
   `schdoc.remove_object(...)`, `schdoc.add_component_from_library(...)`,
   `schdoc.clear_template()`, `schdoc.apply_template(...)`,
-  `schdoc.extract_template(...)`, `schdoc.extract_embedded_images(...)`, and
+  `schdoc.extract_template(...)`, `schdoc.extract_embedded_images(...)`,
+  `schdoc.asset_inventory(...)`, `schdoc.extract_asset(...)`, and
   `schdoc.save(...)`.
 - `make_sch_*` factory functions, schematic enums, `SchPointMils`,
   `SchRectMils`, `SchFontSpec`, and `ColorValue`.
 - `AltiumSchLib`, `AltiumSymbol`, symbol helper methods, `split(...)`,
-  `merge(...)`, and `save(...)`.
+  `merge(...)`, `asset_inventory(...)`, `extract_asset(...)`, and `save(...)`.
 - `AltiumPcbDoc` high-level `add_*`, extraction, rendering, and `save(...)`
   methods.
 - `AltiumPcbVia` fields for via geometry, IPC-4761 type, IPC-4761 feature
   rows, propagation delay in picoseconds, tenting, fabrication testpoint, and
   assembly testpoint metadata.
 - `AltiumPcbLib`, `AltiumPcbFootprint`, footprint high-level `add_*`,
-  embedded-model, SVG, split, and save methods.
+  embedded-model, SVG, split, asset-inventory, single-asset extraction, and
+  save methods.
 - `AltiumPrjPcb` for project parameters, variants, document references, and
   associated OutJob resolution.
 - `AltiumPrjPcbBuilder` for minimal new `.PrjPcb` generation.
@@ -189,6 +200,10 @@ Use with care:
   the raw SchDoc Storage payload and may contain Altium wrapper bytes; use
   `schdoc.extract_embedded_images(...)` for normal image export.
 - Direct edits to PCB typed lists such as `pcbdoc.tracks` or `pcbdoc.pads`.
+- Passing serialized V7 saved layer ids as PCB `layer=` arguments unless the
+  method explicitly documents a V7 override. Current ordinary layer arguments
+  use the legacy/TV6 `PcbLayer` enum, which is limited to Top, Mid1..Mid30,
+  Bottom, Mechanical 1..16, and the documented legacy non-copper layers.
 - Manual management of `IndexInSheet`, `OwnerIndex`, font indexes, component
   indexes, net indexes, model checksums, stream names, or binary stream order.
 - Low-level serializer fields that expose Altium's native units or native enum
@@ -280,3 +295,13 @@ and
 
 For integrated library source recovery, see
 [`intlib_extract_sources`](../../examples/intlib_extract_sources/README.md).
+
+For read-only embedded PCB/PcbLib model, font, and opaque payload inventory,
+see [`embedded_assets`](embedded_assets.md).
+
+For typed asset inventory and one-item extraction, see
+[`extractable_asset_inventory`](../../examples/extractable_asset_inventory/README.md).
+
+For project-level compiled schematic output, repeated sheets, resolved channel
+designators, and `design.a1` to `design.a2` migration, see
+[`compiled_design`](compiled_design.md).

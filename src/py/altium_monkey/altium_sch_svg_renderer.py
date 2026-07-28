@@ -1994,6 +1994,11 @@ class SchSvgRenderContext:
     # Used when schematic-level parameters don't have a match
     project_parameters: dict[str, str] = field(default_factory=dict)
 
+    # Physical-page rendering overrides.
+    # Keys are designator parameter unique ids; values are resolved physical
+    # designator strings from the compiled project model.
+    designator_text_overrides: dict[str, str] = field(default_factory=dict)
+
     # Compile mask bounds for color blending
     # List of (min_x, min_y, max_x, max_y) tuples in Altium coordinates
     # Objects under compile masks have their colors blended toward background
@@ -2106,8 +2111,6 @@ class SchSvgRenderContext:
 
         def build_expression_parameters() -> dict[str, str]:
             resolved: dict[str, str] = {}
-            for key, value in self.project_parameters.items():
-                resolved[key.lower()] = value
 
             for key, value in self.parameters.items():
                 key_lower = key.lower()
@@ -2118,10 +2121,6 @@ class SchSvgRenderContext:
                     if project_value:
                         resolved[key_lower] = project_value
                         continue
-                if value == "" and lookup_case_insensitive(
-                    self.project_parameters, key_lower
-                ):
-                    continue
                 resolved[key_lower] = value
 
             for key, value in system_defaults.items():

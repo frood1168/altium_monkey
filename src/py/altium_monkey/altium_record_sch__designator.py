@@ -262,7 +262,22 @@ class AltiumSchDesignator(SingleFontBindableRecordMixin, SchPrimitive):
             wrap_record_operations,
         )
 
-        if ctx is not None and not self.is_hidden and self.text:
+        display_text = self.text or ""
+        if ctx is not None:
+            override_keys = []
+            if self.unique_id:
+                override_keys.append(str(self.unique_id))
+            parent_unique_id = str(
+                getattr(getattr(self, "parent", None), "unique_id", "") or ""
+            )
+            if parent_unique_id:
+                override_keys.append(f"component:{parent_unique_id}:designator")
+            for override_key in override_keys:
+                if override_key in ctx.designator_text_overrides:
+                    display_text = ctx.designator_text_overrides[override_key]
+                    break
+
+        if ctx is not None and not self.is_hidden and display_text:
             baseline_x, baseline_y = ctx.transform_coord_precise(self.location)
             baseline_x, baseline_y = round(baseline_x, 3), round(baseline_y, 3)
 
@@ -284,7 +299,7 @@ class AltiumSchDesignator(SingleFontBindableRecordMixin, SchPrimitive):
             )
             font_size_for_width = ctx.get_font_size_for_width(self.font_id)
             text_width = measure_text_width(
-                self.text,
+                display_text,
                 font_size_for_width,
                 font_name,
                 bold=is_bold,
@@ -346,7 +361,7 @@ class AltiumSchDesignator(SingleFontBindableRecordMixin, SchPrimitive):
                 SchGeometryOp.string(
                     x=geometry_x,
                     y=geometry_y,
-                    text=self.text,
+                    text=display_text,
                     font=make_font_payload(
                         name=font_name,
                         size_px=font_size_px,

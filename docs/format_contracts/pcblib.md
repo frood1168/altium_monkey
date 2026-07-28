@@ -62,13 +62,46 @@ If STEP bounds cannot be computed on the current host, footprint authoring may
 fall back to an axis-aligned rectangle around available SMD/through-hole pads as
 a recovery projection. This fallback is not a geometry-equivalent STEP import.
 
+## Embedded Asset Inventory
+
+`AltiumPcbLib.embedded_asset_inventory(...)` is the focused read-only contract
+for PcbLib embedded binary payloads. It lists embedded 3D models without
+writing files, and `get_embedded_model_payload(index)` returns one selected
+available model payload.
+
+Model summaries report `payload_available` from actual payload accessibility.
+Corrupt supported model payloads stay visible for review but report unavailable
+state, no SHA-256 hash, and no decompressed size. Hashes are emitted only when
+requested and only for available payload bytes.
+
+PcbLib `Library/EmbeddedFonts` data is currently preserved as an opaque
+embedded stream rather than parsed as typed font summaries. Consumers should
+use `support_status`, `reason`, and `payload_available` when deciding whether
+to display, import, or extract opaque bytes.
+
+`EmbeddedAssetInventory.to_dict()` emits
+`altium_monkey.pcb.embedded_assets.a0`. Use the broader
+`AltiumAssetInventory` / `altium_monkey.extractable_assets.a0` contract when a
+consumer also needs selectable footprints or schematic symbols.
+
 ## Layer Names
+
+Current footprint primitive authoring APIs are legacy-layer-first. `PcbLayer`
+is the legacy/TV6 enum and contains Top, Mid1 through Mid30, Bottom, and
+Mechanical 1 through Mechanical 16 only. Serialized V7 saved layer ids and
+LayerKindMapping ids are separate identity systems; see the public PCB layers
+guide.
 
 PcbLib footprints do not have a board layer stack. Stable layer keys use token
 names, and default display labels are used only for human-facing labels.
 Mechanical layer display names, enabled flags, and mirror pairs are library
 registry metadata. Mechanical layer kind assignments are semantic metadata and
 do not by themselves rename or enable mechanical layers.
+
+Mechanical 17+ and AD 26.8.1 extended signal-layer primitive
+SVG/export/authoring support is deferred to future V7-aware layer-reference
+work. Do not model these by adding `PcbLayer` enum values after Mechanical 16
+or after Mid30.
 
 ## SVG
 
@@ -83,4 +116,5 @@ See [SVG](svg.md) for the shared rendering contract.
 The PcbLib contract is covered by footprint parsing, split/extract, authoring,
 primitive-parameter and via-structure fixture coverage, 3D model, SVG, public
 examples, and release signoff.
-
+Embedded asset inventory behavior is covered by `L6_056`, the public
+`embedded_assets_a0` schema tests, and the `embedded_asset_inventory` example.

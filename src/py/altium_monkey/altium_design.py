@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .altium_api_markers import public_api
 from .altium_netlist_common import _evaluate_altium_expression
@@ -19,6 +19,7 @@ from .altium_pnp_position import (
 )
 
 if TYPE_CHECKING:
+    from .altium_compiled_design_model import AltiumCompiledDesign
     from .altium_netlist_options import NetlistOptions
     from .altium_netlist_model import (
         ComponentHierarchy,
@@ -29,12 +30,14 @@ if TYPE_CHECKING:
     )
     from .altium_pcbdoc import AltiumPcbDoc
     from .altium_prjpcb import AltiumPrjPcb
+    from .altium_sch_geometry_oracle import SchGeometryDocument
+    from .altium_sch_svg_renderer import SchSvgRenderOptions
     from .altium_schdoc import AltiumSchDoc
     from .altium_schdoc_info import SchComponentInfo
 
 log = logging.getLogger(__name__)
 
-DESIGN_JSON_SCHEMA = "altium_monkey.design.a1"
+DESIGN_JSON_SCHEMA = "altium_monkey.design.a2"
 DESIGN_JSON_GENERATOR = "altium_monkey"
 SCHEMATIC_HIERARCHY_SCHEMA = "altium_monkey.schematic_hierarchy.a1"
 _CANONICAL_DECIMAL_RE = re.compile(r"0|[1-9][0-9]*")
@@ -81,6 +84,24 @@ def _coerce_variant_parameter_overrides(
     return overrides
 
 
+def _variant_dnp_designators(variant_data: dict[str, object]) -> set[str]:
+    """
+    Return designators marked not fitted in one project variant.
+    """
+    dnp_designators: set[str] = set()
+    raw_variations = variant_data.get("variations", [])
+    variations = raw_variations if isinstance(raw_variations, list) else []
+    for variation in variations:
+        if not isinstance(variation, dict):
+            continue
+        if variation.get("Kind") != "1":
+            continue
+        designator = str(variation.get("Designator", "") or "").strip()
+        if designator:
+            dnp_designators.add(designator)
+    return dnp_designators
+
+
 def _lookup_case_insensitive(values: dict[str, str], name: str) -> str | None:
     name_lower = name.lower()
     for key, value in values.items():
@@ -91,6 +112,17 @@ def _lookup_case_insensitive(values: dict[str, str], name: str) -> str | None:
 
 def _sorted_json_mapping(values: dict) -> dict:
     return dict(sorted(values.items(), key=lambda item: str(item[0])))
+
+
+def _unique_nonempty_strings(values: list[str] | tuple[str, ...]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
+    return result
 
 
 def _sorted_json_rows(values: object) -> list:
@@ -166,9 +198,6 @@ class AltiumDesign:
         # Get netlist
         netlist = design.to_netlist()
 
-        # Export
-        wirelist = design.to_wirelist()
-
         components = design.to_bom()
         variant_components = design.to_bom(variant="V1")
     """
@@ -176,6 +205,7 @@ class AltiumDesign:
     project: AltiumPrjPcb | None = None
     schdocs: list[AltiumSchDoc] = field(default_factory=list)
     _netlist: Netlist | None = None
+    _compiled_design: AltiumCompiledDesign | None = None
     _options: NetlistOptions | None = None
 
     # Lazy-loaded PcbDoc for pick-and-place and PCB view operations.
@@ -188,7 +218,7 @@ class AltiumDesign:
         """
         Load design from PrjPcb project file.
 
-                Loads active SchDoc files from durable project metadata.
+                Loads compile-participating SchDoc files from durable project metadata.
 
                 Args:
                     path: Path to .PrjPcb file
@@ -203,11 +233,30 @@ class AltiumDesign:
         path = Path(path)
         project = AltiumPrjPcb(path)
 
-        schdocs = []
-        for schdoc_path in project.get_reachable_schdoc_paths():
-            schdocs.append(AltiumSchDoc(schdoc_path))
-
         options = NetlistOptions.from_prjpcb(project)
+        schdoc_paths = project.get_reachable_schdoc_paths()
+        schdocs = [AltiumSchDoc(schdoc_path) for schdoc_path in schdoc_paths]
+        effective_scope = cls(
+            project=project,
+            schdocs=schdocs,
+            _options=options,
+        )._resolve_design_effective_scope(options)
+        if effective_scope in {"HIERARCHICAL", "STRICT_HIERARCHICAL"}:
+            saved_structure_paths = project.get_saved_structure_schdoc_paths()
+            if saved_structure_paths:
+                loaded_paths = {schdoc_path.resolve() for schdoc_path in schdoc_paths}
+                for schdoc_path in saved_structure_paths:
+                    resolved_path = schdoc_path.resolve()
+                    if resolved_path not in loaded_paths:
+                        loaded_paths.add(resolved_path)
+                        schdoc_paths.append(schdoc_path)
+                schdocs = [AltiumSchDoc(schdoc_path) for schdoc_path in schdoc_paths]
+        else:
+            all_schdoc_paths = project.get_schdoc_paths()
+            if [path.resolve() for path in all_schdoc_paths] != [
+                path.resolve() for path in schdoc_paths
+            ]:
+                schdocs = [AltiumSchDoc(schdoc_path) for schdoc_path in all_schdoc_paths]
 
         # Sheet parameters are merged so later sheets can override earlier ones.
         sheet_params = {}
@@ -251,6 +300,28 @@ class AltiumDesign:
         design._pcbdoc_cache[cache_key] = pcbdoc
         return design
 
+    def compile(self, *, force: bool = False) -> AltiumCompiledDesign:
+        """
+        Compile this design into the beta compiled schematic model.
+
+        Args:
+            force: Rebuild the cached compiled model when True
+
+        Returns:
+            Compiled schematic design with logical documents, physical sheet
+            rows, components, options, annotation state, nets, and diagnostics.
+        """
+        if not self.schdocs:
+            raise ValueError("AltiumDesign.compile() requires at least one schematic document")
+        if force:
+            self._compiled_design = None
+            self._netlist = None
+        if self._compiled_design is None:
+            from .altium_design_compiler import compile_design
+
+            self._compiled_design = compile_design(self)
+        return self._compiled_design
+
     def to_netlist(self) -> Netlist:
         """
         Generate unified netlist (cached).
@@ -266,34 +337,26 @@ class AltiumDesign:
 
     def _compile_cached_netlist(self) -> None:
         """
-        Compile and cache the design netlist through the primary compiler.
+        Compile and cache the design netlist from the compiled design model.
         """
-        from .altium_netlist_options import NetlistOptions
-        from .altium_netlist_compilation import compile_netlist
-
         if self._netlist is not None:
             return
 
-        options = self._options or NetlistOptions()
-        self._netlist = compile_netlist(self.schdocs, self.project, options)
+        compiled = self.compile()
+        self._netlist = compiled.to_netlist()
+        from .altium_compiled_design_netlist import compiled_design_schematic_hierarchy
 
-    def to_wirelist(self, strict: bool = True) -> str:
-        """
-        Generate WireList format string.
-
-                Args:
-                    strict: Apply strict text normalization
-
-                Returns:
-                    WireList format string
-        """
-        options = self._options
-        allow_single_pin = options.allow_single_pin_nets if options else False
-        return self.to_netlist().to_wirelist(
-            strict=strict, allow_single_pin_nets=allow_single_pin
+        self._netlist.schematic_hierarchy = compiled_design_schematic_hierarchy(
+            compiled,
+            self.schdocs,
         )
 
-    def to_json(self, include_indexes: bool = True) -> dict:
+    def to_json(
+        self,
+        include_indexes: bool = True,
+        *,
+        include_compile_metadata: bool = False,
+    ) -> dict:
         """
         Serialize design state to JSON-compatible dict.
 
@@ -303,16 +366,313 @@ class AltiumDesign:
 
                 Args:
                     include_indexes: If True, include pre-computed lookup indexes
+                    include_compile_metadata: If True, include low-level compile
+                        summary/options/annotation state and diagnostics. The
+                        default keeps the user-facing design projection compact.
 
                 Returns:
                     JSON-compatible dict with design data
         """
-        return self._design_json_from_netlist(self.to_netlist(), include_indexes)
+        return self._design_json_from_netlist(
+            self.to_netlist(),
+            include_indexes,
+            include_compile_metadata=include_compile_metadata,
+        )
+
+    def to_physical_ir(
+        self,
+        physical_page_id: str,
+        project_parameters: dict[str, str] | None = None,
+        *,
+        profile: str = "onscreen",
+        render_options: "SchSvgRenderOptions | None" = None,
+    ) -> "SchGeometryDocument":
+        """
+        Render one compiled physical schematic page to geometry IR.
+
+        The logical SchDoc geometry is reused, but component designator text is
+        resolved through the compiled physical page before measurement and IR
+        emission. This is the project-level rendering path for repeated sheets
+        and instantiated channels.
+        """
+        compiled = self.compile()
+        physical = self._resolve_physical_document(compiled, physical_page_id)
+        schdoc = self._schdoc_for_physical_document(compiled, physical)
+        designator_overrides = self._physical_designator_text_overrides(
+            compiled,
+            physical,
+            schdoc,
+        )
+        effective_project_parameters = project_parameters
+        if effective_project_parameters is None and self.project is not None:
+            effective_project_parameters = dict(self.project.parameters)
+
+        document = schdoc.to_ir(
+            project_parameters=effective_project_parameters,
+            profile=profile,
+            render_options=render_options,
+            designator_text_overrides=designator_overrides,
+        )
+        runtime_image_hrefs = getattr(document, "_runtime_image_hrefs", None)
+        render_hints = dict(document.render_hints or {})
+        render_hints["physical_page_id"] = physical.id
+        render_hints["physical_source_sheet"] = physical.file_name
+        render_hints["physical_designator_text_override_count"] = len(
+            designator_overrides
+        )
+        extras = dict(document.extras or {})
+        extras["physical_page"] = self._physical_page_render_metadata(physical)
+        if designator_overrides:
+            extras["physical_designator_text_overrides"] = dict(
+                sorted(designator_overrides.items())
+            )
+
+        physical_document = replace(
+            document,
+            document_id=physical.id,
+            source_path=physical.source_path or document.source_path,
+            render_hints=render_hints,
+            extras=extras,
+        )
+        if isinstance(runtime_image_hrefs, dict):
+            object.__setattr__(
+                physical_document,
+                "_runtime_image_hrefs",
+                runtime_image_hrefs,
+            )
+        return physical_document
+
+    def to_physical_svg(
+        self,
+        physical_page_id: str,
+        *,
+        include_border: bool = True,
+        scale: float = 1.0,
+        options: "SchSvgRenderOptions | None" = None,
+        project_parameters: dict[str, str] | None = None,
+        wrap_components: bool = False,
+    ) -> str:
+        """
+        Render one compiled physical schematic page to SVG.
+
+        `AltiumSchDoc.to_svg()` remains the logical-sheet renderer. This method
+        is the project-level physical renderer for design review consumers that
+        need resolved channel/repeated-sheet designators.
+        """
+        from .altium_sch_geometry_renderer import (
+            SchGeometrySvgRenderOptions,
+            SchGeometrySvgRenderer,
+        )
+        from .altium_sch_svg_renderer import SchSvgRenderOptions
+
+        del wrap_components
+        if abs(scale - 1.0) > 1e-9:
+            raise ValueError("Schematic IR SVG rendering currently requires scale=1.0")
+
+        render_options = options if options is not None else SchSvgRenderOptions()
+        ir_profile = (
+            "oracle" if render_options.truncate_font_size_for_baseline else "onscreen"
+        )
+        document = self.to_physical_ir(
+            physical_page_id,
+            project_parameters=project_parameters,
+            profile=ir_profile,
+            render_options=render_options,
+        )
+        runtime_image_hrefs = getattr(document, "_runtime_image_hrefs", None)
+
+        if not include_border:
+            document = replace(
+                document,
+                records=[
+                    record
+                    for record in document.records
+                    if str(getattr(record, "kind", "") or "") != "sheet"
+                ],
+                workspace_background_color=None,
+            )
+            if isinstance(runtime_image_hrefs, dict):
+                object.__setattr__(
+                    document,
+                    "_runtime_image_hrefs",
+                    runtime_image_hrefs,
+                )
+
+        return SchGeometrySvgRenderer(
+            SchGeometrySvgRenderOptions(
+                include_workspace_background=include_border,
+                text_mode=(
+                    "native_svg_export"
+                    if render_options.truncate_font_size_for_baseline
+                    else "onscreen"
+                ),
+                compile_mask_render_mode=render_options.compile_mask_render_mode,
+                text_as_polygons=render_options.text_as_polygons,
+                polygon_text_tolerance=render_options.polygon_text_tolerance,
+                include_view_box=render_options.include_view_box,
+            )
+        ).render(document)
+
+    @staticmethod
+    def _physical_page_render_metadata(physical_document: Any) -> dict:
+        return {
+            "id": physical_document.id,
+            "logical_document_id": physical_document.logical_document_id,
+            "source_sheet": physical_document.file_name,
+            "source_path": physical_document.source_path,
+            "physical_instance_path": physical_document.physical_instance_path,
+            "physical_instance_unique_id": (
+                physical_document.physical_instance_unique_id
+            ),
+            "channel_index": physical_document.channel_index,
+            "channel_prefix": physical_document.channel_prefix or "",
+            "channel_alpha": physical_document.channel_alpha or "",
+            "room_name": physical_document.room_name,
+            "parent_id": physical_document.parent_id,
+            "parent_sheet_symbol_id": physical_document.parent_sheet_symbol_id,
+            "sheet_number": physical_document.sheet_number,
+            "document_number": physical_document.document_number,
+        }
+
+    @staticmethod
+    def _path_identity(path_value: object) -> str:
+        if not path_value:
+            return ""
+        try:
+            return str(Path(str(path_value)).resolve()).lower()
+        except OSError:
+            return str(Path(str(path_value))).lower()
+
+    def _resolve_physical_document(
+        self,
+        compiled: AltiumCompiledDesign,
+        physical_page_id: str,
+    ) -> Any:
+        requested = str(physical_page_id or "").strip()
+        if not requested:
+            raise ValueError("physical_page_id is required")
+        for document in compiled.physical_documents:
+            identifiers = {
+                str(value)
+                for value in (
+                    document.id,
+                    document.physical_instance_path,
+                    document.physical_instance_unique_id,
+                )
+                if value
+            }
+            if requested in identifiers:
+                return document
+        available = ", ".join(
+            document.id for document in compiled.physical_documents[:10]
+        )
+        if len(compiled.physical_documents) > 10:
+            available += ", ..."
+        raise ValueError(
+            f"unknown physical_page_id {physical_page_id!r}; available ids: {available}"
+        )
+
+    def _schdoc_for_physical_document(
+        self,
+        compiled: AltiumCompiledDesign,
+        physical_document: Any,
+    ) -> AltiumSchDoc:
+        logical_by_id = {
+            document.id: document for document in compiled.logical_documents
+        }
+        logical = logical_by_id.get(physical_document.logical_document_id)
+        path_candidates = {
+            self._path_identity(getattr(physical_document, "source_path", "")),
+        }
+        if logical is not None:
+            path_candidates.add(self._path_identity(getattr(logical, "source_path", "")))
+        path_candidates.discard("")
+        for schdoc in self.schdocs:
+            if schdoc.filepath and self._path_identity(schdoc.filepath) in path_candidates:
+                return schdoc
+
+        file_name = str(
+            getattr(logical, "file_name", "")
+            if logical is not None
+            else getattr(physical_document, "file_name", "")
+        )
+        matches = [
+            schdoc
+            for schdoc in self.schdocs
+            if schdoc.filepath and schdoc.filepath.name == file_name
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        raise ValueError(
+            "could not resolve source SchDoc for physical page "
+            f"{physical_document.id!r}"
+        )
+
+    @staticmethod
+    def _source_designator_record_id(component_record: object) -> str:
+        finder = getattr(component_record, "_find_designator_record", None)
+        if not callable(finder):
+            return ""
+        designator_record = finder()
+        designator_unique_id = str(
+            getattr(designator_record, "unique_id", "") or ""
+        )
+        if designator_unique_id:
+            return designator_unique_id
+        component_unique_id = str(getattr(component_record, "unique_id", "") or "")
+        if component_unique_id:
+            return f"component:{component_unique_id}:designator"
+        return ""
+
+    def _physical_designator_text_overrides(
+        self,
+        compiled: AltiumCompiledDesign,
+        physical_document: Any,
+        schdoc: AltiumSchDoc,
+    ) -> dict[str, str]:
+        designator_record_by_component_id: dict[str, str] = {}
+        designator_record_by_logical_designator: dict[str, str] = {}
+        for component_info in schdoc.get_components():
+            component_record = component_info.record
+            designator_record_id = self._source_designator_record_id(component_record)
+            if not designator_record_id:
+                continue
+            component_id = str(getattr(component_record, "unique_id", "") or "")
+            if component_id:
+                designator_record_by_component_id[component_id] = designator_record_id
+            logical_designator = str(component_info.designator or "")
+            if logical_designator:
+                designator_record_by_logical_designator.setdefault(
+                    logical_designator,
+                    designator_record_id,
+                )
+
+        overrides: dict[str, str] = {}
+        for component in compiled.components:
+            if component.physical_document_id != physical_document.id:
+                continue
+            resolved_designator = (
+                component.display_designator or component.physical_designator
+            )
+            if not resolved_designator:
+                continue
+            designator_record_id = designator_record_by_component_id.get(
+                component.source_object_id
+            )
+            if not designator_record_id:
+                designator_record_id = designator_record_by_logical_designator.get(
+                    component.logical_designator
+                )
+            if designator_record_id:
+                overrides[designator_record_id] = resolved_designator
+        return overrides
 
     def _design_json_from_netlist(
         self,
         netlist: Netlist,
         include_indexes: bool,
+        *,
+        include_compile_metadata: bool,
     ) -> dict:
         """
         Build enriched design JSON around an already-generated netlist.
@@ -321,6 +681,7 @@ class AltiumDesign:
         from .altium_netlist_options import NetlistOptions
 
         options = self._options or NetlistOptions()
+        compiled = self.compile()
 
         options_data = {
             "net_identifier_scope": options.net_identifier_scope.name,
@@ -336,18 +697,43 @@ class AltiumDesign:
         sheets_data = self._build_sheets_data(options)
         project_data = self._build_project_data()
         variants_data = self._build_variants_data()
-        comp_data_map = self._build_component_data_map(netlist)
+        active_variant_name = self._active_variant_name()
+        active_variant_dnp = self._active_variant_dnp_designators(active_variant_name)
+        has_repeated_physical_instances = self._has_repeated_physical_instances(
+            compiled
+        )
+        comp_data_map = self._build_component_data_map(
+            netlist,
+            compiled if has_repeated_physical_instances else None,
+        )
         components_data = []
-        for comp in netlist.components:
-            data = comp_data_map.get(comp.designator, {})
-            components_data.append(
-                self._enrich_component(
-                    comp,
-                    sheet=data.get("sheet", ""),
-                    pin_count=data.get("pin_count", 0),
-                    svg_id=data.get("svg_id", ""),
-                )
+        if has_repeated_physical_instances:
+            components_data = self._build_compiled_components_data(
+                compiled,
+                active_variant_dnp=active_variant_dnp,
             )
+        if not components_data:
+            components_data = []
+            for comp in netlist.components:
+                is_dnp = comp.designator in active_variant_dnp
+                data = comp_data_map.get(comp.designator, {})
+                components_data.append(
+                    self._enrich_component(
+                        comp,
+                        sheet=data.get("sheet", ""),
+                        pin_count=data.get("pin_count", 0),
+                        svg_id=data.get("svg_id", ""),
+                        component_context={
+                            **data,
+                            "dnp": is_dnp,
+                            "fitted": not is_dnp,
+                        },
+                    )
+                )
+        physical_pages_data = self._build_physical_pages_data(
+            compiled,
+            active_variant_dnp=active_variant_dnp,
+        )
 
         result = {
             "schema": DESIGN_JSON_SCHEMA,
@@ -355,24 +741,249 @@ class AltiumDesign:
             "project": project_data,
             "variants": variants_data,
             "options": options_data,
-            "sheets": sheets_data,
-            "components": components_data,
-            "schematic_hierarchy": self._build_schematic_hierarchy_data(netlist),
         }
+
+        if include_compile_metadata:
+            result["compile"] = self._build_compile_data(compiled)
+            result["diagnostics"] = self._compiled_design_diagnostics(compiled)
+
+        result.update(
+            {
+                "sheets": sheets_data,
+                "components": components_data,
+                "schematic_hierarchy": self._build_schematic_hierarchy_data(netlist),
+                "physical_pages": physical_pages_data,
+            }
+        )
 
         pnp_data = self._build_pnp_data()
         if pnp_data is not None:
             result["pnp"] = pnp_data
 
-        nets_data = netlist.to_json()["nets"]
-        for index, net_data in enumerate(nets_data, start=1):
-            net_data["uid"] = f"{index:012x}"
+        if has_repeated_physical_instances:
+            nets_data = self._build_compiled_nets_data(compiled)
+        else:
+            nets_data = self._build_legacy_json_nets_data(netlist, compiled)
         result["nets"] = nets_data
 
         if include_indexes:
-            result["indexes"] = self._build_indexes(netlist, components_data)
+            result["indexes"] = self._build_indexes(
+                components_data,
+                nets_data,
+                physical_pages_data,
+            )
 
         return result
+
+    @staticmethod
+    def _build_compile_data(compiled: AltiumCompiledDesign) -> dict:
+        """
+        Build compact compiled-design metadata for the public design JSON.
+        """
+        return {
+            "schema": compiled.schema,
+            "summary": compiled.summary.to_dict(),
+            "options": compiled.options.to_dict(),
+            "annotation": compiled.annotation.to_dict(),
+            "stats": dict(sorted(compiled.compile.items())),
+        }
+
+    @staticmethod
+    def _compiled_design_diagnostics(
+        compiled: AltiumCompiledDesign,
+    ) -> list[dict]:
+        """
+        Return compile diagnostics from every public compiled-design owner.
+        """
+        rows: list[dict] = []
+
+        def add_rows(
+            owner_kind: str,
+            owner_id: str,
+            diagnostics: object,
+        ) -> None:
+            for diagnostic in diagnostics or ():
+                row = diagnostic.to_dict()
+                row["owner_kind"] = owner_kind
+                if owner_id:
+                    row["owner_id"] = owner_id
+                rows.append(row)
+
+        add_rows("compile", "", compiled.diagnostics)
+        add_rows("annotation", "", compiled.annotation.diagnostics)
+        for document in compiled.logical_documents:
+            add_rows("logical_document", document.id, document.diagnostics)
+        for document in compiled.physical_documents:
+            add_rows("physical_document", document.id, document.diagnostics)
+        for symbol in compiled.sheet_symbols:
+            add_rows("sheet_symbol", symbol.id, symbol.diagnostics)
+        for component in compiled.components:
+            add_rows("component", component.id, component.diagnostics)
+        for net in compiled.nets:
+            add_rows("net", net.id, net.diagnostics)
+        return rows
+
+    @staticmethod
+    def _has_repeated_physical_instances(compiled: AltiumCompiledDesign) -> bool:
+        physical_count_by_logical_id: dict[str, int] = {}
+        for document in compiled.physical_documents:
+            logical_id = str(document.logical_document_id or "")
+            if not logical_id:
+                continue
+            physical_count_by_logical_id[logical_id] = (
+                physical_count_by_logical_id.get(logical_id, 0) + 1
+            )
+        return any(count > 1 for count in physical_count_by_logical_id.values())
+
+    def _build_legacy_json_nets_data(
+        self,
+        netlist: Netlist,
+        compiled: AltiumCompiledDesign,
+    ) -> list[dict]:
+        compiled_flat_by_id = {
+            net.id: net for net in compiled.nets if net.scope == "compiled_flat"
+        }
+        nets_data = netlist.to_json()["nets"]
+        for index, net_data in enumerate(nets_data, start=1):
+            compiled_net = compiled_flat_by_id.get(str(net_data.get("uid") or ""))
+            if compiled_net is not None:
+                name_sources = self._compiled_net_name_sources(compiled_net)
+                aliases = self._design_net_aliases(
+                    str(net_data.get("name") or ""),
+                    list(net_data.get("aliases") or []),
+                    name_sources,
+                )
+                net_data["aliases"] = aliases
+                if len(name_sources) > 1:
+                    net_data["name_sources"] = name_sources
+            net_data["uid"] = f"{index:012x}"
+        return nets_data
+
+    def _build_compiled_components_data(
+        self,
+        compiled: AltiumCompiledDesign,
+        *,
+        active_variant_dnp: set[str] | None = None,
+    ) -> list[dict]:
+        """
+        Build top-level design JSON component rows from compiled physical rows.
+        """
+        from .altium_netlist_model import ComponentClassification
+
+        physical_by_id = {
+            document.id: document for document in compiled.physical_documents
+        }
+        flat_nets = [net for net in compiled.nets if net.scope == "compiled_flat"]
+        component_to_nets = self._compiled_component_to_nets(flat_nets)
+        dnp_set = active_variant_dnp or set()
+        components_data: list[dict] = []
+        for component in sorted(
+            compiled.components,
+            key=lambda item: (
+                item.physical_document_id,
+                item.display_designator or item.physical_designator,
+                item.id,
+            ),
+        ):
+            designator = component.display_designator or component.physical_designator
+            if not designator:
+                continue
+            is_dnp = designator in dnp_set
+            physical = physical_by_id.get(component.physical_document_id)
+            sheet = physical.file_name if physical is not None else ""
+            hierarchy = self._parse_hierarchy(designator, sheet)
+            classification = ComponentClassification.from_component(
+                designator,
+                component.pin_count,
+            )
+            components_data.append(
+                {
+                    "id": component.id,
+                    "designator": designator,
+                    "logical_designator": component.logical_designator,
+                    "physical_designator": component.physical_designator,
+                    "physical_sheet_id": component.physical_document_id,
+                    "source_unique_id": component.source_object_id,
+                    "source_unique_id_path": component.source_unique_id_path,
+                    "compiled_component_id": component.id,
+                    "svg_id": component.source_object_id,
+                    "sheet": sheet,
+                    "pin_count": component.pin_count,
+                    "part_count": component.part_count,
+                    "current_part_id": component.current_part_id,
+                    "value": component.value,
+                    "footprint": component.footprint,
+                    "library_ref": component.lib_reference,
+                    "description": component.description,
+                    "design_item_id": component.design_item_id,
+                    "component_kind": component.component_kind,
+                    "component_kind_value": component.component_kind_value,
+                    "include_in_netlist": component.include_in_netlist,
+                    "exclude_from_bom": component.exclude_from_bom,
+                    "dnp": is_dnp,
+                    "fitted": not is_dnp,
+                    "annotation_state": component.annotation_state,
+                    "annotation_locked": component.annotation_locked,
+                    "hierarchy": hierarchy.to_json(),
+                    "classification": classification.to_json(),
+                    "parameters": dict(sorted(dict(component.parameters).items())),
+                    "nets": component_to_nets.get(designator, []),
+                }
+            )
+        return components_data
+
+    @staticmethod
+    def _compiled_component_to_nets(flat_nets: list[object]) -> dict[str, list[str]]:
+        component_to_nets: dict[str, set[str]] = {}
+        for net in flat_nets:
+            net_name = str(getattr(net, "name", "") or "")
+            if not net_name:
+                continue
+            for terminal in getattr(net, "terminals", ()) or ():
+                designator = str(getattr(terminal, "designator", "") or "")
+                if not designator:
+                    continue
+                component_to_nets.setdefault(designator, set()).add(net_name)
+        return {
+            designator: sorted(nets)
+            for designator, nets in sorted(component_to_nets.items())
+        }
+
+    def _build_compiled_nets_data(
+        self,
+        compiled: AltiumCompiledDesign,
+    ) -> list[dict]:
+        """
+        Build top-level design JSON net rows from compiled-flat nets.
+        """
+        nets_data: list[dict] = []
+        flat_nets = [net for net in compiled.nets if net.scope == "compiled_flat"]
+        for index, net in enumerate(flat_nets, start=1):
+            name_sources = self._compiled_net_name_sources(net)
+            net_data = {
+                "id": net.id,
+                "uid": f"{index:012x}",
+                "name": net.name,
+                "aliases": self._design_net_aliases(
+                    net.name,
+                    list(net.aliases),
+                    name_sources,
+                ),
+                "physical_document_ids": list(net.physical_document_ids),
+                "terminal_count": len(net.terminals),
+                "terminals": [terminal.to_dict() for terminal in net.terminals],
+                "graphical": self._compiled_page_net_graphical(list(net.items)),
+                "endpoint_ids": _unique_nonempty_strings(
+                    [endpoint.id for endpoint in net.endpoints]
+                ),
+                "endpoints": [endpoint.to_dict() for endpoint in net.endpoints],
+                "auto_named": net.auto_named,
+                "single_pin": net.single_pin,
+            }
+            if len(name_sources) > 1:
+                net_data["name_sources"] = name_sources
+            nets_data.append(net_data)
+        return nets_data
 
     def _build_schematic_hierarchy_data(self, netlist: Netlist) -> dict:
         """
@@ -449,7 +1060,11 @@ class AltiumDesign:
             "placements": [entry.to_json() for entry in placements],
         }
 
-    def _build_component_data_map(self, netlist: Netlist) -> dict[str, dict]:
+    def _build_component_data_map(
+        self,
+        netlist: Netlist,
+        compiled: AltiumCompiledDesign | None = None,
+    ) -> dict[str, dict]:
         """
         Build mapping of designator -> {sheet, pin_count, svg_id}.
 
@@ -463,6 +1078,50 @@ class AltiumDesign:
                     "sheet": sheet_name,
                     "pin_count": len(comp.pins),
                     "svg_id": comp.unique_id,
+                }
+
+        if compiled is not None:
+            logical_by_id = {
+                document.id: document for document in compiled.logical_documents
+            }
+            physical_by_id = {
+                document.id: document for document in compiled.physical_documents
+            }
+            for component in compiled.components:
+                designator = (
+                    component.display_designator or component.physical_designator
+                )
+                if not designator:
+                    continue
+                if designator in result:
+                    existing_physical_sheet_id = str(
+                        result[designator].get("physical_sheet_id") or ""
+                    )
+                    if (
+                        existing_physical_sheet_id
+                        and existing_physical_sheet_id != component.physical_document_id
+                    ):
+                        result[designator]["ambiguous_physical_designator"] = True
+                        result[designator]["svg_id"] = ""
+                        result[designator]["source_unique_id"] = ""
+                        result[designator]["source_unique_id_path"] = ""
+                        continue
+                physical = physical_by_id.get(component.physical_document_id)
+                logical = logical_by_id.get(component.logical_document_id)
+                result[designator] = {
+                    "sheet": physical.file_name
+                    if physical is not None
+                    else logical.file_name
+                    if logical is not None
+                    else "",
+                    "pin_count": component.pin_count,
+                    "svg_id": component.source_object_id,
+                    "source_unique_id": component.source_object_id,
+                    "source_unique_id_path": component.source_unique_id_path,
+                    "logical_designator": component.logical_designator,
+                    "physical_designator": component.physical_designator,
+                    "physical_sheet_id": component.physical_document_id,
+                    "compiled_component_id": component.id,
                 }
 
         # Fallback for multi-channel components not directly in any SchDoc:
@@ -481,6 +1140,437 @@ class AltiumDesign:
                 }
 
         return result
+
+    @staticmethod
+    def _source_component_rendered_pin_svg_ids(source_component: object) -> dict[str, str]:
+        source_record = getattr(source_component, "record", source_component)
+        show_hidden_pins = bool(
+            getattr(source_component, "show_hidden_pins", False)
+            or getattr(source_record, "show_hidden_pins", False)
+        )
+        pin_svg_ids: dict[str, str] = {}
+        for pin in getattr(source_component, "pins", ()) or ():
+            pin_record = getattr(pin, "record", pin)
+            hidden = bool(
+                getattr(pin, "hidden", False)
+                or getattr(pin, "is_hidden", False)
+                or getattr(pin_record, "hidden", False)
+                or getattr(pin_record, "is_hidden", False)
+            )
+            if hidden and not show_hidden_pins:
+                continue
+            designator = str(
+                getattr(pin, "designator", "")
+                or getattr(pin_record, "designator", "")
+                or ""
+            )
+            unique_id = str(
+                getattr(pin, "unique_id", "")
+                or getattr(pin_record, "unique_id", "")
+                or ""
+            )
+            if designator and unique_id:
+                pin_svg_ids[designator] = unique_id
+        return pin_svg_ids
+
+    def _build_physical_pages_data(
+        self,
+        compiled: AltiumCompiledDesign,
+        *,
+        active_variant_dnp: set[str] | None = None,
+    ) -> list[dict]:
+        """
+        Build the user-facing physical page index for design JSON consumers.
+
+        A source SVG id is only a logical identity. Repeated/channel sheets need
+        the physical page id plus the source SVG id to identify one rendered
+        component instance.
+        """
+        logical_by_id = {
+            document.id: document for document in compiled.logical_documents
+        }
+        source_pin_svg_ids_by_component: dict[tuple[str, str], dict[str, str]] = {}
+
+        def merge_source_pin_svg_ids(key: tuple[str, str], pin_svg_ids: dict[str, str]) -> None:
+            existing = source_pin_svg_ids_by_component.setdefault(key, {})
+            existing.update(pin_svg_ids)
+
+        for schdoc in self.schdocs:
+            sheet_name = schdoc.filepath.name if schdoc.filepath else ""
+            for source_component in schdoc.get_components():
+                pin_svg_ids = self._source_component_rendered_pin_svg_ids(
+                    source_component
+                )
+                if not pin_svg_ids:
+                    continue
+                source_unique_id = str(getattr(source_component, "unique_id", "") or "")
+                if source_unique_id:
+                    merge_source_pin_svg_ids((sheet_name, source_unique_id), pin_svg_ids)
+                source_designator = str(
+                    getattr(source_component, "designator", "") or ""
+                )
+                if source_designator:
+                    merge_source_pin_svg_ids((sheet_name, source_designator), pin_svg_ids)
+        parent_sheet_symbol_by_child_physical_id = {
+            symbol.child_physical_document_id: symbol
+            for symbol in compiled.physical_sheet_symbols
+        }
+        dnp_set = active_variant_dnp or set()
+        components_by_page: dict[str, list[dict]] = {}
+        designator_page: dict[str, str] = {}
+        pin_svg_ids_by_page_designator_pin: dict[tuple[str, str, str], str] = {}
+        for component in sorted(
+            compiled.components,
+            key=lambda item: (
+                item.physical_document_id,
+                item.display_designator or item.physical_designator,
+                item.id,
+            ),
+        ):
+            designator = component.display_designator or component.physical_designator
+            if not designator:
+                continue
+            logical = logical_by_id.get(component.logical_document_id)
+            source_sheet = logical.file_name if logical is not None else ""
+            source_pin_svg_ids = (
+                source_pin_svg_ids_by_component.get(
+                    (source_sheet, component.source_object_id)
+                )
+                or source_pin_svg_ids_by_component.get(
+                    (source_sheet, component.logical_designator)
+                )
+                or {}
+            )
+            for pin, svg_id in source_pin_svg_ids.items():
+                pin_svg_ids_by_page_designator_pin[
+                    (component.physical_document_id, designator, pin)
+                ] = svg_id
+            is_dnp = designator in dnp_set
+            designator_page[designator] = component.physical_document_id
+            components_by_page.setdefault(component.physical_document_id, []).append(
+                {
+                    "id": component.id,
+                    "designator": designator,
+                    "physical_designator": component.physical_designator,
+                    "logical_designator": component.logical_designator,
+                    "source_unique_id": component.source_object_id,
+                    "source_unique_id_path": component.source_unique_id_path,
+                    "svg_id": component.source_object_id,
+                    "pin_count": component.pin_count,
+                    "value": component.value,
+                    "library_ref": component.lib_reference,
+                    "component_kind": component.component_kind,
+                    "dnp": is_dnp,
+                    "fitted": not is_dnp,
+                }
+            )
+
+        flat_nets = [net for net in compiled.nets if net.scope == "compiled_flat"]
+        nets_by_physical_document_id: dict[str, list[object]] = {}
+        items_by_net_and_physical_document_id: dict[
+            tuple[str, str],
+            list[object],
+        ] = {}
+        net_name_sources_by_id: dict[str, list[dict]] = {}
+        for net in flat_nets:
+            net_name_sources_by_id[net.id] = self._compiled_net_name_sources(net)
+            net_physical_document_ids = {
+                str(physical_document_id)
+                for physical_document_id in net.physical_document_ids
+                if str(physical_document_id)
+            }
+            for item in net.items:
+                item_physical_document_id = str(item.physical_document_id or "")
+                if not item_physical_document_id:
+                    continue
+                net_physical_document_ids.add(item_physical_document_id)
+                items_by_net_and_physical_document_id.setdefault(
+                    (net.id, item_physical_document_id),
+                    [],
+                ).append(item)
+            for physical_document_id in net_physical_document_ids:
+                nets_by_physical_document_id.setdefault(
+                    physical_document_id,
+                    [],
+                ).append(net)
+
+        pages: list[dict] = []
+        for document in sorted(compiled.physical_documents, key=lambda item: item.ordinal):
+            logical = logical_by_id.get(document.logical_document_id)
+            parent_sheet_symbol = parent_sheet_symbol_by_child_physical_id.get(
+                document.id
+            )
+            page_components = components_by_page.get(document.id, [])
+            page_designators = {
+                str(component.get("designator") or "")
+                for component in page_components
+            }
+            page_nets = []
+            for net in nets_by_physical_document_id.get(document.id, []):
+                page_terminal_objects = [
+                    terminal
+                    for terminal in net.terminals
+                    if terminal.designator in page_designators
+                    or designator_page.get(terminal.designator) == document.id
+                ]
+                terminals = [terminal.to_dict() for terminal in page_terminal_objects]
+                items = items_by_net_and_physical_document_id.get(
+                    (net.id, document.id),
+                    [],
+                )
+                endpoints = [
+                    endpoint
+                    for endpoint in net.endpoints
+                    if endpoint.designator in page_designators
+                    or endpoint.parent_id in {document.source_path, document.file_name}
+                ]
+                name_sources = net_name_sources_by_id[net.id]
+                graphical = self._compiled_page_net_graphical(items)
+                fallback_pins = []
+                for terminal in page_terminal_objects:
+                    svg_id = pin_svg_ids_by_page_designator_pin.get(
+                        (document.id, terminal.designator, terminal.pin)
+                    )
+                    if not svg_id:
+                        continue
+                    fallback_pins.append(
+                        {
+                            "designator": terminal.designator,
+                            "pin": terminal.pin,
+                            "svg_id": svg_id,
+                        }
+                    )
+                if fallback_pins:
+                    merged_pins = [
+                        *graphical["pins"],
+                        *fallback_pins,
+                    ]
+                    graphical["pins"] = sorted(
+                        {
+                            (
+                                pin["designator"],
+                                pin["pin"],
+                                pin["svg_id"],
+                            ): pin
+                            for pin in merged_pins
+                        }.values(),
+                        key=lambda item: (
+                            item.get("designator", ""),
+                            item.get("pin", ""),
+                            item.get("svg_id", ""),
+                        ),
+                    )
+                    graphical["object_ids"] = sorted(
+                        _unique_nonempty_strings(
+                            [
+                                *graphical["object_ids"],
+                                *[pin["svg_id"] for pin in fallback_pins],
+                            ]
+                        )
+                    )
+                page_nets.append(
+                    {
+                        "id": net.id,
+                        "name": net.name,
+                        "aliases": self._design_net_aliases(
+                            net.name,
+                            list(net.aliases),
+                            name_sources,
+                        ),
+                        "name_sources": name_sources,
+                        "terminal_count": len(terminals),
+                        "terminals": terminals,
+                        "graphical": graphical,
+                        "endpoint_ids": _unique_nonempty_strings(
+                            [endpoint.id for endpoint in endpoints]
+                        ),
+                    }
+                )
+            pages.append(
+                {
+                    "id": document.id,
+                    "logical_document_id": document.logical_document_id,
+                    "source_sheet": document.file_name,
+                    "source_path": document.source_path,
+                    "sheet_index": logical.ordinal if logical is not None else None,
+                    "compiled_sheet_index": document.ordinal,
+                    "physical_instance_path": document.physical_instance_path,
+                    "physical_instance_unique_id": (
+                        document.physical_instance_unique_id
+                    ),
+                    "is_top_level": document.parent_id is None,
+                    "channel_index": document.channel_index,
+                    "channel_prefix": document.channel_prefix or "",
+                    "channel_alpha": document.channel_alpha or "",
+                    "room_name": document.room_name,
+                    "parent_id": document.parent_id,
+                    "parent_sheet_symbol_id": document.parent_sheet_symbol_id,
+                    "parent_sheet_symbol": self._physical_page_parent_sheet_symbol(
+                        parent_sheet_symbol
+                    ),
+                    "sheet_number": document.sheet_number,
+                    "document_number": document.document_number,
+                    "components": page_components,
+                    "nets": page_nets,
+                }
+            )
+        return pages
+
+    @staticmethod
+    def _physical_page_parent_sheet_symbol(symbol: object | None) -> dict | None:
+        if symbol is None:
+            return None
+        return {
+            "id": symbol.id,
+            "source_object_id": symbol.source_object_id,
+            "owner_physical_document_id": symbol.owner_physical_document_id,
+            "logical_designator": symbol.logical_designator,
+            "physical_designator": symbol.physical_designator,
+            "sheet_symbol_file_name": symbol.sheet_symbol_file_name,
+            "entry_count": symbol.entry_count,
+        }
+
+    @staticmethod
+    def _compiled_page_net_graphical(items: list[object]) -> dict:
+        pins: list[dict] = []
+        labels: list[str] = []
+        power_ports: list[str] = []
+        ports: list[str] = []
+        sheet_entries: list[str] = []
+        object_ids: list[str] = []
+        for item in items:
+            object_id = str(
+                getattr(item, "element_id", "")
+                or getattr(item, "object_id", "")
+                or ""
+            )
+            if not object_id:
+                continue
+            object_ids.append(object_id)
+            kind = str(getattr(item, "kind", "") or "")
+            if kind == "pin":
+                pins.append(
+                    {
+                        "designator": str(getattr(item, "designator", "") or ""),
+                        "pin": str(getattr(item, "pin", "") or ""),
+                        "svg_id": object_id,
+                    }
+                )
+            elif kind == "net_label":
+                labels.append(object_id)
+            elif kind == "power_port":
+                power_ports.append(object_id)
+            elif kind in {"port", "harness_port"}:
+                ports.append(object_id)
+            elif kind in {"sheet_entry", "harness_entry"}:
+                sheet_entries.append(object_id)
+        return {
+            "pins": sorted(
+                pins,
+                key=lambda item: (
+                    item.get("designator", ""),
+                    item.get("pin", ""),
+                    item.get("svg_id", ""),
+                ),
+            ),
+            "labels": sorted(_unique_nonempty_strings(labels)),
+            "power_ports": sorted(_unique_nonempty_strings(power_ports)),
+            "ports": sorted(_unique_nonempty_strings(ports)),
+            "sheet_entries": sorted(_unique_nonempty_strings(sheet_entries)),
+            "object_ids": sorted(_unique_nonempty_strings(object_ids)),
+        }
+
+    @staticmethod
+    def _compiled_net_name_sources(compiled_net: object) -> list[dict]:
+        rows: list[dict] = []
+        seen: set[tuple[str, str, str, str, str, str]] = set()
+
+        def add(
+            *,
+            name: str,
+            role: str,
+            source: str,
+            physical_document_id: str = "",
+            object_id: str = "",
+            graphical_id: str = "",
+        ) -> None:
+            clean = str(name or "").strip()
+            if not clean:
+                return
+            key = (
+                clean,
+                role,
+                source,
+                physical_document_id,
+                object_id,
+                graphical_id,
+            )
+            if key in seen:
+                return
+            seen.add(key)
+            row: dict[str, object] = {
+                "name": clean,
+                "role": role,
+                "source": source,
+            }
+            if physical_document_id:
+                row["physical_document_id"] = physical_document_id
+            if object_id:
+                row["object_id"] = object_id
+            if graphical_id:
+                row["graphical_id"] = graphical_id
+            rows.append(row)
+
+        winner = str(getattr(compiled_net, "name", "") or "")
+        add(name=winner, role="winner", source="compiled_net")
+        original_name = str(getattr(compiled_net, "original_name", "") or "")
+        add(name=original_name, role="alias", source="original_name")
+        override_name = str(getattr(compiled_net, "override_name", "") or "")
+        add(name=override_name, role="alias", source="override_name")
+        for alias in getattr(compiled_net, "aliases", ()) or ():
+            add(name=str(alias), role="alias", source="compiled_alias")
+        net_items = [*(getattr(compiled_net, "items", ()) or ())]
+        for item in net_items:
+            add(
+                name=str(getattr(item, "name", "") or ""),
+                role="candidate",
+                source=str(getattr(item, "kind", "") or "net_item"),
+                physical_document_id=str(
+                    getattr(item, "physical_document_id", "") or ""
+                ),
+                object_id=str(getattr(item, "object_id", "") or ""),
+                graphical_id=str(
+                    getattr(item, "element_id", "")
+                    or getattr(item, "object_id", "")
+                    or ""
+                ),
+            )
+        for endpoint in getattr(compiled_net, "endpoints", ()) or ():
+            add(
+                name=str(getattr(endpoint, "name", "") or ""),
+                role="candidate",
+                source=str(getattr(endpoint, "role", "") or "endpoint"),
+                object_id=str(getattr(endpoint, "object_id", "") or ""),
+                graphical_id=str(
+                    getattr(endpoint, "element_id", "")
+                    or getattr(endpoint, "object_id", "")
+                    or ""
+                ),
+            )
+        return rows
+
+    @staticmethod
+    def _design_net_aliases(
+        net_name: str,
+        aliases: list[str],
+        name_sources: list[dict],
+    ) -> list[str]:
+        values = list(aliases)
+        for source in name_sources:
+            source_name = str(source.get("name") or "")
+            if source_name != net_name:
+                values.append(source_name)
+        return sorted(_unique_nonempty_strings(values))
 
     def _build_sheets_data(self, options: NetlistOptions) -> list[dict]:
         """
@@ -515,8 +1605,28 @@ class AltiumDesign:
             "filename": str(self.project.filepath.name)
             if self.project.filepath
             else None,
+            "current_variant": self.project.get_current_variant(),
             "parameters": dict(sorted(self.project.parameters.items())),
         }
+
+    def _active_variant_name(self) -> str | None:
+        if not self.project:
+            return None
+        return self.project.get_current_variant()
+
+    def _active_variant_dnp_designators(
+        self,
+        variant_name: str | None = None,
+    ) -> set[str]:
+        if not self.project:
+            return set()
+        effective_variant = variant_name or self.project.get_current_variant()
+        if not effective_variant:
+            return set()
+        variant_data = self.project.variants.get(effective_variant)
+        if not variant_data:
+            return set()
+        return _variant_dnp_designators(variant_data)
 
     def _build_variants_data(self) -> list[dict]:
         """
@@ -529,17 +1639,16 @@ class AltiumDesign:
         if not self.project or not self.project.variants:
             return []
 
+        current_variant = self._active_variant_name()
         variants_list = []
         for variant_name, variant_data in self.project.variants.items():
-            dnp_designators = []
-            for variation in variant_data.get("variations", []):
-                # Kind=1 means Not Fitted (DNP)
-                if variation.get("Kind") == "1":
-                    designator = variation.get("Designator", "")
-                    if designator:
-                        dnp_designators.append(designator)
+            dnp_designators = sorted(_variant_dnp_designators(variant_data))
 
-            variant_entry = {"name": variant_name, "dnp": dnp_designators}
+            variant_entry = {
+                "name": variant_name,
+                "is_current": variant_name == current_variant,
+                "dnp": dnp_designators,
+            }
             for key in ("variations", "parameters", "param_variations"):
                 values = variant_data.get(key, [])
                 if values:
@@ -559,6 +1668,7 @@ class AltiumDesign:
         sheet: str,
         pin_count: int,
         svg_id: str,
+        component_context: dict | None = None,
     ) -> dict:
         """
         Build enriched component data for JSON.
@@ -582,13 +1692,25 @@ class AltiumDesign:
             comp.designator, pin_count
         )
 
+        context = component_context or {}
         return {
             "designator": comp.designator,
+            "logical_designator": context.get("logical_designator", comp.designator),
+            "physical_designator": context.get("physical_designator", comp.designator),
+            "physical_sheet_id": context.get("physical_sheet_id", ""),
+            "ambiguous_physical_designator": bool(
+                context.get("ambiguous_physical_designator", False)
+            ),
+            "source_unique_id": context.get("source_unique_id", svg_id),
+            "source_unique_id_path": context.get("source_unique_id_path", ""),
+            "compiled_component_id": context.get("compiled_component_id", ""),
             "svg_id": svg_id,
             "value": comp.value,
             "footprint": comp.footprint,
             "library_ref": comp.library_ref,
             "description": comp.description,
+            "dnp": bool(context.get("dnp", False)),
+            "fitted": bool(context.get("fitted", True)),
             "hierarchy": hierarchy.to_json(),
             "classification": classification.to_json(),
             "parameters": dict(sorted(comp.parameters.items())),
@@ -623,39 +1745,116 @@ class AltiumDesign:
 
     def _build_indexes(
         self,
-        netlist: Netlist,
         components_data: list[dict],
+        nets_data: list[dict],
+        physical_pages_data: list[dict] | None = None,
     ) -> dict:
         """
         Build pre-computed lookup indexes.
         """
-        # svg_to_component: SVG ID -> designator
-        svg_to_component = {}
+        svg_to_components: dict[str, list[str]] = {}
+        physical_svg_to_components: dict[str, list[str]] = {}
+        component_to_physical_page: dict[str, str] = {}
         for comp_data in components_data:
             svg_id = comp_data.get("svg_id", "")
+            designator = str(comp_data.get("designator", ""))
             if svg_id:
-                svg_to_component[svg_id] = str(comp_data.get("designator", ""))
+                svg_to_components.setdefault(str(svg_id), []).append(designator)
+            physical_sheet_id = str(comp_data.get("physical_sheet_id", "") or "")
+            if physical_sheet_id:
+                component_to_physical_page[designator] = physical_sheet_id
+            if physical_sheet_id and svg_id:
+                physical_key = f"{physical_sheet_id}|{svg_id}"
+                physical_svg_to_components.setdefault(physical_key, []).append(
+                    designator
+                )
 
-        # component_to_nets: designator -> list of net names
+        # Existing scalar map. It intentionally contains only
+        # unambiguous logical SVG ids; repeated/channel consumers should use
+        # svg_to_components or physical_svg_to_components.
+        svg_to_component = {
+            svg_id: designators[0]
+            for svg_id, designators in svg_to_components.items()
+            if len(_unique_nonempty_strings(designators)) == 1
+        }
+
         component_to_nets: dict[str, list[str]] = {}
-        for net in netlist.nets:
-            for terminal in net.terminals:
-                des = terminal.designator
-                if des not in component_to_nets:
-                    component_to_nets[des] = []
-                if net.name not in component_to_nets[des]:
-                    component_to_nets[des].append(net.name)
-
-        # net_to_components: net name -> list of designators
         net_to_components: dict[str, list[str]] = {}
-        for net in netlist.nets:
-            designators = list(set(t.designator for t in net.terminals))
-            net_to_components[net.name] = sorted(designators)
+        net_to_physical_pages: dict[str, list[str]] = {}
+        for net in nets_data:
+            net_name = str(net.get("name") or "")
+            if not net_name:
+                continue
+            designators: set[str] = set()
+            for terminal in net.get("terminals", []):
+                if not isinstance(terminal, dict):
+                    continue
+                designator = str(terminal.get("designator") or "")
+                if not designator:
+                    continue
+                designators.add(designator)
+                component_to_nets.setdefault(designator, [])
+                if net_name not in component_to_nets[designator]:
+                    component_to_nets[designator].append(net_name)
+            net_to_components[net_name] = sorted(designators)
+
+            page_ids = [
+                str(page_id)
+                for page_id in net.get("physical_document_ids", [])
+                if str(page_id)
+            ]
+            if page_ids:
+                net_to_physical_pages[net_name] = sorted(
+                    _unique_nonempty_strings(page_ids)
+                )
+
+        physical_page_to_components: dict[str, list[str]] = {}
+        physical_page_to_nets: dict[str, list[str]] = {}
+        for page in physical_pages_data or []:
+            page_id = str(page.get("id") or "")
+            if not page_id:
+                continue
+            physical_page_to_components[page_id] = [
+                str(component.get("designator") or "")
+                for component in page.get("components", [])
+                if str(component.get("designator") or "")
+            ]
+            physical_page_to_nets[page_id] = [
+                str(net.get("name") or "")
+                for net in page.get("nets", [])
+                if str(net.get("name") or "")
+            ]
+            for net_name in physical_page_to_nets[page_id]:
+                net_to_physical_pages.setdefault(net_name, [])
+                if page_id not in net_to_physical_pages[net_name]:
+                    net_to_physical_pages[net_name].append(page_id)
 
         return {
             "svg_to_component": svg_to_component,
-            "component_to_nets": component_to_nets,
-            "net_to_components": net_to_components,
+            "svg_to_components": {
+                svg_id: sorted(_unique_nonempty_strings(designators))
+                for svg_id, designators in sorted(svg_to_components.items())
+            },
+            "physical_svg_to_components": {
+                key: sorted(_unique_nonempty_strings(designators))
+                for key, designators in sorted(physical_svg_to_components.items())
+            },
+            "component_to_nets": {
+                designator: sorted(_unique_nonempty_strings(nets))
+                for designator, nets in sorted(component_to_nets.items())
+            },
+            "net_to_components": dict(sorted(net_to_components.items())),
+            "net_to_physical_pages": {
+                net_name: sorted(_unique_nonempty_strings(page_ids))
+                for net_name, page_ids in sorted(net_to_physical_pages.items())
+            },
+            "component_to_physical_page": dict(
+                sorted(component_to_physical_page.items())
+            ),
+            "physical_page_to_components": dict(
+                sorted(physical_page_to_components.items())
+            ),
+            "physical_page_to_nets": dict(sorted(physical_page_to_nets.items())),
         }
 
     def _resolve_sheet_numbers(self, options: NetlistOptions) -> dict[str, str]:
@@ -708,6 +1907,7 @@ class AltiumDesign:
         Force regeneration of netlist (clear cache).
         """
         self._netlist = None
+        self._compiled_design = None
         return self.to_netlist()
 
     # ------------------------------------------------------------------

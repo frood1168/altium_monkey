@@ -1,0 +1,24 @@
+{
+  "type": "monkey_theme",
+  "version": 1,
+  "id": "amber",
+  "display_name": "Amber Phosphor",
+  "tokens": {
+    "--mk-bg": "#050403",
+    "--mk-panel": "#0c0904",
+    "--mk-panel-raised": "#151005",
+    "--mk-input": "#090704",
+    "--mk-border": "#6b4a00",
+    "--mk-accent": "#ffb000",
+    "--mk-accent-bright": "#ffd475",
+    "--mk-accent-dim": "#946600",
+    "--mk-text": "#f9d987",
+    "--mk-text-dim": "#b9954e",
+    "--mk-success": "#70ff86",
+    "--mk-warning": "#ffc857",
+    "--mk-error": "#ff5a65",
+    "--mk-grid": "#523800",
+    "--mk-selection": "#ffeec7",
+    "--mk-glow": "0 0 18px rgb(255 176 0 / 0.32)"
+  }
+}

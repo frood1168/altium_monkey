@@ -124,7 +124,31 @@ computed on the current host, authoring helpers may use an axis-aligned
 rectangle around available SMD/through-hole pads as a recovery projection. This
 fallback is not a replacement for STEP-derived model geometry.
 
+## Embedded Asset Inventory
+
+`AltiumPcbDoc.embedded_asset_inventory(...)` is the focused read-only contract
+for embedded PCB binary payloads. It lists embedded 3D models and embedded
+TrueType fonts without writing files. Payload bytes remain explicit direct
+calls through `get_embedded_model_payload(index)` and
+`get_embedded_font_payload(index)`.
+
+Summaries report `payload_available` from actual payload accessibility. Corrupt
+supported payloads stay visible for review but report unavailable state, no
+SHA-256 hash, and no decompressed size. Hashes are emitted only when requested
+and only for available payload bytes.
+
+`EmbeddedAssetInventory.to_dict()` emits
+`altium_monkey.pcb.embedded_assets.a0`. Use the broader
+`AltiumAssetInventory` / `altium_monkey.extractable_assets.a0` contract when a
+consumer also needs selectable footprints or schematic symbols.
+
 ## Layer Names
+
+Current primitive authoring APIs are legacy-layer-first. `PcbLayer` is the
+legacy/TV6 enum and contains Top, Mid1 through Mid30, Bottom, and Mechanical 1
+through Mechanical 16 only. Serialized V7 saved layer ids, V8 Layer Stack
+Manager rows, V9 Board6 cache rows, and LayerKindMapping ids are separate
+identity systems; see the public PCB layers guide.
 
 Stable layer keys use token names such as `TOP`, `BOTTOM`, and `TOPOVERLAY`.
 Mechanical layer display names, enabled flags, and mirror pairs are board
@@ -134,6 +158,11 @@ Use the resolved layer stack when board-specific user-facing names are needed.
 Default display labels are fallback labels, not stable identifiers.
 `ResolvedLayerStack` is a derived read-only consumer view; new PcbDoc authoring
 uses `AltiumLayerStackDocument`.
+
+Mechanical 17+ and AD 26.8.1 extended signal-layer primitive
+SVG/export/authoring support is deferred to future V7-aware layer-reference
+work. Do not model these by adding `PcbLayer` enum values after Mechanical 16
+or after Mid30.
 
 ## Layer Stack And Interchange
 
@@ -209,4 +238,5 @@ SVG, public examples, and release signoff. Promoted layer-stack writer
 features require generated native PcbDoc readback through `AltiumPcbDoc` and
 `AltiumLayerStackDocument`; `.stackup` and `.stackupx` comparisons are
 supporting evidence, not substitutes for native PcbDoc verification.
-
+Embedded asset inventory behavior is covered by `L6_056`, the public
+`embedded_assets_a0` schema tests, and the `embedded_asset_inventory` example.

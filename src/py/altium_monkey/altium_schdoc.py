@@ -14,6 +14,16 @@ from pathlib import Path, PureWindowsPath
 from typing import TYPE_CHECKING, Any, Callable, Iterable, cast
 
 from .altium_api_markers import public_api
+from .altium_extractable_assets import (
+    AltiumAssetInventory,
+    AltiumAssetRef,
+    AltiumAssetSummary,
+    AltiumExtractedAsset,
+    SchSymbolAssetDetails,
+    semantic_asset_key,
+    selected_asset_index,
+    source_instance_id_for,
+)
 from .altium_json_apply_helpers import JsonApplyMixin
 from .altium_sch_display_mode import record_belongs_to_display_mode
 from .altium_sch_enums import PortStyle
@@ -38,6 +48,7 @@ from . import (
     AltiumSchImplementation,
     AltiumSchImplementationList,
     AltiumSchImplParams,
+    AltiumSchMapDefiner,
     AltiumSchMapDefinerList,
     AltiumSchJunction,
     AltiumSchLabel,
@@ -99,7 +110,7 @@ from .altium_utilities import get_records_in_section, parse_storage_stream_raw
 
 if TYPE_CHECKING:
     from .altium_font_manager import FontIDManager
-    from .altium_netlist_options import NetlistOptions
+    from .altium_schlib import AltiumSchLib
     from .altium_sch_geometry_oracle import (
         SchGeometryDocument,
         SchGeometryRecord,
@@ -3291,57 +3302,6 @@ class AltiumSchDoc(JsonApplyMixin):
 
         return "\n".join(lines)
 
-    def to_netlist(
-        self,
-        format: str = "wirelist",
-        tolerance: int = 0,
-        options: NetlistOptions | None = None,
-    ) -> str:
-        """
-        Generate a WireList-format netlist from this schematic document.
-
-        Args:
-            format: Output format. Currently only `"wirelist"` is supported.
-            tolerance: Optional connection tolerance in parsed coordinate units.
-                      The default is exact connectivity, matching Altium
-                      wire-list output for off-grid crossings without explicit
-                      junctions.
-            options: Netlist generation options from project settings.
-                    If None, uses free document defaults (no project).
-                    Use NetlistOptions.from_prjpcb() to load from a PrjPcb file.
-
-        Returns:
-            Netlist as string in requested format.
-
-        Raises:
-            ValueError: If format is not supported.
-
-            # With project options:
-        """
-        if format.lower() != "wirelist":
-            raise ValueError(
-                f"Unsupported netlist format: {format}. Supported formats: wirelist"
-            )
-
-        from .altium_netlist_options import NetlistOptions
-        from .altium_netlist_single_sheet import AltiumNetlistSingleSheetCompiler
-
-        effective_options = options or NetlistOptions()
-
-        generator = AltiumNetlistSingleSheetCompiler(
-            self,
-            tolerance=tolerance,
-            options=effective_options,
-        )
-        netlist = generator.generate()
-
-        # Convert Netlist to WireList format string
-        # Pass allow_single_pin_nets option to control filtering
-        return netlist.to_wirelist(
-            strict=True,
-            allow_single_pin_nets=effective_options.allow_single_pin_nets,
-        )
-
     def _append_top_level_geometry_records(
         self,
         records: list[Any],
@@ -4684,6 +4644,7 @@ class AltiumSchDoc(JsonApplyMixin):
         harness_port_colors: dict[str, int],
         harness_sheet_entry_colors: dict[str, int],
         wire_segments: list[Any],
+        designator_text_overrides: dict[str, str] | None = None,
     ) -> Any:
         """
         Build the shared rendering context used by geometry exporters.
@@ -4702,6 +4663,7 @@ class AltiumSchDoc(JsonApplyMixin):
             else 0xFFFFFF,
             parameters=parameters,
             project_parameters=project_parameters or {},
+            designator_text_overrides=dict(designator_text_overrides or {}),
             connection_points=connection_points,
             explicit_junction_points=explicit_junction_points,
             harness_junction_points=harness_junction_points,
@@ -4881,6 +4843,7 @@ class AltiumSchDoc(JsonApplyMixin):
         *,
         profile: str | SchIrRenderProfile = "onscreen",
         render_options: SchSvgRenderOptions | None = None,
+        designator_text_overrides: dict[str, str] | None = None,
     ) -> SchGeometryDocument:
         """
         Build schematic IR using a named render profile.
@@ -4892,6 +4855,7 @@ class AltiumSchDoc(JsonApplyMixin):
             project_parameters=project_parameters,
             render_options=render_options,
             ir_profile=profile,
+            designator_text_overrides=designator_text_overrides,
         )
 
     def to_geometry(
@@ -4899,6 +4863,7 @@ class AltiumSchDoc(JsonApplyMixin):
         project_parameters: dict[str, str] | None = None,
         render_options: SchSvgRenderOptions | None = None,
         ir_profile: str | SchIrRenderProfile | None = None,
+        designator_text_overrides: dict[str, str] | None = None,
     ) -> SchGeometryDocument:
         """
         Build a schematic IR document.
@@ -4969,6 +4934,7 @@ class AltiumSchDoc(JsonApplyMixin):
             harness_port_colors=harness_port_colors,
             harness_sheet_entry_colors=harness_sheet_entry_colors,
             wire_segments=wire_segments,
+            designator_text_overrides=designator_text_overrides,
         )
         ownership = self._build_geometry_ownership_state(geometry_ctx)
         native_svg_hidden_image_ids: set[str] = set()
@@ -6695,63 +6661,215 @@ class AltiumSchDoc(JsonApplyMixin):
             - Preserves multipart symbol structure (PartCount)
             - Embedded images from symbols are extracted to the SchLib files
         """
-        from .altium_schdoc_symbol_extractor import extract_symbols_from_schdoc_file
-        from .altium_schlib import AltiumSchLib
-        from .altium_schlib_merger import merge_directory
+        from .altium_schdoc_symbol_extractor import write_extracted_symbols
 
         if self.filepath is None:
             raise ValueError("Cannot extract symbols: SchDoc has no filepath")
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Directory for individual SchLib files
-        if split_schlibs:
-            split_dir = output_dir
-        else:
-            # Create temporary directory for intermediate files if only combined is needed
-            split_dir = output_dir / "_temp_split"
-            split_dir.mkdir(exist_ok=True)
-
-        # Extract to individual SchLib files using existing extractor
         log.info(f"Extracting symbols from: {self.filepath.name}")
-        results = extract_symbols_from_schdoc_file(
-            self.filepath,
-            split_dir,
+        return write_extracted_symbols(
+            self,
+            Path(output_dir),
+            combined_schlib=combined_schlib,
+            split_schlibs=split_schlibs,
             debug=debug,
             strip_parameters=strip_parameters,
             strip_implementations=strip_implementations,
         )
-        successful = sum(1 for value in results.values() if value)
 
-        # Create combined SchLib if requested
-        if combined_schlib:
-            # Name after the schematic file
-            combined_name = self.filepath.stem + ".SchLib"
-            combined_path = output_dir / combined_name
+    def extract_schlib(
+        self,
+        debug: bool = False,
+        strip_parameters: bool = True,
+        strip_implementations: bool = True,
+    ) -> "AltiumSchLib":
+        """
+        Extract placed component symbols into an in-memory SchLib.
 
-            if successful == 0:
-                log.info(f"Creating empty combined SchLib: {combined_name}")
-                AltiumSchLib().save(combined_path)
-            else:
-                log.info(f"Creating combined SchLib: {combined_name}")
-                success = merge_directory(
-                    split_dir,
-                    combined_path,
-                    pattern="*.SchLib",
-                    handle_conflicts="skip",  # Skip duplicates in combined file
-                    verbose=debug,
+        This is the non-writing counterpart to `extract_symbols(...)`.
+        """
+        from .altium_schdoc_symbol_extractor import extract_schlib_from_schdoc
+
+        return extract_schlib_from_schdoc(
+            self,
+            debug=debug,
+            strip_parameters=strip_parameters,
+            strip_implementations=strip_implementations,
+        )
+
+    def _symbol_asset_summaries(self) -> tuple[AltiumAssetSummary, ...]:
+        """
+        Return extractable SchDoc symbol summaries in extractor grouping order.
+        """
+        from .altium_schdoc_symbol_extractor import (
+            _group_components_by_symbol,
+            _get_actual_part_count,
+            _sanitize_filename,
+            _select_best_instance,
+            _symbol_display_name,
+        )
+
+        source_path = str(self.filepath) if self.filepath is not None else None
+        source_instance_id = source_instance_id_for(self, source_path)
+        summaries: list[AltiumAssetSummary] = []
+        for index, (symbol_key, instances) in enumerate(
+            _group_components_by_symbol(self.components).items()
+        ):
+            template = _select_best_instance(instances)
+            display_name = _symbol_display_name(symbol_key, template)
+            safe_name = _sanitize_filename(display_name)
+            kind = "sch_symbol"
+            summaries.append(
+                AltiumAssetSummary(
+                    ref=AltiumAssetRef(
+                        source_kind="schdoc",
+                        source_path=source_path,
+                        kind=kind,
+                        key=semantic_asset_key(kind, symbol_key),
+                        index=index,
+                        name=symbol_key,
+                        source_instance_id=source_instance_id,
+                    ),
+                    kind=kind,
+                    name=symbol_key,
+                    extraction_filename=f"{safe_name}.SchLib",
+                    native_extension="SchLib",
+                    can_extract=True,
+                    payload_available=False,
+                    details=SchSymbolAssetDetails(
+                        display_name=display_name,
+                        safe_name=safe_name,
+                        component_count=len(instances),
+                        component_designators=tuple(
+                            self._component_designator_text(comp)
+                            for comp in instances
+                        ),
+                        selected_designator=self._component_designator_text(template),
+                        lib_reference=str(getattr(template, "lib_reference", "") or ""),
+                        design_item_id=str(getattr(template, "design_item_id", "") or ""),
+                        original_name=symbol_key,
+                        pin_count=len(getattr(template, "pins", []) or []),
+                        object_count=self._component_symbol_inventory_object_count(
+                            template
+                        ),
+                        part_count=_get_actual_part_count(template),
+                    ),
                 )
-                if not success:
-                    log.warning(f"Failed to create combined SchLib: {combined_name}")
+            )
+        return tuple(summaries)
 
-        # Clean up temp directory if we created one
-        if not split_schlibs and split_dir.exists():
-            import shutil
+    @staticmethod
+    def _component_symbol_inventory_object_count(component: object) -> int:
+        """
+        Return the default extracted-symbol object count for inventory display.
 
-            shutil.rmtree(split_dir)
+        The default symbol extractor strips ordinary parameters and
+        implementation/model records but retains pins, designators, and
+        geometry. Match that public extraction profile so the inventory count
+        is stable across Python and C++.
+        """
+        count = 1
+        for child in getattr(component, "children", []) or []:
+            if isinstance(child, AltiumSchParameter) and not isinstance(
+                child, AltiumSchDesignator
+            ):
+                continue
+            if isinstance(
+                child,
+                (
+                    AltiumSchImplementationList,
+                    AltiumSchImplementation,
+                    AltiumSchMapDefiner,
+                    AltiumSchMapDefinerList,
+                    AltiumSchImplParams,
+                ),
+            ):
+                continue
+            count += 1
+        return count
 
-        return results
+    @staticmethod
+    def _component_designator_text(component: object) -> str:
+        finder = getattr(component, "_find_designator_record", None)
+        if callable(finder):
+            designator = finder()
+            if designator is not None:
+                return str(getattr(designator, "text", "") or "")
+        return str(getattr(component, "designator", "") or "")
+
+    def asset_inventory(self, *, include_hashes: bool = False) -> AltiumAssetInventory:
+        """
+        Return extractable asset inventory for this SchDoc.
+        """
+        _ = include_hashes
+        source_path = str(self.filepath) if self.filepath is not None else None
+        return AltiumAssetInventory(
+            source_kind="schdoc",
+            source_path=source_path,
+            assets=self._symbol_asset_summaries(),
+        )
+
+    def extract_symbol(
+        self,
+        ref_or_name_or_index: object,
+        *,
+        strip_parameters: bool = True,
+        strip_implementations: bool = True,
+        debug: bool = False,
+    ) -> "AltiumSchLib":
+        """
+        Extract one placed SchDoc symbol as a single-symbol SchLib.
+        """
+        from .altium_schdoc_symbol_extractor import (
+            _create_schlib_symbol_from_template,
+            _first_instance_current_part_id,
+            _group_components_by_symbol,
+            _select_best_instance,
+        )
+
+        groups = list(_group_components_by_symbol(self.components).items())
+        summaries = self._symbol_asset_summaries()
+        index = selected_asset_index(
+            ref_or_name_or_index,
+            summaries=summaries,
+            expected_source_kind="schdoc",
+            expected_kind="sch_symbol",
+        )
+        symbol_key, instances = groups[index]
+        template = _select_best_instance(instances)
+        schlib, _safe_name, _symbol = _create_schlib_symbol_from_template(
+            symbol_key,
+            template,
+            self,
+            current_part_id=_first_instance_current_part_id(instances),
+            strip_parameters=strip_parameters,
+            strip_implementations=strip_implementations,
+            debug=debug,
+        )
+        return schlib
+
+    def extract_asset(self, ref: AltiumAssetRef) -> AltiumExtractedAsset:
+        """
+        Extract one asset selected from `asset_inventory()`.
+        """
+        if ref.source_kind != "schdoc":
+            raise ValueError(
+                f"asset reference source mismatch: expected schdoc, got {ref.source_kind}"
+            )
+        if ref.kind != "sch_symbol":
+            raise ValueError(f"unsupported SchDoc extractable asset kind: {ref.kind}")
+
+        summaries = self._symbol_asset_summaries()
+        index = selected_asset_index(
+            ref,
+            summaries=summaries,
+            expected_source_kind="schdoc",
+            expected_kind="sch_symbol",
+        )
+        return AltiumExtractedAsset(
+            ref=ref,
+            filename=summaries[index].extraction_filename or f"symbol_{index:03d}.SchLib",
+            schlib=self.extract_symbol(ref),
+        )
 
     # Clean SchDoc API - user-friendly access methods
 

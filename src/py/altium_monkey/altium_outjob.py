@@ -73,7 +73,6 @@ __all__ = [
     "NCDrillOutput",
     "ODBOutput",
     "PickPlaceOutput",
-    "WireListNetlistOutput",
     "BomPartTypeOutput",
     "ExportStepOutput",
     "SchematicPrintOutput",
@@ -613,70 +612,13 @@ class PickPlaceOutput:
 
 
 @dataclass(frozen=True)
-class WireListNetlistOutput:
-    """
-    Typed wirelist netlist output definition.
-    """
-
-    document_path: str = ""
-    output_name: str = "NETLIST"
-    units: str = "Imperial"
-    generate_csv_format: bool = False
-    generate_text_format: bool = True
-    show_units: bool = False
-    separator: str = "."
-    exclude_filter_param: bool = False
-    include_variations: bool = False
-    include_standard_no_bom: bool = False
-    filter_text: str = " "
-    filter_active: bool = False
-    y_flip: bool = False
-    different_footprints: bool = False
-    columns: tuple[str, ...] = ()
-
-    def to_spec(self) -> OutJobOutputSpec:
-        doc = _normalize_path(self.document_path)
-        fields: list[tuple[str, str]] = [
-            ("Units", self.units),
-            ("GenerateCSVFormat", _bool_str(self.generate_csv_format)),
-            ("GenerateTextFormat", _bool_str(self.generate_text_format)),
-            ("ShowUnits", _bool_str(self.show_units)),
-            ("Separator", self.separator),
-            ("ExcludeFilterParam", _bool_str(self.exclude_filter_param)),
-            ("IncludeVariations", _bool_str(self.include_variations)),
-            ("IncludeStandardNoBOM", _bool_str(self.include_standard_no_bom)),
-            ("Filter", self.filter_text),
-            ("FilterActive", _bool_str(self.filter_active)),
-            ("YFlip", _bool_str(self.y_flip)),
-            ("DifferentFootprints", _bool_str(self.different_footprints)),
-        ]
-        for idx, column in enumerate(self.columns, start=1):
-            fields.append((f"Column#{idx}", column))
-        fields.append(("DocumentPath", doc))
-
-        config = OutJobConfigRecord(
-            record_name=None,
-            fields=tuple(fields),
-            leading_separator=True,
-        )
-        return OutJobOutputSpec(
-            output_type="WireListNetlist",
-            output_name=self.output_name,
-            category="Netlist",
-            document_path=doc,
-            configuration_items=(
-                ("OutputConfigurationParameter1", config.to_string()),
-            ),
-        )
-
-
-@dataclass(frozen=True)
 class BomPartTypeOutput:
     """
     Typed BOM report output definition.
     """
 
     output_name: str = "CSV-BOM"
+    variant_name: str = ""
     page_options: str = _DEFAULT_PCB_PAGE_OPTIONS
     column_name_format: str = "CaptionAsName"
     general: str | None = None
@@ -698,6 +640,7 @@ class BomPartTypeOutput:
             output_type="BOM_PartType",
             output_name=self.output_name,
             category="Report",
+            variant_name=self.variant_name,
             page_options=self.page_options,
             configuration_items=(
                 ("ColumnNameFormat", self.column_name_format),
@@ -1417,34 +1360,6 @@ class AltiumOutJob:
             document_path=pcbdoc_path,
             units=units,
             generate_csv_format=csv_format,
-        )
-        return self.add_output_spec(output.to_spec(), enabled_medium=enabled_medium)
-
-    def add_wirelist_netlist(
-        self,
-        pcbdoc_path: str = "",
-        enabled_medium: int | None = None,
-        *,
-        units: str = "Imperial",
-        csv_format: bool = False,
-        columns: tuple[str, ...] = (),
-    ) -> int:
-        """
-        Add WireList netlist output type.
-
-                Args:
-                    pcbdoc_path: Path to PcbDoc.
-                    enabled_medium: Medium index to enable for.
-                    units: "Metric" or "Imperial".
-                    csv_format: Generate CSV format (if False, generate text format).
-                    columns: Optional explicit column definitions ("Name:...,Fixed:...,").
-        """
-        output = WireListNetlistOutput(
-            document_path=pcbdoc_path,
-            units=units,
-            generate_csv_format=csv_format,
-            generate_text_format=not csv_format,
-            columns=columns,
         )
         return self.add_output_spec(output.to_spec(), enabled_medium=enabled_medium)
 

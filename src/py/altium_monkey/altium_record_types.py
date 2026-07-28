@@ -273,12 +273,19 @@ class PcbRecordType(IntEnum):
 
 class PcbLayer(IntEnum):
     """
-    PCB layer IDs used by PcbDoc and PcbLib primitive APIs.
+    Legacy/TV6 PCB layer IDs used by PcbDoc and PcbLib primitive APIs.
 
-    Enum values map directly to the on-disk PCB layer ids used by Altium's
-    binary format. Public authoring methods accept these enum values anywhere a
-    layer argument is required, and rendering/export helpers use them to group
-    copper, mask, paste, overlay, keepout, drill, and mechanical layers.
+    Enum values map to Altium's compact legacy layer enum. That enum contains
+    Top, Mid1 through Mid30, Bottom, and Mechanical 1 through Mechanical 16
+    only; values 73, 74, and 75 are Drill Drawing, Multi-Layer, and Connect.
+    Extended mechanical layers such as Mechanical 17 and AD 26.8.1 extended
+    signal layers such as Mid31 use separate serialized V7 saved-layer
+    identities and must not be represented by adding linear `PcbLayer` enum
+    values.
+
+    Current public authoring methods accept these enum values for legacy
+    `layer` arguments. Some record families also carry V7 side fields, but this
+    enum is intentionally not the V7 layer-reference model.
     """
 
     TOP = 1

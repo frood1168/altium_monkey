@@ -25,6 +25,13 @@ overlapping symbol children in record order. SchDoc component insertion from
 SchLib preserves the source symbol order, and SchDoc symbol extraction writes
 children back in the placed component order.
 
+## Extraction From SchDoc
+
+`AltiumSchDoc.extract_schlib(...)` returns an in-memory `AltiumSchLib` from
+placed schematic components. `AltiumSchDoc.extract_symbols(...)` is the
+file-oriented companion for split or combined `.SchLib` output and uses the
+same extraction model.
+
 ## Units
 
 High-level public symbol-authoring APIs use mils. Low-level records may expose
@@ -49,4 +56,3 @@ See [SVG](svg.md) for the shared rendering contract.
 
 The SchLib contract is covered by symbol parsing, split/merge, extraction,
 authoring, SVG, public examples, and release signoff.
-

@@ -933,30 +933,13 @@ class Netlist:
             return []
         return net.graphical.all_svg_ids()
 
-    def to_wirelist(
-        self, strict: bool = True, allow_single_pin_nets: bool = False
-    ) -> str:
-        """
-        Convert to WireList format string.
-
-                Args:
-                    strict: If True, normalize special chars to ASCII.
-                    allow_single_pin_nets: If True, include single-pin auto-named nets.
-                                           Mirrors Altium's "NetlistSinglePinNets" option.
-        """
-        from .altium_netlist_format import netlist_to_wirelist
-
-        return netlist_to_wirelist(
-            self, strict=strict, allow_single_pin_nets=allow_single_pin_nets
-        )
-
     def to_json(self) -> dict:
         """
         Serialize netlist to JSON-compatible dict.
 
                 The resulting payload is the package-owned raw netlist contract.
-                It contains enough information to reproduce WireList output and
-                preserve grouped graphical connectivity metadata.
+                It preserves grouped graphical connectivity metadata without
+                relying on the deprecated WireList serialization.
         """
         return {
             "schema": NETLIST_JSON_SCHEMA,

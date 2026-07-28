@@ -4524,7 +4524,7 @@ class PcbDocBuilder:
 
     @property
     def mechanical_layer_kinds(self) -> Mapping[int, MechanicalLayerKind]:
-        """Return the current mechanical layer kind mapping by native layer id."""
+        """Return the current mapping by LayerKindMapping/Data layer id."""
 
         return self.layer_kind_mapping_data.mapping
 
@@ -4546,8 +4546,9 @@ class PcbDocBuilder:
         """
         Set the semantic kind assigned to a mechanical layer.
 
-        The layer may be a `PcbLayer`, a native classic mechanical layer id, a
+        The layer may be a `PcbLayer`, a LayerKindMapping/Data layer id, a
         `"MECHANICAL17"` token, or a mechanical layer number `1..32`.
+        Serialized V7 saved layer IDs are not accepted here.
         """
         kind_value = coerce_mechanical_layer_kind(kind)
         self.layer_kind_mapping_data = self.layer_kind_mapping_data.with_layer_kind(

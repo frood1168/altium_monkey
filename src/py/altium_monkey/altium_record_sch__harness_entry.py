@@ -20,6 +20,7 @@ from .altium_serializer import (
 from .altium_sch_record_helpers import (
     _basic_entry_distance_to_native_units,
     _basic_entry_distance_to_public_mils,
+    _basic_entry_distance_to_rounded_native_units,
     _public_mils_to_basic_entry_distance,
     detect_case_mode_method_from_uppercase_fields,
 )
@@ -108,6 +109,12 @@ class AltiumSchHarnessEntry(SingleFontBindableRecordMixin, SchPrimitive):
 
     def _distance_from_top_native_units(self) -> float:
         return _basic_entry_distance_to_native_units(
+            self.distance_from_top,
+            self.distance_from_top_frac1,
+        )
+
+    def _rounded_distance_from_top_native_units(self) -> int:
+        return _basic_entry_distance_to_rounded_native_units(
             self.distance_from_top,
             self.distance_from_top_frac1,
         )

@@ -70,26 +70,6 @@
         "type": "string"
       }
     },
-    "sheet": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "filename",
-        "sheet_number"
-      ],
-      "properties": {
-        "filename": {
-          "type": "string"
-        },
-        "sheet_number": {
-          "type": [
-            "integer",
-            "string"
-          ],
-          "description": "Canonical decimal sheet numbers are emitted as integers for compatibility; non-canonical Altium SheetNumber parameter values are emitted as exact strings."
-        }
-      }
-    },
     "parameter_map": {
       "type": "object",
       "additionalProperties": true
@@ -167,6 +147,26 @@
           "items": {
             "$ref": "design_a0.schema.json#/$defs/pnp_placement"
           }
+        }
+      }
+    },
+    "sheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "sheet_number"
+      ],
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "sheet_number": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "description": "Canonical decimal sheet numbers are emitted as integers for compatibility; non-canonical Altium SheetNumber parameter values are emitted as exact strings."
         }
       }
     },
@@ -249,21 +249,11 @@
         "metadata"
       ],
       "properties": {
-        "sheet_index": {
-          "type": "integer"
-        },
-        "filename": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        },
-        "is_top_level": {
-          "type": "boolean"
-        },
-        "metadata": {
-          "$ref": "#/$defs/freeform_object"
-        }
+        "sheet_index": { "type": "integer" },
+        "filename": { "type": "string" },
+        "path": { "type": "string" },
+        "is_top_level": { "type": "boolean" },
+        "metadata": { "$ref": "#/$defs/freeform_object" }
       }
     },
     "hierarchy_sheet_symbol": {
@@ -279,36 +269,20 @@
         "metadata"
       ],
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "parent_sheet_index": {
-          "type": "integer"
-        },
-        "designator": {
-          "type": "string"
-        },
-        "child_filename": {
-          "type": "string"
-        },
+        "id": { "type": "string" },
+        "parent_sheet_index": { "type": "integer" },
+        "designator": { "type": "string" },
+        "child_filename": { "type": "string" },
         "child_sheet_indices": {
           "type": "array",
-          "items": {
-            "type": "integer"
-          }
+          "items": { "type": "integer" }
         },
-        "repeat": {
-          "$ref": "#/$defs/freeform_object"
-        },
+        "repeat": { "$ref": "#/$defs/freeform_object" },
         "entries": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/freeform_object"
-          }
+          "items": { "$ref": "#/$defs/freeform_object" }
         },
-        "metadata": {
-          "$ref": "#/$defs/freeform_object"
-        }
+        "metadata": { "$ref": "#/$defs/freeform_object" }
       }
     },
     "hierarchy_path_record": {
@@ -321,26 +295,12 @@
         "levels"
       ],
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "source_sheet_index": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "compiled_sheet_index": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
+        "id": { "type": "string" },
+        "source_sheet_index": { "type": ["integer", "null"] },
+        "compiled_sheet_index": { "type": ["integer", "null"] },
         "levels": {
           "type": "array",
-          "items": {
-            "$ref": "netlist_a0.schema.json#/$defs/hierarchy_level"
-          }
+          "items": { "$ref": "netlist_a0.schema.json#/$defs/hierarchy_level" }
         }
       }
     },
@@ -356,33 +316,14 @@
         "hierarchy_path_id"
       ],
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "sheet_symbol_id": {
-          "type": "string"
-        },
-        "parent_sheet_index": {
-          "type": "integer"
-        },
-        "child_sheet_index": {
-          "type": "integer"
-        },
-        "compiled_child_sheet_index": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "instance_index": {
-          "type": "integer"
-        },
-        "channel_name": {
-          "type": "string"
-        },
-        "hierarchy_path_id": {
-          "type": "string"
-        }
+        "id": { "type": "string" },
+        "sheet_symbol_id": { "type": "string" },
+        "parent_sheet_index": { "type": "integer" },
+        "child_sheet_index": { "type": "integer" },
+        "compiled_child_sheet_index": { "type": ["integer", "null"] },
+        "instance_index": { "type": "integer" },
+        "channel_name": { "type": "string" },
+        "hierarchy_path_id": { "type": "string" }
       }
     },
     "hierarchy_link": {
@@ -398,27 +339,13 @@
         "metadata"
       ],
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "kind": {
-          "type": "string"
-        },
-        "parent": {
-          "$ref": "#/$defs/freeform_object"
-        },
-        "child": {
-          "$ref": "#/$defs/freeform_object"
-        },
-        "match_kind": {
-          "type": "string"
-        },
-        "hierarchy_path_id": {
-          "type": "string"
-        },
-        "metadata": {
-          "$ref": "#/$defs/freeform_object"
-        }
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "parent": { "$ref": "#/$defs/freeform_object" },
+        "child": { "$ref": "#/$defs/freeform_object" },
+        "match_kind": { "type": "string" },
+        "hierarchy_path_id": { "type": "string" },
+        "metadata": { "$ref": "#/$defs/freeform_object" }
       }
     },
     "harness_bundle_link": {
@@ -436,33 +363,15 @@
         "metadata"
       ],
       "properties": {
-        "id": {
-          "type": "string"
-        },
-        "kind": {
-          "const": "harness_bundle"
-        },
-        "topology": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "parent": {
-          "$ref": "#/$defs/freeform_object"
-        },
-        "child": {
-          "$ref": "#/$defs/freeform_object"
-        },
-        "bundle": {
-          "$ref": "#/$defs/freeform_object"
-        },
-        "match_kind": {
-          "type": "string"
-        },
-        "metadata": {
-          "$ref": "#/$defs/freeform_object"
-        }
+        "id": { "type": "string" },
+        "kind": { "const": "harness_bundle" },
+        "topology": { "type": "string" },
+        "name": { "type": "string" },
+        "parent": { "$ref": "#/$defs/freeform_object" },
+        "child": { "$ref": "#/$defs/freeform_object" },
+        "bundle": { "$ref": "#/$defs/freeform_object" },
+        "match_kind": { "type": "string" },
+        "metadata": { "$ref": "#/$defs/freeform_object" }
       }
     },
     "freeform_object": {

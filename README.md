@@ -44,7 +44,7 @@ Common workflows:
 2. create schematic symbols and PCB footprints
 3. insert SchLib symbols and PcbLib footprints
 4. extract SchLib and PcbLib data from projects
-5. render schematic and PCB SVGs
+5. render logical schematic SVGs, compiled physical schematic SVGs, and PCB SVGs
 6. inspect PCB layers, drills, board outlines, nets, and net classes
 7. author and mutate PCB vias, including IPC-4761 protection metadata
 8. extract embedded fonts and 3D models
@@ -141,7 +141,8 @@ The public docs are Markdown-first for this release:
 8. [API patterns](docs/api_patterns/index.md)
 9. [Schema contracts](docs/schemas/index.md)
 10. [Format contracts](docs/format_contracts/index.md)
-11. [Examples](docs/examples/index.md)
+11. [Docs style foundation](docs/style.md)
+12. [Examples](docs/examples/index.md)
 
 The examples are the best starting point for public API usage. They are kept in
 [`examples/`](examples/) and are indexed from `examples/manifest.toml`.
@@ -217,9 +218,16 @@ Known release boundaries include:
    component cross-reference metadata cannot be parsed.
 4. Variant processing supports DNP handling and parameter overrides; alternate
    fitted component replacement is not applied semantically yet.
-5. Complex hierarchical channels and `.Annotation` file handling may need
-   additional validation.
-6. Windows remains the primary validation platform. macOS font discovery and
+5. Complex hierarchical channels now route through the compiled design model
+   for design JSON, netlist JSON, and physical schematic SVG/IR output.
+   Rich consumers should use `AltiumDesign.to_json(...)` `physical_pages` or
+   `AltiumDesign.to_physical_svg(...)` for repeated sheets instead of assuming
+   one source SVG ID maps to one physical component.
+6. Project design JSON now emits `altium_monkey.design.a2`. Strict validators
+   pinned to the old `design.a1` schema should refresh to `design.a2`; compile
+   metadata and diagnostics are opt-in through
+   `to_json(include_compile_metadata=True)`.
+7. Windows remains the primary validation platform. macOS font discovery and
    bundled schematic font substitution have focused coverage; Linux coverage
    remains limited and may rely more heavily on bundled substitutions.
 

@@ -91,7 +91,14 @@ def build_fill_stream(fills: Sequence[AltiumPcbFill]) -> bytes:
 
 def coerce_legacy_layer_id(layer: int | str | PcbLayer) -> int:
     """
-    Resolve a public builder layer input into the legacy PCB layer ID.
+    Resolve a public builder layer input into the legacy/TV6 PCB layer ID.
+
+    This helper does not validate or remap serialized V7 saved-layer IDs;
+    integer input is passed through as a legacy layer id, so passing a V7
+    saved-layer ID silently corrupts the legacy layer field. Methods that
+    need Mechanical 17+, Mid31+, or other V7-only identities must use a future
+    V7-aware layer reference path instead of passing those IDs through
+    `layer=`.
     """
     if isinstance(layer, PcbLayer):
         return int(layer.value)

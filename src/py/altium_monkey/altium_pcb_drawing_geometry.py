@@ -151,7 +151,7 @@ class PcbDrawingDocument:
         )
 
     def layer(self, layer: int | PcbLayer) -> PcbDrawingLayer | None:
-        """Return a layer by native layer id."""
+        """Return a drawing layer by legacy/TV6 layer id."""
 
         layer_id = int(layer)
         for drawing_layer in self.layers:
@@ -163,7 +163,7 @@ class PcbDrawingDocument:
         self,
         layer: int | PcbLayer,
     ) -> tuple[PcbDrawingPrimitive, ...]:
-        """Return primitives for a native layer id."""
+        """Return primitives for a legacy/TV6 layer id."""
 
         drawing_layer = self.layer(layer)
         if drawing_layer is None:

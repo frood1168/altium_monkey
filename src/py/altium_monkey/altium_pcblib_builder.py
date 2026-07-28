@@ -2441,7 +2441,7 @@ class PcbLibBuilder:
 
     @property
     def mechanical_layer_kinds(self) -> dict[int, MechanicalLayerKind]:
-        """Return the current mechanical layer kind mapping by native layer id."""
+        """Return the current mapping by LayerKindMapping/Data layer id."""
 
         return dict(self.layer_kind_mapping_data.mapping)
 

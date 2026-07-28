@@ -160,6 +160,62 @@
         },
         "layer_id_to_name": {
           "$ref": "#/$defs/string_map"
+        },
+        "render_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/render_layer"
+          }
+        }
+      }
+    },
+    "render_layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "key",
+        "name",
+        "display_name",
+        "role",
+        "kind",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "native",
+            "derived"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "altium",
+            "renderer"
+          ]
+        },
+        "derived_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

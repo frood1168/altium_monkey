@@ -13,9 +13,11 @@ import sys
 import tomllib
 import zlib
 from collections.abc import Iterator
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
@@ -33,15 +35,59 @@ def _load_examples() -> list[dict[str, object]]:
     return examples
 
 
+def _extractable_asset_schema_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (CONTRACTS_ROOT / "extractable_assets_a0.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _embedded_asset_schema_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (CONTRACTS_ROOT / "embedded_assets_a0.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _design_a2_schema_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (CONTRACTS_ROOT / "design_a2.schema.json").read_text(encoding="utf-8")
+    )
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _assert_schema_valid(
+    validator: Draft202012Validator, payload: object, context: str
+) -> None:
+    errors = sorted(validator.iter_errors(payload), key=lambda error: list(error.path))
+    assert not errors, f"{context} schema errors: {[error.message for error in errors]}"
+
+
+def _assert_schema_invalid(
+    validator: Draft202012Validator, payload: object, context: str
+) -> None:
+    assert list(validator.iter_errors(payload)), f"{context} unexpectedly validated"
+
+
 def test_schema_contract_docs_list_public_schema_ids() -> None:
     docs_path = PUBLIC_ROOT / "docs" / "schemas" / "index.md"
     docs_text = docs_path.read_text(encoding="utf-8")
 
     for schema_id in (
+        "altium_monkey.design.a2",
         "altium_monkey.design.a1",
         "altium_monkey.design.a0",
         "altium_monkey.netlist.a0",
         "altium_monkey.pcb.svg.enrichment.a0",
+        "altium_monkey.pcb.embedded_assets.a0",
+        "altium_monkey.extractable_assets.a0",
     ):
         assert schema_id in docs_text
 
@@ -52,28 +98,75 @@ def test_schema_contract_docs_list_public_schema_ids() -> None:
     assert "pcb-enrichment-a0" in docs_text
     assert "Moving from `a` to `b`" in docs_text
     assert "Moving from `a0` to `a1`" in docs_text
+    assert "Moving from `a1` to `a2`" in docs_text
     assert "docs/schemas/altium_monkey" in docs_text
+    assert "design_a2.schema.json" in docs_text
     assert "design_a1.schema.json" in docs_text
     assert "design_a0.schema.json" in docs_text
     assert "netlist_a0.schema.json" in docs_text
     assert "pcb_svg_enrichment_a0.schema.json" in docs_text
+    assert "embedded_assets_a0.schema.json" in docs_text
+    assert "extractable_assets_a0.schema.json" in docs_text
+    assert "EmbeddedAssetInventory.to_dict" in docs_text
+    assert "AltiumAssetInventory.to_dict" in docs_text
 
 
 def test_altium_monkey_contract_schemas_are_parseable() -> None:
     schemas = {
+        "design_a2.schema.json": "altium_monkey.design.a2",
         "design_a1.schema.json": "altium_monkey.design.a1",
         "design_a0.schema.json": "altium_monkey.design.a0",
         "netlist_a0.schema.json": "altium_monkey.netlist.a0",
         "pcb_svg_enrichment_a0.schema.json": ("altium_monkey.pcb.svg.enrichment.a0"),
+        "embedded_assets_a0.schema.json": "altium_monkey.pcb.embedded_assets.a0",
+        "extractable_assets_a0.schema.json": "altium_monkey.extractable_assets.a0",
     }
 
     spec_text = (CONTRACTS_ROOT / "SPEC.md").read_text(encoding="utf-8")
     for filename, schema_id in schemas.items():
         schema_path = CONTRACTS_ROOT / filename
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         assert schema["properties"]["schema"]["const"] == schema_id
         assert schema_id in spec_text
+
+
+@pytest.mark.parametrize(
+    ("project_path", "case_id"),
+    [
+        (
+            "examples/assets/projects/bunny_brain/bunny_brain_D.PrjPcb",
+            "bunny_brain",
+        ),
+        (
+            "examples/assets/projects/hydroscope/Hydroscope.PrjPcb",
+            "hydroscope",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "include_compile_metadata",
+    [False, True],
+    ids=["compact", "compile_metadata"],
+)
+def test_altium_design_a2_schema_validates_real_to_json_payloads(
+    project_path: str,
+    case_id: str,
+    include_compile_metadata: bool,
+) -> None:
+    from altium_monkey import AltiumDesign
+
+    validator = _design_a2_schema_validator()
+    payload = AltiumDesign.from_prjpcb(PUBLIC_ROOT / project_path).to_json(
+        include_compile_metadata=include_compile_metadata
+    )
+
+    assert payload["schema"] == "altium_monkey.design.a2"
+    assert ("compile" in payload) is include_compile_metadata
+    assert ("diagnostics" in payload) is include_compile_metadata
+    assert "physical_pages" in payload
+    _assert_schema_valid(validator, payload, case_id)
 
 
 def test_public_gitignore_tracks_lockfile_and_ignores_example_outputs() -> None:
@@ -186,8 +279,13 @@ def test_domain_docs_list_public_workflow_examples() -> None:
         "source_stackup_ref",
         "layers_for_board_region",
         "intlib_extract_sources",
+        "altium_monkey.design.a2",
         "altium_monkey.design.a1",
         "altium_monkey.netlist.a0",
+        "altium_monkey.pcb.embedded_assets.a0",
+        "altium_monkey.extractable_assets.a0",
+        "embedded_asset_inventory",
+        "extractable_asset_inventory",
     ):
         assert token in docs_text
 
@@ -292,6 +390,71 @@ def test_public_markdown_links_resolve() -> None:
                 missing.append(f"{markdown_path.relative_to(public_root)} -> {target}")
 
     assert not missing, "\n".join(missing[:50])
+
+
+def test_public_docs_style_foundation_is_present() -> None:
+    stylesheet = PUBLIC_ROOT / "docs" / "assets" / "altium-monkey-docs.css"
+    theme_css = PUBLIC_ROOT / "docs" / "assets" / "altium-monkey-theme.css"
+    theme_json = PUBLIC_ROOT / "docs" / "assets" / "altium-monkey-theme.json"
+    font_ttf = PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.ttf"
+    font_otf = PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.otf"
+    font_woff = PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.woff"
+    font_woff2 = (
+        PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.woff2"
+    )
+    font_css = (
+        PUBLIC_ROOT
+        / "docs"
+        / "assets"
+        / "fonts"
+        / "altium-monkey-stroke-fonts.css"
+    )
+    monkey_html = (
+        PUBLIC_ROOT / "docs" / "assets" / "monkey" / "altium-monkey.html"
+    )
+    monkey_txt = PUBLIC_ROOT / "docs" / "assets" / "monkey" / "altium-monkey.txt"
+    monkey_preview = (
+        PUBLIC_ROOT / "docs" / "assets" / "monkey" / "altium-monkey-preview.png"
+    )
+    style_doc = PUBLIC_ROOT / "docs" / "style.md"
+    docs_index = (PUBLIC_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    public_readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
+    css = stylesheet.read_text(encoding="utf-8")
+    font_css_text = font_css.read_text(encoding="utf-8")
+    theme = json.loads(theme_json.read_text(encoding="utf-8"))
+    style_text = style_doc.read_text(encoding="utf-8")
+
+    assert stylesheet.exists()
+    assert theme_css.exists()
+    assert theme_json.exists()
+    assert font_ttf.exists()
+    assert font_otf.exists()
+    assert font_woff.exists()
+    assert font_woff2.exists()
+    assert font_css.exists()
+    assert monkey_html.exists()
+    assert monkey_txt.exists()
+    assert monkey_preview.exists()
+    assert style_doc.exists()
+    assert "style.md" in docs_index
+    assert "docs/style.md" in public_readme
+    assert "--mk-accent: #ffb000" in css
+    assert "--mk-bg: #050403" in css
+    assert "--am-font-stroke" in css
+    assert "font-family: 'Altium Stroke'" in css
+    assert "fonts/altium-stroke.woff2" in css
+    assert "fonts/altium-stroke.woff" in css
+    assert "fonts/altium-stroke.otf" in css
+    assert "font-family: 'Altium Stroke'" in font_css_text
+    assert "altium-stroke.woff2" in font_css_text
+    assert "altium-stroke.otf" in font_css_text
+    assert theme["id"] == "amber"
+    assert theme["tokens"]["--mk-accent"] == "#ffb000"
+    assert "assets/altium-monkey-docs.css" in style_text
+    assert "assets/fonts/altium-stroke.woff2" in style_text
+    assert "assets/fonts/altium-stroke.woff" in style_text
+    assert "assets/fonts/altium-stroke.otf" in style_text
+    assert "assets/monkey/altium-monkey.html" in style_text
 
 
 @pytest.fixture(scope="session")
@@ -1036,7 +1199,7 @@ def test_prjpcb_make_project_writes_project_container(
             enabled_count += 1
         index += 1
 
-    assert output_count >= 10
+    assert output_count >= 9
     assert enabled_count == output_count
     assert outjob.config.get(
         "GeneratedFilesSettings", "RelativeOutputPath1"
@@ -3595,6 +3758,519 @@ def test_pcbdoc_extraction_examples_write_parseable_assets(
         assert model_path.read_text(encoding="utf-8", errors="ignore").startswith(
             "ISO-10303-21;"
         )
+
+
+def test_embedded_asset_inventory_to_dict_matches_public_schema() -> None:
+    from altium_monkey import (
+        AltiumPcbDoc,
+        AltiumPcbLib,
+        EmbeddedFont,
+        PcbLayer,
+        embedded_asset_schema_id,
+    )
+
+    validator = _embedded_asset_schema_validator()
+    model_payload = b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n"
+    font_payload = b"\x00\x01\x00\x00embedded font payload"
+
+    pcbdoc = AltiumPcbDoc()
+    pcbdoc_model = pcbdoc.add_embedded_model(
+        name="board-model.step",
+        model_data=model_payload,
+        model_id="{10101010-1010-1010-1010-101010101010}",
+        checksum=1010,
+    )
+    pcbdoc.add_embedded_3d_model(
+        pcbdoc_model,
+        bounds_mils=(-10.0, -10.0, 10.0, 10.0),
+        overall_height_mils=12.0,
+    )
+    pcbdoc.embedded_fonts = [
+        EmbeddedFont(
+            name="Preview Font",
+            style="Regular",
+            compressed_data=zlib.compress(font_payload),
+            raw_data=b"font-record" + zlib.compress(font_payload),
+        )
+    ]
+    pcbdoc_payload = pcbdoc.embedded_asset_inventory(include_hashes=True).to_dict()
+    _assert_schema_valid(validator, pcbdoc_payload, "pcbdoc embedded inventory")
+    assert pcbdoc_payload["schema"] == embedded_asset_schema_id()
+    assert pcbdoc_payload["source_kind"] == "pcbdoc"
+    assert pcbdoc_payload["source_path"] is None
+    assert pcbdoc_payload["opaque_assets"] == []
+    assert pcbdoc_payload["models"][0]["payload_sha256"] == (  # type: ignore[index]
+        hashlib.sha256(model_payload).hexdigest()
+    )
+    assert pcbdoc_payload["fonts"][0]["payload_sha256"] == (  # type: ignore[index]
+        hashlib.sha256(font_payload).hexdigest()
+    )
+    assert isinstance(pcbdoc_payload["models"][0]["references"], list)  # type: ignore[index]
+
+    pcblib = AltiumPcbLib()
+    pcblib.raw_embedded_fonts = b"opaque pcblib font stream"
+    pcblib_model = pcblib.add_embedded_model(
+        name="library-model.step",
+        model_data=model_payload,
+        model_id="{20202020-2020-2020-2020-202020202020}",
+        checksum=2020,
+    )
+    footprint = pcblib.add_footprint("MODEL_SOURCE")
+    footprint.add_embedded_3d_model(
+        pcblib_model,
+        bounds_mils=(-20.0, -10.0, 20.0, 10.0),
+        layer=PcbLayer.MECHANICAL_1,
+        overall_height_mils=15.0,
+    )
+    pcblib_payload = pcblib.embedded_asset_inventory(include_hashes=True).to_dict()
+    _assert_schema_valid(validator, pcblib_payload, "pcblib embedded inventory")
+    assert pcblib_payload["schema"] == embedded_asset_schema_id()
+    assert pcblib_payload["source_kind"] == "pcblib"
+    assert pcblib_payload["fonts"] == []
+    assert pcblib_payload["models"][0]["source_kind"] == "pcblib"  # type: ignore[index]
+    assert pcblib_payload["models"][0]["references"][0]["source_object_kind"] == (  # type: ignore[index]
+        "footprint"
+    )
+    assert pcblib_payload["opaque_assets"][0]["stream_name"] == (  # type: ignore[index]
+        "Library/EmbeddedFonts"
+    )
+    assert pcblib_payload["opaque_assets"][0]["support_status"] == "opaque"  # type: ignore[index]
+
+    bad_extra_field = deepcopy(pcbdoc_payload)
+    bad_extra_field["models"][0]["unexpected"] = True  # type: ignore[index]
+    _assert_schema_invalid(validator, bad_extra_field, "unexpected model field")
+
+    bad_source_kind = deepcopy(pcbdoc_payload)
+    bad_source_kind["models"][0]["source_kind"] = "pcblib"  # type: ignore[index]
+    _assert_schema_invalid(validator, bad_source_kind, "mismatched item source")
+
+    bad_hash = deepcopy(pcbdoc_payload)
+    bad_hash["models"][0]["payload_sha256"] = "not-a-sha256"  # type: ignore[index]
+    _assert_schema_invalid(validator, bad_hash, "malformed model hash")
+
+    bad_unavailable_model = deepcopy(pcbdoc_payload)
+    bad_unavailable_model["models"][0]["payload_available"] = False  # type: ignore[index]
+    bad_unavailable_model["models"][0]["decompressed_size"] = 99  # type: ignore[index]
+    _assert_schema_invalid(
+        validator, bad_unavailable_model, "unavailable model with decompressed size"
+    )
+
+    bad_unavailable_model_hash = deepcopy(pcbdoc_payload)
+    bad_unavailable_model_hash["models"][0]["payload_available"] = False  # type: ignore[index]
+    bad_unavailable_model_hash["models"][0]["decompressed_size"] = None  # type: ignore[index]
+    _assert_schema_invalid(
+        validator, bad_unavailable_model_hash, "unavailable model with hash"
+    )
+
+    bad_reference_kind = deepcopy(pcbdoc_payload)
+    bad_reference_kind["models"][0]["references"][0]["asset_kind"] = "font"  # type: ignore[index]
+    _assert_schema_invalid(validator, bad_reference_kind, "non-model reference kind")
+
+    bad_unavailable_font = deepcopy(pcbdoc_payload)
+    bad_unavailable_font["fonts"][0]["payload_available"] = False  # type: ignore[index]
+    bad_unavailable_font["fonts"][0]["decompressed_size"] = 12  # type: ignore[index]
+    _assert_schema_invalid(
+        validator, bad_unavailable_font, "unavailable font with decompressed size"
+    )
+
+    bad_unavailable_font_hash = deepcopy(pcbdoc_payload)
+    bad_unavailable_font_hash["fonts"][0]["payload_available"] = False  # type: ignore[index]
+    bad_unavailable_font_hash["fonts"][0]["decompressed_size"] = None  # type: ignore[index]
+    _assert_schema_invalid(
+        validator, bad_unavailable_font_hash, "unavailable font with hash"
+    )
+
+    bad_pcblib_font = deepcopy(pcblib_payload)
+    font_entry = deepcopy(pcbdoc_payload["fonts"][0])  # type: ignore[index]
+    font_entry["source_kind"] = "pcblib"
+    bad_pcblib_font["fonts"].append(font_entry)  # type: ignore[union-attr]
+    _assert_schema_invalid(validator, bad_pcblib_font, "pcblib typed font")
+
+    bad_pcbdoc_opaque = deepcopy(pcbdoc_payload)
+    opaque_entry = deepcopy(pcblib_payload["opaque_assets"][0])  # type: ignore[index]
+    opaque_entry["source_kind"] = "pcbdoc"
+    bad_pcbdoc_opaque["opaque_assets"].append(opaque_entry)  # type: ignore[union-attr]
+    _assert_schema_invalid(validator, bad_pcbdoc_opaque, "pcbdoc opaque asset")
+
+    bad_unavailable_opaque_hash = deepcopy(pcblib_payload)
+    bad_unavailable_opaque_hash["opaque_assets"][0]["payload_available"] = False  # type: ignore[index]
+    _assert_schema_invalid(
+        validator, bad_unavailable_opaque_hash, "unavailable opaque asset with hash"
+    )
+
+
+def test_extractable_asset_inventory_to_dict_handles_unavailable_embedded_payloads() -> None:
+    from altium_monkey import (
+        AltiumPcbDoc,
+        AltiumPcbLib,
+        EmbeddedFont,
+        extractable_asset_schema_id,
+    )
+
+    validator = _extractable_asset_schema_validator()
+    pcbdoc = AltiumPcbDoc()
+    pcbdoc.add_embedded_model(
+        name="corrupt_model.step",
+        model_data=b"not a zlib stream",
+        model_id="{30303030-3030-3030-3030-303030303030}",
+        data_is_compressed=True,
+    )
+    pcbdoc.embedded_fonts = [
+        EmbeddedFont(
+            name="Corrupt Font",
+            style="Regular",
+            compressed_data=b"not a zlib font stream",
+            raw_data=b"font-record-prefix",
+        )
+    ]
+
+    payload = pcbdoc.asset_inventory(include_hashes=True).to_dict()
+    _assert_schema_valid(validator, payload, "generic unavailable embedded payloads")
+    assert payload["schema"] == extractable_asset_schema_id()
+
+    assets_by_kind = {
+        asset["kind"]: asset for asset in payload["assets"]  # type: ignore[index]
+    }
+    model = assets_by_kind["embedded_model"]
+    assert model["can_extract"] is False
+    assert model["payload_available"] is False
+    assert model["payload_sha256"] is None
+    assert model["details"]["decompressed_size"] == 0  # type: ignore[index]
+
+    font = assets_by_kind["embedded_font"]
+    assert font["can_extract"] is False
+    assert font["payload_available"] is False
+    assert font["payload_sha256"] is None
+    assert font["details"]["decompressed_size"] == 0  # type: ignore[index]
+
+    bad_model_size = deepcopy(payload)
+    bad_model = next(
+        asset
+        for asset in bad_model_size["assets"]  # type: ignore[index]
+        if asset["kind"] == "embedded_model"
+    )
+    bad_model["details"]["decompressed_size"] = None
+    _assert_schema_invalid(
+        validator, bad_model_size, "generic model unavailable size null"
+    )
+
+    bad_model_hash = deepcopy(payload)
+    bad_model = next(
+        asset
+        for asset in bad_model_hash["assets"]  # type: ignore[index]
+        if asset["kind"] == "embedded_model"
+    )
+    bad_model["payload_sha256"] = "0" * 64
+    _assert_schema_invalid(
+        validator, bad_model_hash, "generic unavailable model with hash"
+    )
+
+    bad_font_size = deepcopy(payload)
+    bad_font = next(
+        asset
+        for asset in bad_font_size["assets"]  # type: ignore[index]
+        if asset["kind"] == "embedded_font"
+    )
+    bad_font["details"]["decompressed_size"] = None
+    _assert_schema_invalid(
+        validator, bad_font_size, "generic font unavailable size null"
+    )
+
+    bad_font_hash = deepcopy(payload)
+    bad_font = next(
+        asset
+        for asset in bad_font_hash["assets"]  # type: ignore[index]
+        if asset["kind"] == "embedded_font"
+    )
+    bad_font["payload_sha256"] = "1" * 64
+    _assert_schema_invalid(
+        validator, bad_font_hash, "generic unavailable font with hash"
+    )
+
+    pcblib = AltiumPcbLib()
+    pcblib.raw_embedded_fonts = b"opaque pcblib font stream"
+    opaque_payload = pcblib.asset_inventory(include_hashes=True).to_dict()
+    _assert_schema_valid(validator, opaque_payload, "generic opaque payload")
+    opaque_asset = next(
+        asset
+        for asset in opaque_payload["assets"]  # type: ignore[index]
+        if asset["kind"] == "opaque_embedded"
+    )
+    assert opaque_asset["payload_available"] is True
+    assert opaque_asset["payload_sha256"] == hashlib.sha256(
+        b"opaque pcblib font stream"
+    ).hexdigest()
+
+    bad_opaque_hash = deepcopy(opaque_payload)
+    bad_opaque = next(
+        asset
+        for asset in bad_opaque_hash["assets"]  # type: ignore[index]
+        if asset["kind"] == "opaque_embedded"
+    )
+    bad_opaque["payload_available"] = False
+    _assert_schema_invalid(
+        validator, bad_opaque_hash, "generic unavailable opaque with hash"
+    )
+
+
+def test_embedded_asset_inventory_example_writes_consumer_json(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item for item in _load_examples() if item["id"] == "embedded_asset_inventory"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+    assert "Inventoried embedded asset sources: 2" in result.stdout
+
+    example_root = check_examples_root / "embedded_asset_inventory"
+    manifest = json.loads(
+        (
+            example_root
+            / "output"
+            / "embedded_asset_inventory_manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert manifest["schema"] == "altium_monkey.examples.embedded_asset_inventory.a0"
+    assert manifest["inventory_schema"] == "altium_monkey.pcb.embedded_assets.a0"
+    assert set(manifest["sources"]) == {"pcbdoc", "pcblib"}
+
+    validator = _embedded_asset_schema_validator()
+    inventories: dict[str, dict[str, object]] = {}
+    for source_kind in ("pcbdoc", "pcblib"):
+        source = manifest["sources"][source_kind]
+        assert source["schema"] == "altium_monkey.pcb.embedded_assets.a0"
+        inventory = json.loads(
+            (example_root / source["inventory"]).read_text(encoding="utf-8")
+        )
+        inventories[source_kind] = inventory
+        _assert_schema_valid(validator, inventory, f"{source_kind} embedded inventory")
+        assert inventory["schema"] == "altium_monkey.pcb.embedded_assets.a0"
+        assert inventory["source_kind"] == source_kind
+        assert len(inventory["models"]) == source["model_count"]
+        assert len(inventory["fonts"]) == source["font_count"]
+        assert len(inventory["opaque_assets"]) == source["opaque_count"]
+
+    assert manifest["sources"]["pcbdoc"]["model_count"] > 0
+    assert manifest["sources"]["pcbdoc"]["font_count"] > 0
+    assert manifest["sources"]["pcblib"]["model_count"] > 0
+    assert manifest["sources"]["pcblib"]["opaque_count"] > 0
+    assert inventories["pcblib"]["fonts"] == []
+    assert inventories["pcblib"]["opaque_assets"][0]["stream_name"] == (
+        "Library/EmbeddedFonts"
+    )
+
+    def selected_inventory_entry(
+        *,
+        source_kind: str,
+        collection_name: str,
+        selected_entry: dict[str, object],
+    ) -> dict[str, object]:
+        matches = [
+            item
+            for item in inventories[source_kind][collection_name]  # type: ignore[index]
+            if item["extraction_filename"] == selected_entry["suggested_filename"]
+        ]
+        assert len(matches) == 1
+        return matches[0]
+
+    selected = manifest["selected"]
+    selected_entries = {
+        "pcbdoc_model": selected_inventory_entry(
+            source_kind="pcbdoc",
+            collection_name="models",
+            selected_entry=selected["pcbdoc_model"],
+        ),
+        "pcbdoc_font": selected_inventory_entry(
+            source_kind="pcbdoc",
+            collection_name="fonts",
+            selected_entry=selected["pcbdoc_font"],
+        ),
+        "pcblib_model": selected_inventory_entry(
+            source_kind="pcblib",
+            collection_name="models",
+            selected_entry=selected["pcblib_model"],
+        ),
+    }
+    payload_paths = {
+        "pcbdoc_model": example_root / selected["pcbdoc_model"]["path"],
+        "pcbdoc_font": example_root / selected["pcbdoc_font"]["path"],
+        "pcblib_model": example_root / selected["pcblib_model"]["path"],
+    }
+    for key, path in payload_paths.items():
+        assert selected_entries[key]["payload_available"] is True
+        assert selected_entries[key]["payload_sha256"] == selected[key]["sha256"]
+        assert (
+            selected_entries[key]["extraction_filename"]
+            == selected[key]["suggested_filename"]
+        )
+        assert path.exists()
+        assert path.stat().st_size == selected[key]["byte_count"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == selected[key]["sha256"]
+
+    assert payload_paths["pcbdoc_model"].read_text(
+        encoding="utf-8",
+        errors="ignore",
+    ).startswith("ISO-10303-21;")
+    assert payload_paths["pcblib_model"].read_text(
+        encoding="utf-8",
+        errors="ignore",
+    ).startswith("ISO-10303-21;")
+    assert payload_paths["pcbdoc_font"].read_bytes()[:4] in (b"\x00\x01\x00\x00", b"OTTO")
+
+
+def test_extractable_asset_inventory_example_writes_selected_assets(
+    check_examples_root: Path,
+) -> None:
+    from altium_monkey import AltiumPcbLib, AltiumSchLib
+
+    example = next(
+        item for item in _load_examples() if item["id"] == "extractable_asset_inventory"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+    assert "Inventoried sources: 4" in result.stdout
+
+    example_root = check_examples_root / "extractable_asset_inventory"
+    manifest = json.loads(
+        (
+            example_root
+            / "output"
+            / "extractable_asset_inventory_manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert manifest["schema"] == "altium_monkey.examples.extractable_asset_inventory.a0"
+    assert manifest["inventory_schema"] == "altium_monkey.extractable_assets.a0"
+    assert set(manifest["sources"]) == {"schdoc", "schlib", "pcbdoc", "pcblib"}
+    validator = _extractable_asset_schema_validator()
+    inventories: dict[str, dict[str, object]] = {}
+
+    expected_kinds = {
+        "schdoc": "sch_symbol",
+        "schlib": "sch_symbol",
+        "pcbdoc": "pcb_footprint",
+        "pcblib": "pcb_footprint",
+    }
+    for source_kind, asset_kind in expected_kinds.items():
+        source = manifest["sources"][source_kind]
+        assert source["schema"] == "altium_monkey.extractable_assets.a0"
+        assert source["asset_counts"][asset_kind] > 0
+        inventory = json.loads(
+            (example_root / source["inventory"]).read_text(encoding="utf-8")
+        )
+        inventories[source_kind] = inventory
+        _assert_schema_valid(validator, inventory, f"{source_kind} inventory")
+        assert inventory["schema"] == "altium_monkey.extractable_assets.a0"
+        assert inventory["source_kind"] == source_kind
+        assert any(asset["kind"] == asset_kind for asset in inventory["assets"])
+
+    schdoc_inventory = inventories["schdoc"]
+    bad_details = deepcopy(schdoc_inventory)
+    bad_details["assets"][0]["details"] = {  # type: ignore[index]
+        "pattern": "QFN-16",
+        "occurrence": 0,
+        "component_indices": [],
+        "component_designators": [],
+        "component_count": 0,
+        "source_footprint_library": "",
+        "pad_count": 0,
+        "primitive_count": 0,
+    }
+    _assert_schema_invalid(validator, bad_details, "mismatched detail kind")
+
+    bad_ref_kind = deepcopy(schdoc_inventory)
+    bad_ref_kind["assets"][0]["ref"]["kind"] = "pcb_footprint"  # type: ignore[index]
+    _assert_schema_invalid(validator, bad_ref_kind, "mismatched ref.kind")
+
+    bad_extras = deepcopy(schdoc_inventory)
+    bad_extras["assets"][0]["extras"] = {"unexpected": True}  # type: ignore[index]
+    _assert_schema_invalid(validator, bad_extras, "non-empty extras")
+
+    pcbdoc_inventory = inventories["pcbdoc"]
+    hashed_payload = next(
+        asset
+        for asset in pcbdoc_inventory["assets"]  # type: ignore[index]
+        if asset["payload_sha256"] is not None
+    )
+    bad_hash = deepcopy(pcbdoc_inventory)
+    bad_hash_asset = next(
+        asset
+        for asset in bad_hash["assets"]  # type: ignore[index]
+        if asset["name"] == hashed_payload["name"]
+    )
+    bad_hash_asset["payload_sha256"] = "not-a-sha256"
+    _assert_schema_invalid(validator, bad_hash, "malformed payload_sha256")
+
+    reserved_kind = deepcopy(schdoc_inventory)
+    reserved_kind["assets"][0]["kind"] = "sch_image"  # type: ignore[index]
+    reserved_kind["assets"][0]["ref"]["kind"] = "sch_image"  # type: ignore[index]
+    _assert_schema_invalid(validator, reserved_kind, "reserved sch_image kind")
+
+    def selected_asset_entry(
+        *,
+        source_kind: str,
+        selected_entry: dict[str, object],
+    ) -> dict[str, object]:
+        matches = [
+            asset
+            for asset in inventories[source_kind]["assets"]  # type: ignore[index]
+            if asset["kind"] == selected_entry["kind"]
+            and asset["name"] == selected_entry["name"]
+            and asset["ref"]["key"] == selected_entry["ref_key"]
+        ]
+        assert len(matches) == 1
+        return matches[0]
+
+    selected = manifest["selected"]
+    selected_entries = {
+        "schdoc_symbol": selected_asset_entry(
+            source_kind="schdoc",
+            selected_entry=selected["schdoc_symbol"],
+        ),
+        "schlib_symbol": selected_asset_entry(
+            source_kind="schlib",
+            selected_entry=selected["schlib_symbol"],
+        ),
+        "pcbdoc_footprint": selected_asset_entry(
+            source_kind="pcbdoc",
+            selected_entry=selected["pcbdoc_footprint"],
+        ),
+        "pcblib_footprint": selected_asset_entry(
+            source_kind="pcblib",
+            selected_entry=selected["pcblib_footprint"],
+        ),
+        "pcbdoc_model": selected_asset_entry(
+            source_kind="pcbdoc",
+            selected_entry=selected["pcbdoc_model"],
+        ),
+    }
+    for key, asset in selected_entries.items():
+        assert asset["can_extract"] is True
+        assert asset["extraction_filename"] == selected[key]["suggested_filename"]
+
+    model_entry = selected_entries["pcbdoc_model"]
+    assert model_entry["payload_available"] is True
+    assert model_entry["payload_sha256"] == selected["pcbdoc_model"]["sha256"]
+
+    schdoc_symbol = AltiumSchLib(example_root / selected["schdoc_symbol"]["path"])
+    schlib_symbol = AltiumSchLib(example_root / selected["schlib_symbol"]["path"])
+    pcbdoc_footprint = AltiumPcbLib.from_file(
+        example_root / selected["pcbdoc_footprint"]["path"]
+    )
+    pcblib_footprint = AltiumPcbLib.from_file(
+        example_root / selected["pcblib_footprint"]["path"]
+    )
+    assert len(schdoc_symbol.symbols) == 1
+    assert len(schlib_symbol.symbols) == 1
+    assert len(pcbdoc_footprint.footprints) == 1
+    assert len(pcblib_footprint.footprints) == 1
+
+    model_path = example_root / selected["pcbdoc_model"]["path"]
+    assert model_path.exists()
+    assert model_path.stat().st_size == selected["pcbdoc_model"]["byte_count"]
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        selected["pcbdoc_model"]["sha256"]
+    )
 
 
 def test_pcbdoc_add_primitive_examples_write_expected_records(

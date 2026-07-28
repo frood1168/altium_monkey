@@ -470,6 +470,7 @@ class AltiumPrjPcbOutJob:
         script_directory: Path | str | None = None,
         keep_script_artifacts: bool = False,
         poll_interval_seconds: float = 0.5,
+        kill_after_run: bool = False,
     ) -> OutJobRunResult:
         """
         Run this OutJob.
@@ -487,6 +488,12 @@ class AltiumPrjPcbOutJob:
             script_directory: Where to write temporary run artifacts.
             keep_script_artifacts: Keep generated script artifacts after run.
             poll_interval_seconds: Marker poll interval.
+            kill_after_run: Require no pre-existing X2.exe processes, then
+                force-terminate every X2.exe process after collecting the run
+                marker/log. Useful for unattended automation when project
+                compile can leave the project dirty in memory and interactive
+                close prompts must be avoided. Without this option, opened
+                documents may remain in the Altium session.
 
         Returns:
             `OutJobRunResult` from `altium_outjob_runner`.
@@ -511,6 +518,7 @@ class AltiumPrjPcbOutJob:
             script_directory=script_directory,
             keep_script_artifacts=keep_script_artifacts,
             poll_interval_seconds=poll_interval_seconds,
+            kill_after_run=kill_after_run,
         )
 
     def __repr__(self) -> str:
@@ -560,6 +568,10 @@ class AltiumPrjPcb:
     def _extract_documents(self) -> None:
         """
         Extract document list from config (including full DocumentN options).
+
+        Managed device sheets can be stored in `[DeviceSheetN]` sections rather
+        than contiguous `[DocumentN]` sections. They are durable schematic
+        references and must participate in project-level compile loading.
         """
         self.documents = []
         doc_num = 1
@@ -582,6 +594,31 @@ class AltiumPrjPcb:
             )
 
             doc_num += 1
+
+        device_sheet_sections = sorted(
+            (
+                section
+                for section in self.config.sections()
+                if re.fullmatch(r"DeviceSheet\d+", section, re.IGNORECASE)
+            ),
+            key=lambda section: int(re.search(r"\d+", section).group(0)),
+        )
+        for section in device_sheet_sections:
+            doc_path = self.config.get(section, "DocumentPath", fallback="")
+            if not doc_path:
+                continue
+            options = [(key, value) for key, value in self.config.items(section)]
+            self.documents.append(
+                {
+                    "path": doc_path,
+                    "unique_id": self.config.get(
+                        section,
+                        "DocumentUniqueId",
+                        fallback="",
+                    ),
+                    "options": options,
+                }
+            )
 
     def add_document(self, path: str | Path, unique_id: str | None = None) -> None:
         """
@@ -1101,6 +1138,72 @@ class AltiumPrjPcb:
                 active_paths.append(full_path)
 
         return active_paths or all_paths
+
+    def _saved_structure_schdoc_names(self) -> tuple[str | None, tuple[str, ...]]:
+        if not self.filepath:
+            return None, ()
+        structure_path = self.filepath.with_suffix(".PrjPcbStructure")
+        try:
+            lines = structure_path.read_text(
+                encoding="utf-8-sig",
+                errors="replace",
+            ).splitlines()
+        except OSError:
+            return None, ()
+
+        top_level: str | None = None
+        names: list[str] = []
+        seen: set[str] = set()
+        for line in lines:
+            fields: dict[str, str] = {}
+            for part in line.split("|"):
+                if "=" not in part:
+                    continue
+                key, value = part.split("=", 1)
+                fields[key.strip().lower()] = value.strip()
+
+            record = fields.get("record", "").lower()
+            if record == "topleveldocument":
+                top_level_name = Path(
+                    fields.get("filename", "").replace("\\", "/")
+                ).name
+                if top_level_name:
+                    top_level = top_level_name
+            for key in ("sourcedocument", "filename"):
+                value = fields.get(key, "")
+                if not value.lower().endswith(".schdoc"):
+                    continue
+                name = Path(value.replace("\\", "/")).name
+                normalized = name.lower()
+                if name and normalized not in seen:
+                    seen.add(normalized)
+                    names.append(name)
+        return top_level, tuple(names)
+
+    def get_saved_structure_top_level_schdoc_name(self) -> str | None:
+        """Get the saved `.PrjPcbStructure` top-level SchDoc file name."""
+        top_level, _names = self._saved_structure_schdoc_names()
+        return top_level
+
+    def get_saved_structure_schdoc_paths(self) -> list[Path]:
+        """
+        Get SchDoc paths named by the saved `.PrjPcbStructure` file.
+
+        The returned paths are resolved from the project document list so stale
+        structure-only names do not introduce files outside the project.
+        """
+        _top_level, names = self._saved_structure_schdoc_names()
+        if not names:
+            return []
+        path_by_name = {
+            path.name.lower(): path
+            for path in self.get_schdoc_paths()
+        }
+        return [
+            path_by_name[name.lower()]
+            for name in names
+            if name.lower() in path_by_name
+        ]
 
     def get_pcbdoc_paths(self) -> list[Path]:
         """

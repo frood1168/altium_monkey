@@ -12,9 +12,14 @@ project-loading and design-analysis API, not internal netlist plumbing.
 1. `AltiumDesign.from_prjpcb(...)`
 2. `AltiumDesign.to_json(...)`
 3. `AltiumDesign.to_netlist(...)`
-4. `AltiumDesign.to_wirelist(...)`
-5. `AltiumDesign.to_bom(...)`
-6. `AltiumDesign.get_variants(...)`
+4. `AltiumDesign.to_bom(...)`
+5. `AltiumDesign.get_variants(...)`
+6. Reading compiled net `winning_name`, `alternate_names`, and
+   `name_sources` from `design.a2` physical pages
+7. Reading `physical_pages` to find physical documents, page-local components,
+   page-local nets, and repeated/channel-safe SVG identities
+8. Rendering project-aware physical schematic SVGs with
+   `AltiumDesign.to_physical_svg(physical_page_id)`
 
 ## Run
 
@@ -39,14 +44,39 @@ The script writes:
 ```text
 examples/hello_altium_design/output/project_summary.json
 examples/hello_altium_design/output/altium_design.json
+examples/hello_altium_design/output/physical_pages_summary.json
+examples/hello_altium_design/output/physical_svg_manifest.json
+examples/hello_altium_design/output/physical_svgs/<physical-page>.svg
 examples/hello_altium_design/output/netlist.json
-examples/hello_altium_design/output/wirelist.txt
+examples/hello_altium_design/output/compiled_net_name_examples.json
 examples/hello_altium_design/output/bom_all.json
 examples/hello_altium_design/output/variant_boms/<variant>.json
 ```
 
-`altium_design.json` uses the `altium_monkey.design.a1` schema. `netlist.json`
+`altium_design.json` uses the `altium_monkey.design.a2` schema. `netlist.json`
 uses the `altium_monkey.netlist.a0` schema.
+
+`physical_pages_summary.json` is a compact consumer-oriented view of the
+`design.a2` physical-page contract. It shows the stable identity rule:
+
+```text
+physical_page.id + svg_id
+```
+
+For simple projects this decays to one physical page per source sheet. For
+repeated sheets or channelized projects, the same source SVG ID can appear on
+multiple physical pages with different resolved component designators.
+
+`physical_svg_manifest.json` lists the SVG files written through
+`AltiumDesign.to_physical_svg(physical_page_id)`. These SVGs render source
+schematic geometry in project compile context, so resolved physical designators
+are used before text measurement and SVG emission.
+
+`compiled_net_name_examples.json` demonstrates the canonical pattern for
+compiled net names: `winning_name` is the selected compiled net name, while
+`alternate_names` and `name_sources` expose other labels or source objects that
+contributed to the same compiled net. It can be empty for projects without
+alternate names.
 
 When the project references a PcbDoc, `altium_design.json` also includes the
 optional root `pnp` block with pick-and-place placements in millimeters. See

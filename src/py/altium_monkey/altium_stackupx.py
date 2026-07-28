@@ -383,18 +383,37 @@ class AltiumStackupXDocument:
         """
         stackups = _export_stacks(document)
         primary_stack = stackups[0]
+        source_features = tuple(getattr(document, "stackupx_features", ()) or ())
         return cls(
-            serializer_version="1.1.0.0",
-            version="2.1.0.0",
+            serializer_version=(
+                _value_text(getattr(document, "stackupx_serializer_version", ""))
+                or "1.1.0.0"
+            ),
+            version=_value_text(getattr(document, "stackupx_version", "")) or "2.1.0.0",
             id=_existing_or_stackupx_guid(
+                getattr(document, "stackupx_document_id", ""),
                 document.active_stack_ref,
                 primary_stack.id,
             ),
-            revision_id=_stackupx_guid("revision", primary_stack.id),
-            revision_date="2000-01-01T00:00:00.0000000Z",
-            features=_export_features(
-                rigid_flex_mode=str(getattr(document, "rigid_flex_mode", "") or ""),
-                stackups=stackups,
+            revision_id=_existing_or_stackupx_guid(
+                getattr(document, "stackupx_revision_id", ""),
+                "revision",
+                primary_stack.id,
+            ),
+            revision_date=(
+                _value_text(getattr(document, "stackupx_revision_date", ""))
+                or "2000-01-01T00:00:00.0000000Z"
+            ),
+            features=(
+                tuple(
+                    StackupXFeature(id=str(item[0]), name=str(item[1]))
+                    for item in source_features
+                )
+                if source_features
+                else _export_features(
+                    rigid_flex_mode=str(getattr(document, "rigid_flex_mode", "") or ""),
+                    stackups=stackups,
+                )
             ),
             stackup_attributes=tuple(getattr(document, "stackup_attributes", ()) or ())
             or _default_stackup_attributes(),
@@ -553,6 +572,8 @@ class AltiumStackupXDocument:
                     display_name=stack.name,
                     source_family="stackupx",
                     is_flex=stack.is_flex,
+                    stackupx_is_flex=stack.is_flex,
+                    stackupx_stack_type=stack.stack_type,
                     layers=tuple(stack_layers),
                 )
             )
@@ -656,11 +677,20 @@ class AltiumStackupXDocument:
                 )
             ),
             stackup_attributes=self.stackup_attributes,
+            stackupx_serializer_version=self.serializer_version,
+            stackupx_version=self.version,
+            stackupx_document_id=self.id,
+            stackupx_revision_id=self.revision_id,
+            stackupx_revision_date=self.revision_date,
+            stackupx_features=tuple(
+                (feature.id, feature.name) for feature in self.features
+            ),
             source=AltiumLayerStackSourceMap(
                 origin="stackupx",
                 board_record=(
                     ("STACKUPX_DOCUMENT_ID", self.id),
                     ("STACKUPX_REVISION_ID", self.revision_id),
+                    ("STACKUPX_REVISION_DATE", self.revision_date),
                     ("STACKUPX_SERIALIZER_VERSION", self.serializer_version),
                     ("STACKUPX_VERSION", self.version),
                 ),
@@ -1140,6 +1170,10 @@ def _raw_attributes(element: Element) -> tuple[tuple[str, str], ...]:
 
 def _text(element: Element) -> str:
     return str(element.text or "").strip()
+
+
+def _value_text(value: object) -> str:
+    return str(value or "").strip()
 
 
 def _local_name(tag: str) -> str:

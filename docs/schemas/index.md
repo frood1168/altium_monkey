@@ -16,7 +16,11 @@ Schema suffixes use a stepping-style revision scheme:
 2. The trailing number is the minor revision. Moving from `a0` to `a1`
    indicates the contract may have added fields while preserving the existing
    `a` major-revision shape.
-3. Current public contracts use `a0` and `a1` depending on payload family.
+3. Moving from `a1` to `a2` marks the compiled physical-page design JSON
+   projection. The Python call surface stayed compatible, but the schema ID
+   changed because strict `design.a1` validators reject new root fields.
+4. Current public contracts use `a0`, `a1`, and `a2` depending on payload
+   family.
 
 This is intentionally similar to semiconductor stepping names: compact, stable,
 and easy to compare in filenames, generated artifacts, and downstream tooling.
@@ -28,21 +32,28 @@ The explicit contract bundle is maintained under
 
 Machine-readable entry points:
 
-1. [`design_a1.schema.json`](altium_monkey/design_a1.schema.json)
-2. [`design_a0.schema.json`](altium_monkey/design_a0.schema.json)
-3. [`netlist_a0.schema.json`](altium_monkey/netlist_a0.schema.json)
-4. [`pcb_svg_enrichment_a0.schema.json`](altium_monkey/pcb_svg_enrichment_a0.schema.json)
+1. [`design_a2.schema.json`](altium_monkey/design_a2.schema.json)
+2. [`design_a1.schema.json`](altium_monkey/design_a1.schema.json)
+3. [`design_a0.schema.json`](altium_monkey/design_a0.schema.json)
+4. [`netlist_a0.schema.json`](altium_monkey/netlist_a0.schema.json)
+5. [`pcb_svg_enrichment_a0.schema.json`](altium_monkey/pcb_svg_enrichment_a0.schema.json)
+6. [`embedded_assets_a0.schema.json`](altium_monkey/embedded_assets_a0.schema.json)
+7. [`extractable_assets_a0.schema.json`](altium_monkey/extractable_assets_a0.schema.json)
 
-## `altium_monkey.design.a1`
+`design_a2.schema.json` is self-contained for strict validation. Older sibling
+schemas remain bundled for consumers pinned to earlier contracts or validating
+other payload families directly.
+
+## `altium_monkey.design.a2`
 
 Emitter: `AltiumDesign.to_json(...)`
 
 Generator: `altium_monkey`
 
 This is the full project/design analysis contract. It combines project metadata,
-schematic sheet metadata, variant metadata, enriched schematic components, and
-compiled nets. `design.a1` adds source-owned schematic hierarchy data for
-visualizers and project analysis tools.
+schematic sheet metadata, variant metadata, enriched schematic components,
+compiled nets, physical page projections, and resolved schematic hierarchy
+data for visualizers and project analysis tools.
 
 Root field order:
 
@@ -52,9 +63,12 @@ generator
 project
 variants
 options
+compile
+diagnostics
 sheets
 components
 schematic_hierarchy
+physical_pages
 pnp
 nets
 indexes
@@ -66,9 +80,15 @@ indexes
 `pnp` is optional and appears only when the design has a referenced PcbDoc that
 can provide pick-and-place placements.
 
+`compile` and `diagnostics` are optional and appear only when
+`AltiumDesign.to_json(include_compile_metadata=True)` is requested.
+
+`physical_pages` is always present. For projects without repeated physical
+sheet instances it decays to the single physical instance per source sheet.
+
 Important fields:
 
-1. `schema`: always `altium_monkey.design.a1`.
+1. `schema`: always `altium_monkey.design.a2`.
 2. `generator`: always `altium_monkey`.
 3. `project`: project name, path-derived metadata, document paths, and project parameters.
 4. `variants`: project variant definitions, including DNP lists and parameter overrides when available.
@@ -80,13 +100,39 @@ Important fields:
 7. `components`: schematic components enriched with sheet, pin-count, parameters, and `svg_id` where available.
 8. `schematic_hierarchy`: resolved documents, sheet symbols, channels, hierarchy paths, sheet-entry links, harness bundle links, and unresolved hierarchy diagnostics.
 9. `pnp`: optional PCB-backed pick-and-place data in millimeters.
-10. `nets`: compiled net records from the netlist contract.
-11. `indexes`: optional lookup maps for components, nets, pins, and SVG IDs.
+10. `compile`: optional compact compiled-model metadata, including compiled schema,
+    summary, compile options, annotation metadata, and statistics.
+11. `diagnostics`: optional compile, annotation, document, sheet-symbol,
+    component, and net diagnostics.
+12. `physical_pages`: compiled physical schematic pages with page-local
+    components, nets, graphical evidence, and hierarchy identity.
+13. `nets`: compiled net records from the netlist contract, enriched with
+    aliases and optional name-source provenance when available.
+14. `indexes`: optional lookup maps for components, nets, pins, SVG IDs, and
+    physical page identity.
 
-The predecessor [`design_a0.schema.json`](altium_monkey/design_a0.schema.json)
-is still bundled for readers that need the first public
-`altium_monkey.design.a0` contract. Current `AltiumDesign.to_json(...)` output
-uses `design.a1`.
+Physical page and SVG identity:
+
+1. `physical_page.id` is the compiled physical schematic page identifier.
+2. A review-safe graphical identity is `physical_page.id` plus the source
+   `svg_id`.
+3. `indexes.svg_to_component` contains only unambiguous one-to-one legacy
+   mappings.
+4. `indexes.svg_to_components` maps one logical SVG ID to all physical
+   designators represented by that element.
+5. `indexes.physical_svg_to_components` maps
+   `"{physical_page.id}|{svg_id}"` to page-specific physical designators.
+6. `indexes.component_to_physical_page`,
+   `indexes.physical_page_to_components`, and
+   `indexes.physical_page_to_nets` provide direct physical page navigation.
+
+The predecessor `altium_monkey.design.a1`
+[`design_a1.schema.json`](altium_monkey/design_a1.schema.json) is still bundled
+for strict validators pinned to the pre-compiled-design project contract. The
+first public design contract, `altium_monkey.design.a0`
+[`design_a0.schema.json`](altium_monkey/design_a0.schema.json), is also
+bundled. Current `AltiumDesign.to_json(...)` output uses
+`altium_monkey.design.a2`.
 
 PNP fields:
 
@@ -176,6 +222,12 @@ Graphical net fields:
 6. `sheet_entries`
 7. `pins`
 
+When `endpoints[].connection_point` is produced for sheet entries or harness
+entries, the point uses the composed basic-entry offset from `DistanceFromTop`
+and `DistanceFromTop_Frac1`. The fractional field is millionths of one
+100-mil entry step, and the netlist projection rounds the composed native
+10-mil-unit offset half-away-from-zero before exact endpoint matching.
+
 ## `altium_monkey.pcb.svg.enrichment.a0`
 
 Emitter: PCB SVG rendering when `PcbSvgRenderOptions(include_metadata=True)`.
@@ -211,16 +263,33 @@ Important fields:
 2. `board.centroid_mils`: board centroid in mils when known.
 3. `board.centroid_relative_to_origin_mils`: centroid relative to the board origin in mils when known.
 4. `view.kind`: view type such as `board`, `layer_set`, or `board_outline_only`.
-5. `view.included_layer_ids`: layer IDs included in this SVG.
-6. `view.includes_board_outline`: true when board-outline geometry is present.
-7. `layers.all_layer_ids`: all known layer IDs in the rendered board context.
+5. `view.included_layer_ids`: renderer layer IDs for layer groups actually
+   emitted in this SVG. These are legacy source IDs for native legacy layers
+   and renderer-assigned IDs for derived layers, not serialized V7 saved layer
+   IDs.
+6. `view.includes_board_outline`: true when board-outline geometry is actually
+   emitted.
+7. `layers.all_layer_ids`: all known renderer layer IDs in the rendered board
+   context; this is a discovery registry, not proof that each layer is emitted
+   in the current SVG. These IDs use the same legacy/native or
+   renderer-assigned derived-layer convention as `view.included_layer_ids`.
 8. `layers.layer_id_to_key`: stable layer keys such as `L1`, `L32`, or `DRILLS`.
 9. `layers.layer_id_to_name`: stable layer tokens such as `TOP`, `BOTTOM`, or `DRILLS`.
-10. `lookup.net_index_to_name`: net-index lookup table.
-11. `lookup.net_name_to_classes`: net-class membership by net name.
-12. `lookup.component_index_to_designator`: component-index lookup table.
-13. `lookup.component_index_to_uid`: component unique IDs by component index.
-14. `components`: component placement and parameter summaries used by SVG viewers.
+10. `layers.render_layers`: optional render-layer registry emitted when
+    `include_render_layer_metadata=True`; entries classify native Altium layers
+    and renderer-derived layers such as `DRILLS`.
+11. `lookup.net_index_to_name`: net-index lookup table.
+12. `lookup.net_name_to_classes`: net-class membership by net name.
+13. `lookup.component_index_to_designator`: component-index lookup table.
+14. `lookup.component_index_to_uid`: component unique IDs by component index.
+15. `components`: component placement and parameter summaries used by SVG viewers.
+
+`layers.render_layers` entries contain `id`, `key`, `name`, `display_name`,
+`role`, `kind`, and `source`. Native source-backed entries use
+`kind="native"` and `source="altium"`. Renderer-derived entries use
+`kind="derived"` and `source="renderer"` and may include `derived_from`; the
+current derived entry is `DRILLS` with id `9001`, role `drill`, and
+`derived_from=["pad-hole", "via-hole"]`.
 
 Element-level SVG metadata uses ordinary `data-*` attributes. Common attributes
 include:
@@ -232,3 +301,109 @@ include:
 4. `data-feature="board-outline"` and `data-feature="board-cutout"`
 5. `data-primitive="pad-hole"` or `data-primitive="via-hole"` for drill geometry
 6. `data-hole-kind`, `data-hole-plating`, and `data-hole-render`
+7. `data-overlay-kind="pad-designator"` and
+   `data-overlay-kind="origin-datum"` for optional review overlays
+
+## `altium_monkey.extractable_assets.a0`
+
+Emitter: `AltiumAssetInventory.to_dict(...)`
+
+This is the JSON-ready inventory contract for assets that can be selected from
+one source document or library. The public Python containers that currently
+emit it are `AltiumPcbDoc.asset_inventory(...)`,
+`AltiumPcbLib.asset_inventory(...)`, `AltiumSchDoc.asset_inventory(...)`, and
+`AltiumSchLib.asset_inventory(...)`.
+
+Payload root fields:
+
+```text
+schema
+source_kind
+source_path
+assets
+```
+
+Important fields:
+
+1. `schema`: always `altium_monkey.extractable_assets.a0`.
+2. `source_kind`: source container kind such as `pcbdoc`, `pcblib`, `schdoc`,
+   or `schlib`.
+3. `source_path`: source file path when the inventory came from a file-backed
+   container; live unsaved containers may emit `null`.
+4. `assets`: selectable asset summaries.
+
+Each asset contains:
+
+1. `ref`: the `AltiumAssetRef` handle to pass back to `extract_asset(...)` or a
+   kind-specific extraction helper.
+2. `kind`: A0 accepts `embedded_model`, `embedded_font`, `opaque_embedded`,
+   `pcb_footprint`, and `sch_symbol`. The in-process API reserves `sch_image`
+   for future image inventory work, but it is not valid in this A0 JSON schema
+   until a future schema revision adds a matching typed details branch.
+3. `name`: public display and exact-name selection value.
+4. `extraction_filename`: suggested output filename, or `null` when no stable
+   filename is available.
+5. `native_extension`: native file extension without a leading dot, or `null`.
+6. `can_extract`: true when this API can extract the asset from the current
+   source.
+7. `payload_available`: true when the selected asset has direct byte payload
+   access. Footprint and symbol assets extract as library objects instead.
+8. `payload_sha256`: optional SHA-256 over extracted payload bytes when hashes
+   were requested and a byte payload is available.
+9. `details`: typed per-kind detail object. Numeric counts remain JSON numbers,
+   booleans remain booleans, and designator/index lists remain arrays.
+10. `extras`: reserved extension object for non-contract annotations. A0
+    requires `{}`.
+
+File-backed refs are durable through normalized `source_path` identity. Refs
+from live unsaved containers carry an opaque process-local
+`source_instance_id`; they are valid only for that live source instance in the
+current process and are not durable across reloads or serialization
+boundaries.
+
+## `altium_monkey.pcb.embedded_assets.a0`
+
+Emitter: `EmbeddedAssetInventory.to_dict(...)` from
+`AltiumPcbDoc.embedded_asset_inventory(...)` and
+`AltiumPcbLib.embedded_asset_inventory(...)`.
+
+This is the focused PCB/PcbLib embedded-binary inventory contract for preview,
+dedupe, import dry-run, and extraction-planning consumers. Use it when the
+consumer only needs embedded model/font/opaque payload metadata. Use
+`altium_monkey.extractable_assets.a0` when the consumer also needs selectable
+logical assets such as footprints or schematic symbols.
+
+Payload root fields:
+
+```text
+schema
+source_kind
+source_path
+models
+fonts
+opaque_assets
+```
+
+Important fields:
+
+1. `schema`: always `altium_monkey.pcb.embedded_assets.a0`.
+2. `source_kind`: `pcbdoc` or `pcblib`.
+3. `source_path`: source file path when file-backed, otherwise `null` for live
+   unsaved containers.
+4. `models`: embedded 3D model summaries.
+5. `fonts`: embedded TrueType font summaries. A0 currently emits typed fonts
+   for PcbDoc only.
+6. `opaque_assets`: preserved embedded streams that are not parsed as typed
+   assets. A0 currently uses this for PcbLib `Library/EmbeddedFonts`.
+
+Model summaries include `index`, `name`, `id`, `extraction_filename`,
+`model_format`, `is_embedded`, compressed/decompressed sizes, payload
+availability, optional SHA-256, optional Altium checksum, and PCB object
+references. Font summaries include family/style names, extraction filename,
+sizes, payload availability, optional SHA-256, and support status. Opaque
+summaries include stream name, raw size, payload availability, optional SHA-256,
+support status, and reason.
+
+Hashes are only present when requested and when a payload is available. Corrupt
+or unsupported payloads report `payload_available=false` and
+`payload_sha256=null`.

@@ -10,6 +10,7 @@ Use it when you need to:
 3. insert components from `.SchLib`
 4. iterate and normalize existing schematic objects
 5. render schematic pages to SVG
+6. inventory placed symbols and extract one selected or complete `.SchLib`
 
 ## Object Model
 
@@ -63,6 +64,31 @@ symbol's child record order. This keeps intentional schematic draw order intact
 for cases where pins, rounded rectangles, designators, and other visible child
 records overlap.
 
+## Symbol Extraction
+
+Use `AltiumSchDoc.extract_schlib(...)` when a caller needs an in-memory
+`AltiumSchLib` from the placed component symbols in a schematic.
+
+Use `AltiumSchDoc.extract_symbols(...)` when writing split or combined
+`.SchLib` files:
+
+```python
+schdoc = AltiumSchDoc("input.SchDoc")
+schlib = schdoc.extract_schlib()
+
+schdoc.extract_symbols(
+    "output_symbols",
+    split_schlibs=True,
+    combined_schlib=False,
+)
+```
+
+Both paths share the same extraction model. Symbols are grouped by design item,
+component-owned child records are transformed back into symbol coordinates, and
+implementation/model records can be preserved with
+`strip_implementations=False`. The default file-writing behavior remains
+compatible with earlier releases.
+
 ## Templates
 
 Use `clear_template()`, `apply_template(...)`, and `extract_template(...)` for
@@ -105,6 +131,28 @@ native image. Code that needs image files should not hash or write
 `image.image_data` directly unless it intentionally wants the exact stored
 payload.
 
+## Extractable Assets
+
+`AltiumSchDoc.asset_inventory()` lists placed schematic symbols with typed
+`SchSymbolAssetDetails`. Use the returned `AltiumAssetRef` with
+`extract_asset(...)` to extract one selected symbol as a single-symbol
+`AltiumSchLib`.
+
+```python
+inventory = schdoc.asset_inventory()
+symbol = next(
+    (item for item in inventory.by_kind("sch_symbol") if item.can_extract),
+    None,
+)
+if symbol is None:
+    raise RuntimeError("no extractable schematic symbol found")
+extracted = schdoc.extract_asset(symbol.ref)
+extracted.schlib.save("selected_symbol.SchLib")
+```
+
+For the shared reference and JSON contract, see
+[extractable assets](api_patterns/extractable_assets.md).
+
 ## SVG Rendering
 
 `AltiumSchDoc.to_svg(...)` accepts `SchSvgRenderOptions`. Normal review output
@@ -146,6 +194,7 @@ Start with:
 11. [`schdoc_clean`](../examples/schdoc_clean/README.md)
 12. [`schdoc_svg`](../examples/schdoc_svg/README.md)
 13. [`schdoc_apply_dynamic_template`](../examples/schdoc_apply_dynamic_template/README.md)
+14. [`extractable_asset_inventory`](../examples/extractable_asset_inventory/README.md)
 
 See [API patterns](api_patterns/index.md) for cross-cutting mutation and
 ownership guidance.

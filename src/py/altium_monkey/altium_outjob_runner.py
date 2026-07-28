@@ -81,6 +81,7 @@ class OutJobRunRequest:
     auto_bind_pcbdoc: bool = False
     script_directory: Path | str | None = None
     keep_script_artifacts: bool = False
+    kill_after_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -367,7 +368,6 @@ def _render_outjob_runner_pas(
 ) -> str:
     project = _pas_escape(str(project_path).replace("/", "\\"))
     outjob = _pas_escape(str(outjob_path).replace("/", "\\"))
-    script_project = _pas_escape(str(script_project_path).replace("/", "\\"))
     marker = _pas_escape(str(marker_path).replace("/", "\\"))
     log_file = _pas_escape(str(log_path).replace("/", "\\"))
 
@@ -465,25 +465,6 @@ begin
     Application.ProcessMessages;
 
     Log('OutJob run completed');
-
-    if OutJobDoc <> Nil then
-    begin
-        Client.CloseDocument(OutJobDoc);
-        Log('Closed OutJob document');
-    end;
-
-    // Close all project docs to avoid accumulation during batch runs.
-    ResetParameters;
-    AddStringParameter('ObjectKind', 'FocusedProjectDocuments');
-    RunProcess('WorkspaceManager:CloseObject');
-    Sleep(300);
-    Application.ProcessMessages;
-
-    ResetParameters;
-    AddStringParameter('ObjectKind', 'FocusedProject');
-    RunProcess('WorkspaceManager:CloseObject');
-    Sleep(300);
-    Application.ProcessMessages;
 end;
 
 procedure Run;
@@ -498,30 +479,6 @@ begin
     except
         Log('ERROR: Unhandled exception in Run');
         Inc(ErrorCount);
-    end;
-
-    // Best-effort: close script document/project before emitting DONE marker.
-    // This reduces overlap between sequential scripted runs.
-    try
-        ResetParameters;
-        AddStringParameter('ObjectKind', 'Document');
-        AddStringParameter('FileName', '{script_project}');
-        RunProcess('WorkspaceManager:CloseObject');
-        Sleep(200);
-        Application.ProcessMessages;
-    except
-        Log('WARN: failed to close script document');
-    end;
-
-    try
-        ResetParameters;
-        AddStringParameter('ObjectKind', 'Project');
-        AddStringParameter('FileName', '{script_project}');
-        RunProcess('WorkspaceManager:CloseObject');
-        Sleep(300);
-        Application.ProcessMessages;
-    except
-        Log('WARN: failed to close script project');
     end;
 
     CloseFile(LogFile);
@@ -571,8 +528,14 @@ class AltiumOutJobRunner:
     Runner for Altium OutJobs.
     """
 
-    def __init__(self, preferred_version: int | None = 25) -> None:
+    def __init__(
+        self,
+        preferred_version: int | None = 25,
+        *,
+        altium_path: Path | str | None = None,
+    ) -> None:
         self._preferred_version = preferred_version
+        self._altium_path = Path(altium_path).resolve() if altium_path else None
 
     def run(
         self,
@@ -588,6 +551,7 @@ class AltiumOutJobRunner:
         script_directory: Path | str | None = None,
         keep_script_artifacts: bool = False,
         poll_interval_seconds: float = 0.5,
+        kill_after_run: bool = False,
     ) -> OutJobRunResult:
         """
         Run a single OutJob and wait for completion marker.
@@ -616,6 +580,14 @@ class AltiumOutJobRunner:
             keep_script_artifacts: When `script_directory` is provided, keep
                 generated script artifacts after run for inspection.
             poll_interval_seconds: Marker poll interval.
+            kill_after_run: If True, require that no X2.exe processes are
+                already running, then force-terminate every X2.exe process on
+                this machine after the marker/log has been collected. Use this
+                for unattended runs where project compile may dirty the
+                in-memory project and interactive close prompts must be
+                avoided. If False, the runner does not close the opened project
+                documents because that close path may prompt to save; callers
+                running unattended batches should use `kill_after_run=True`.
         """
         project = Path(project_path).resolve()
         if not project.is_file():
@@ -643,6 +615,18 @@ class AltiumOutJobRunner:
         marker_path: Path | None = None
         run_log_path: Path | None = None
         try:
+            if kill_after_run:
+                existing_x2 = AltiumLauncher.running_x2_processes()
+                if existing_x2:
+                    process_list = ", ".join(
+                        f"{process.pid}:{process.executable or '<unknown>'}"
+                        for process in existing_x2
+                    )
+                    raise RuntimeError(
+                        "kill_after_run requires no pre-existing X2.exe "
+                        f"processes because cleanup kills all X2.exe instances: {process_list}"
+                    )
+
             if script_directory is None:
                 script_dir = project.parent
             else:
@@ -692,32 +676,41 @@ class AltiumOutJobRunner:
 
             if marker_path.exists():
                 marker_path.unlink()
-
-            launcher = AltiumLauncher(preferred_version=self._preferred_version)
-            launch_code = launcher.run_script(prjscr_path, unit_name, "Run")
-
-            marker_text = ""
-            error_count = -1
-            timed_out = True
-            start = time.time()
-            while (time.time() - start) < timeout_seconds:
-                if marker_path.exists():
-                    time.sleep(0.1)
-                    marker_text = marker_path.read_text(
-                        encoding="utf-8", errors="replace"
-                    ).strip()
-                    if marker_text.startswith(_DONE_PREFIX):
-                        try:
-                            error_count = int(marker_text[len(_DONE_PREFIX) :])
-                        except ValueError:
-                            error_count = -1
-                    timed_out = False
-                    break
-                time.sleep(poll_interval_seconds)
-
-            log_text = ""
             if run_log_path.exists():
-                log_text = run_log_path.read_text(encoding="utf-8", errors="replace")
+                run_log_path.unlink()
+
+            launcher = AltiumLauncher(
+                altium_path=self._altium_path,
+                preferred_version=self._preferred_version,
+            )
+            try:
+                launch_code = launcher.run_script(prjscr_path, unit_name, "Run")
+
+                marker_text = ""
+                error_count = -1
+                timed_out = True
+                start = time.time()
+                while (time.time() - start) < timeout_seconds:
+                    if marker_path.exists():
+                        time.sleep(0.1)
+                        marker_text = marker_path.read_text(
+                            encoding="utf-8", errors="replace"
+                        ).strip()
+                        if marker_text.startswith(_DONE_PREFIX):
+                            try:
+                                error_count = int(marker_text[len(_DONE_PREFIX) :])
+                            except ValueError:
+                                error_count = -1
+                        timed_out = False
+                        break
+                    time.sleep(poll_interval_seconds)
+
+                log_text = ""
+                if run_log_path.exists():
+                    log_text = run_log_path.read_text(encoding="utf-8", errors="replace")
+            finally:
+                if kill_after_run:
+                    launcher.kill()
 
             success = (not timed_out) and (error_count == 0)
             return OutJobRunResult(
@@ -771,6 +764,7 @@ class AltiumOutJobRunner:
                 auto_bind_pcbdoc=request.auto_bind_pcbdoc,
                 script_directory=request.script_directory,
                 keep_script_artifacts=request.keep_script_artifacts,
+                kill_after_run=request.kill_after_run,
             )
             results.append(result)
             if stop_on_error and not result.success:

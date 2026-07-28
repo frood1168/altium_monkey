@@ -2128,6 +2128,12 @@ class AltiumLayerStackDocument:
     impedance_profiles: tuple[AltiumImpedanceProfile, ...] = ()
     transmission_lines: tuple[AltiumTransmissionLine, ...] = ()
     stackup_attributes: tuple[tuple[str, str], ...] = ()
+    stackupx_serializer_version: str = ""
+    stackupx_version: str = ""
+    stackupx_document_id: str = ""
+    stackupx_revision_id: str = ""
+    stackupx_revision_date: str = ""
+    stackupx_features: tuple[tuple[str, str], ...] = ()
     source: AltiumLayerStackSourceMap = field(default_factory=AltiumLayerStackSourceMap)
 
     @property

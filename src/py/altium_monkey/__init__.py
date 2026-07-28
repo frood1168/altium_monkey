@@ -19,6 +19,22 @@ from .altium_api_markers import public_api
 from ._version import __version__, __version_info__
 
 if TYPE_CHECKING:
+    from .altium_compiled_design_model import (
+        AltiumCompileDiagnostic,
+        AltiumCompiledAnnotationState,
+        AltiumCompiledComponent,
+        AltiumCompiledDesign,
+        AltiumCompiledDesignSummary,
+        AltiumCompiledLogicalDocument,
+        AltiumCompiledNet,
+        AltiumCompiledNetEndpoint,
+        AltiumCompiledNetItem,
+        AltiumCompiledNetTerminal,
+        AltiumCompiledPhysicalDocument,
+        AltiumCompiledPhysicalSheetSymbol,
+        AltiumCompiledSheetSymbol,
+        AltiumProjectCompileOptions,
+    )
     from .altium_design import AltiumDesign
     from .altium_draftsman import (
         AltiumDraftsmanDocument,
@@ -367,6 +383,26 @@ from .altium_embedded_files import (
     EmbeddedFont,
     EmbeddedModel,
 )
+from .altium_embedded_assets import (
+    EmbeddedAssetInventory,
+    EmbeddedAssetReference,
+    EmbeddedOpaqueAssetSummary,
+    EmbeddedPcbFontSummary,
+    EmbeddedPcbModelSummary,
+    embedded_asset_schema_id,
+)
+from .altium_extractable_assets import (
+    EmbeddedFontAssetDetails,
+    EmbeddedModelAssetDetails,
+    OpaqueEmbeddedAssetDetails,
+    AltiumAssetInventory,
+    AltiumAssetRef,
+    AltiumAssetSummary,
+    AltiumExtractedAsset,
+    PcbFootprintAssetDetails,
+    SchSymbolAssetDetails,
+    extractable_asset_schema_id,
+)
 
 # Export core public types.
 __all__ = [
@@ -391,6 +427,24 @@ __all__ = [
     "IntLibExtractionResult",
     "IntLibModel",
     "IntLibSource",
+    # Embedded PCB asset inventory
+    "EmbeddedAssetInventory",
+    "EmbeddedAssetReference",
+    "EmbeddedOpaqueAssetSummary",
+    "EmbeddedPcbFontSummary",
+    "EmbeddedPcbModelSummary",
+    "embedded_asset_schema_id",
+    # Generic extractable asset inventory
+    "AltiumAssetInventory",
+    "AltiumAssetRef",
+    "AltiumAssetSummary",
+    "AltiumExtractedAsset",
+    "EmbeddedFontAssetDetails",
+    "EmbeddedModelAssetDetails",
+    "OpaqueEmbeddedAssetDetails",
+    "PcbFootprintAssetDetails",
+    "SchSymbolAssetDetails",
+    "extractable_asset_schema_id",
     # Enums
     "IeeeSymbol",
     "PinElectrical",
@@ -583,6 +637,20 @@ __all__ = [
     "EmbeddedModel",
     # High-level parsers (lazy loaded)
     "AltiumDesign",
+    "AltiumCompileDiagnostic",
+    "AltiumCompiledAnnotationState",
+    "AltiumCompiledComponent",
+    "AltiumCompiledDesign",
+    "AltiumCompiledDesignSummary",
+    "AltiumCompiledLogicalDocument",
+    "AltiumCompiledNet",
+    "AltiumCompiledNetEndpoint",
+    "AltiumCompiledNetItem",
+    "AltiumCompiledNetTerminal",
+    "AltiumCompiledPhysicalDocument",
+    "AltiumCompiledPhysicalSheetSymbol",
+    "AltiumCompiledSheetSymbol",
+    "AltiumProjectCompileOptions",
     "AltiumSchLib",
     "AltiumSchDoc",
     "AltiumPcbDoc",
@@ -793,6 +861,20 @@ def _mark_declared_public_surfaces() -> None:
 _LAZY_PUBLIC_EXPORTS = {
     # High-level parsers
     "AltiumDesign": "altium_design",
+    "AltiumCompileDiagnostic": "altium_compiled_design_model",
+    "AltiumCompiledAnnotationState": "altium_compiled_design_model",
+    "AltiumCompiledComponent": "altium_compiled_design_model",
+    "AltiumCompiledDesign": "altium_compiled_design_model",
+    "AltiumCompiledDesignSummary": "altium_compiled_design_model",
+    "AltiumCompiledLogicalDocument": "altium_compiled_design_model",
+    "AltiumCompiledNet": "altium_compiled_design_model",
+    "AltiumCompiledNetEndpoint": "altium_compiled_design_model",
+    "AltiumCompiledNetItem": "altium_compiled_design_model",
+    "AltiumCompiledNetTerminal": "altium_compiled_design_model",
+    "AltiumCompiledPhysicalDocument": "altium_compiled_design_model",
+    "AltiumCompiledPhysicalSheetSymbol": "altium_compiled_design_model",
+    "AltiumCompiledSheetSymbol": "altium_compiled_design_model",
+    "AltiumProjectCompileOptions": "altium_compiled_design_model",
     "AltiumSchLib": "altium_schlib",
     "AltiumPcbDoc": "altium_pcbdoc",
     "PcbDocBuilder": "altium_pcbdoc_builder",

@@ -1,3 +1,105 @@
+# altium-monkey 2026.07.26b1 Prerelease Notes
+
+Package version: `2026.7.26b1`
+
+`2026.07.26b1` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.26b1`.
+
+This is a testing prerelease for the new project-level schematic compiler,
+`design.a2` JSON contract, and physical SVG/IR rendering features. Downstream
+integrators should pin this exact package version while validating repeated
+and channelized project flows. General users should stay on the latest stable
+release unless they are explicitly testing these new features.
+
+This prerelease promotes the project-level schematic compiler to the default
+project netlisting and design-JSON path. It adds a new `design.a2` JSON
+contract for compiled physical pages, repeated/channel sheet identity,
+resolved physical designators, physical SVG/IR rendering, and net-name
+provenance.
+
+## Compiled Project Design Data
+
+`AltiumDesign.compile()` now produces the project-level compiled schematic
+model used by `AltiumDesign.to_netlist()` and `AltiumDesign.to_json()`. The old
+multi-sheet clone/rewrite netlisting implementation has been removed from the
+production path; compatibility entry points remain importable but route through
+the compiled model for multi-sheet projects.
+
+`AltiumDesign.to_json()` now emits `altium_monkey.design.a2` by default. The
+new contract includes `physical_pages`, page-local components and nets,
+resolved physical designators, active-variant `dnp` / `fitted` metadata,
+net-name aliases, and optional name-source provenance. Compact compile
+metadata and diagnostics remain opt-in through
+`AltiumDesign.to_json(include_compile_metadata=True)`.
+
+Strict validators pinned to `altium_monkey.design.a1` should refresh to
+`design.a2`. The `design_a2.schema.json` file is self-contained for strict
+validation.
+
+## Physical SVG and IR
+
+Project-level rendering APIs were added for repeated and channelized designs:
+`AltiumDesign.to_physical_ir(physical_page_id)` and
+`AltiumDesign.to_physical_svg(physical_page_id)`. They render the source
+logical schematic geometry with compiled physical designator substitutions,
+so repeated pages show resolved names such as `R1.1`, `R1.2`, `R1A`, or `R1B`
+without mutating the source schematic.
+
+For review-safe graphical identity in repeated/channel projects, combine a
+`physical_page.id` with an SVG element id or use the
+`physical_svg_to_components` index.
+
+## WireList API Removal
+
+WireList serialization APIs are removed from the public output path:
+`AltiumDesign.to_wirelist()`, `Netlist.to_wirelist()`, and
+`AltiumSchDoc.to_netlist(format="wirelist")`. WireList can lose hierarchy,
+zero-pin interface, long-name, alias, and repeated-channel information. Use
+`AltiumDesign.to_json()`, `AltiumDesign.compile().to_dict()`, or
+`AltiumDesign.to_netlist().to_json()` for programmatic consumers.
+
+## Documentation and Examples
+
+The `hello_altium_design` example now demonstrates project-aware design JSON,
+physical pages, net-name winners/aliases/name_sources, and physical SVG output.
+The public API docs include the new compiled-design migration guide and the
+initial Altium Monkey docs theme assets, including the generated Altium Stroke
+webfont assets.
+
+## PCB and Library Updates
+
+PCB/PcbLib SVG review overlays can now emit fill-only pad-designator labels and
+a document/footprint origin datum marker without changing default rendered
+geometry.
+
+Extractable-asset inventory APIs were added for PCB, PCB library, schematic,
+and schematic-library documents. Embedded PCB asset inventory APIs can list
+embedded models, embedded PcbDoc fonts, and opaque PcbLib embedded-font streams
+without writing files.
+
+SchDoc symbol extraction was optimized for large placed symbols and now
+supports `AltiumSchDoc.extract_schlib(...)` for in-memory workflows.
+
+## Fixes and Clarifications
+
+SchDoc connectivity now composes whole and fractional sheet-entry and harness
+entry offsets before endpoint matching, avoiding off-by-one attachment to
+nearby wires or ports.
+
+PCB layer identity docs now distinguish the legacy `PcbLayer` enum from saved
+layer ids, Layer Stack Manager rows, Board6 stack/cache rows, and layer-kind
+mapping ids. Current authoring and SVG layer-selection APIs remain
+legacy-layer-first while newer high-layer-count workflows remain future design
+work.
+
+## Validation
+
+Release validation covers package formatting/lint, schema validation against
+real design JSON payloads, generated-doc checks, example execution, public
+export, wheel build, clean install, the Python L3/L4/L5 release rack, and a
+compiled-design corpus performance baseline.
+
+---
 # altium-monkey 2026.07.15 Release Notes
 
 Package version: `2026.7.15`
@@ -694,7 +796,7 @@ serialization, generated public example docs, and the promoted writer
 controls.
 
 This release was tested with focused package authoring tests, public example
-tests, private PcbDoc/PcbLib fixture lanes, AD26 interop open/save smoke for
+tests, private PcbDoc/PcbLib fixture lanes, current Altium interop open/save smoke for
 the generated PcbLib samples, and strict package Pyright with zero diagnostics.
 
 ## Public API Compatibility

@@ -10,6 +10,7 @@ Use it when you need to:
 3. embed STEP models
 4. extract embedded 3D models
 5. find, split, or render footprints
+6. inventory footprints and embedded payloads before selecting one
 
 ## Object Model
 
@@ -33,6 +34,21 @@ pcblib.save("footprints.PcbLib")
 Public PcbLib helper methods use explicit mil-unit parameter names. Metric
 package data is common for footprints, so convert millimeters to mils at the
 call site for now.
+
+## Layer Arguments
+
+Current PcbLib footprint primitive helpers are legacy-layer-first. Arguments
+named `layer`, `layer_start`, and `layer_end` accept documented `PcbLayer`
+values. `PcbLayer` mirrors Altium's compact legacy/TV6 enum and contains Top,
+Mid1 through Mid30, Bottom, and Mechanical 1 through Mechanical 16 only; values
+73, 74, and 75 are Drill Drawing, Multi-Layer, and Connect.
+
+Some parsed footprint records expose V7 side metadata such as `v7_layer_id`,
+`layer_v7_save_id`, or `V7_LAYER` property text. Some footprint track/arc/fill
+helpers expose explicit V7 override arguments for compatibility. Do not pass
+serialized V7 saved layer ids as ordinary `layer=` values unless a method
+explicitly documents that override. See [PCB layers](api_patterns/pcb_layers.md)
+for the current public boundary.
 
 ## Pads, Mask, And Paste
 
@@ -162,6 +178,49 @@ geometry-equivalent STEP import.
 Explicit `bounds_mils`, `projection_outline_mils`, and `overall_height_mils`
 remain supported for deterministic authored output.
 
+## Extractable Assets
+
+`AltiumPcbLib.asset_inventory(include_hashes=False)` lists selectable
+footprints, embedded 3D model payloads, and opaque embedded streams. Use the
+returned `AltiumAssetRef` with `extract_asset(...)` to extract one model
+payload or one footprint.
+
+```python
+inventory = pcblib.asset_inventory(include_hashes=True)
+footprint = next(
+    (item for item in inventory.by_kind("pcb_footprint") if item.can_extract),
+    None,
+)
+if footprint is None:
+    raise RuntimeError("no extractable footprint found")
+selected = pcblib.extract_asset(footprint.ref)
+selected.pcblib.save("selected_footprint.PcbLib")
+```
+
+For the shared reference and JSON contract, see
+[extractable assets](api_patterns/extractable_assets.md).
+
+## Embedded Asset Inventory
+
+`AltiumPcbLib.embedded_asset_inventory(include_hashes=False)` lists embedded
+3D models and preserved opaque embedded streams without writing files. PcbLib
+`Library/EmbeddedFonts` bytes are currently reported as opaque summaries rather
+than typed font records.
+
+Use the direct embedded model helpers for one selected model payload:
+
+```python
+inventory = pcblib.embedded_asset_inventory(include_hashes=True)
+model = next((item for item in inventory.models if item.payload_available), None)
+if model is None:
+    raise RuntimeError("no available embedded model payload found")
+payload = pcblib.get_embedded_model_payload(model.index)
+```
+
+The focused inventory emits the `altium_monkey.pcb.embedded_assets.a0` JSON
+shape through `to_dict()`. For the focused JSON contract, see
+[embedded PCB assets](api_patterns/embedded_assets.md).
+
 ## SVG Rendering
 
 `AltiumPcbFootprint.to_svg(...)` and `to_layer_svgs(...)` accept
@@ -173,6 +232,8 @@ attribute.
 Layer keys and SVG filenames use stable `PcbLayer.to_json_name()` tokens.
 Use `PcbLayer.to_display_name()` only for default UI labels; PcbLib footprints
 do not have a board layer stack, so there is no board-specific rename source.
+Mechanical 17+ and AD 26.8.1 Mid31+ SVG/export behavior is future V7-aware
+layer-reference work and is not represented by extending `PcbLayer`.
 
 ## Mechanical Layer Kinds
 
@@ -201,7 +262,9 @@ pcblib.save("mechanical_kind.PcbLib")
 
 Mechanical layers 1 through 16 use classic PCB layer ids in the mapping.
 Mechanical layers 17 through 32 use Altium's extended
-`0x04000000 | mechanical_number` id form.
+`0x04000000 | mechanical_number` id form. This is the mechanical-kind mapping
+id family, not the primitive `PcbLayer` enum and not the serialized V7
+saved-layer id family.
 
 ## Direct Record Edits
 
@@ -223,7 +286,8 @@ Start with:
 8. [`pcblib_add_free_3d_extruded`](../examples/pcblib_add_free_3d_extruded/README.md)
 9. [`pcblib_create_cavity_region`](../examples/pcblib_create_cavity_region/README.md)
 10. [`pcblib_synthesize_power_resistor_lib`](../examples/pcblib_synthesize_power_resistor_lib/README.md)
+11. [`extractable_asset_inventory`](../examples/extractable_asset_inventory/README.md)
+12. [`embedded_asset_inventory`](../examples/embedded_asset_inventory/README.md)
 
 See [API patterns](api_patterns/index.md) for the differences between schematic
 and PCB object systems.
-

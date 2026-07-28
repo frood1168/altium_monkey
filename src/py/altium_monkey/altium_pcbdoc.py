@@ -25,6 +25,28 @@ from .altium_embedded_files import (
     parse_embedded_fonts,
     sanitize_embedded_asset_name,
 )
+from .altium_embedded_assets import (
+    EmbeddedAssetInventory,
+    EmbeddedAssetReference,
+    EmbeddedPcbFontSummary,
+    EmbeddedPcbModelSummary,
+    embedded_font_payload,
+    embedded_font_summary,
+    embedded_model_payload,
+    embedded_model_summary,
+    live_embedded_model_entries_from_builder,
+)
+from .altium_extractable_assets import (
+    AltiumAssetInventory,
+    AltiumAssetRef,
+    AltiumAssetSummary,
+    AltiumExtractedAsset,
+    PcbFootprintAssetDetails,
+    embedded_inventory_asset_summaries,
+    semantic_asset_key,
+    selected_asset_index,
+    source_instance_id_for,
+)
 from .altium_pcb_component import AltiumPcbComponent
 from .altium_pcbdoc_builder_components import build_component_stream
 from .altium_pcb_dimension import AltiumPcbDimension, parse_dimensions6_stream
@@ -1307,8 +1329,9 @@ class AltiumPcbDoc:
         Return the semantic kind assigned to a mechanical layer, if present.
 
         Args:
-            layer: Mechanical layer token, enum, native layer id, or mechanical
-                layer number.
+            layer: Mechanical layer token, `PcbLayer`, LayerKindMapping/Data
+                layer id, or mechanical layer number. Serialized V7 saved
+                layer IDs are not accepted here.
         """
         return self.mechanical_layer_kinds.get(
             coerce_layer_kind_mapping_layer_id(layer)
@@ -1323,9 +1346,10 @@ class AltiumPcbDoc:
         Set the semantic kind assigned to a mechanical layer.
 
         Args:
-            layer: Mechanical layer token, enum, native layer id, or mechanical
-                layer number.
-            kind: `MechanicalLayerKind`, enum name, or native kind value.
+            layer: Mechanical layer token, `PcbLayer`, LayerKindMapping/Data
+                layer id, or mechanical layer number. Serialized V7 saved
+                layer IDs are not accepted here.
+            kind: `MechanicalLayerKind`, enum name, or raw kind integer value.
         """
         self._ensure_authoring_builder().set_mechanical_layer_kind(layer, kind)
         self._mirror_authoring_builder_state()
@@ -1483,7 +1507,9 @@ class AltiumPcbDoc:
         Args:
             outline_points_mils: Board-local 2D projection polygon vertices in
                 mils.
-            layer: `PcbLayer` or native layer id that owns the 2D projection.
+            layer: `PcbLayer` or legacy/TV6 layer integer id that owns the 2D
+                projection. Serialized V7 saved layer IDs are not accepted
+                here.
             overall_height_mils: Top Z height of the body in mils.
             standoff_height_mils: Bottom Z height of the body in mils.
             cavity_height_mils: Native cavity height field in mils.
@@ -1652,8 +1678,9 @@ class AltiumPcbDoc:
 
         Args:
             outline_points_mils: Polygon vertices for the 2D projection in mils.
-            layer: Mechanical `PcbLayer` or native layer id that owns the 3D
-                body projection.
+            layer: Mechanical `PcbLayer` or legacy/TV6 layer integer id that
+                owns the 3D body projection. Serialized V7 saved layer IDs are
+                not accepted here.
             overall_height_mils: Top Z of the extruded body in mils.
             standoff_height_mils: Bottom Z of the extruded body in mils.
             side: `PcbBodyProjection` board side/projection for the body.
@@ -1734,7 +1761,9 @@ class AltiumPcbDoc:
                 bottom_mils, right_mils, top_mils)`.
             projection_outline_mils: Optional non-rectangular projection polygon
                 vertices in mils.
-            layer: `PcbLayer` or native layer id that owns the projection.
+            layer: `PcbLayer` or legacy/TV6 layer integer id that owns the
+                projection. Serialized V7 saved layer IDs are not accepted
+                here.
             side: `PcbBodyProjection` side/projection mode.
             location_mils: Model XY placement point in mils.
             rotation_x_degrees: Optional X-axis rotation override in degrees.
@@ -2042,7 +2071,9 @@ class AltiumPcbDoc:
             start_mils: Track start as `(x_mils, y_mils)`.
             end_mils: Track end as `(x_mils, y_mils)`.
             width_mils: Track width in mils.
-            layer: `PcbLayer`, native layer id, or supported layer name.
+            layer: `PcbLayer`, legacy/TV6 layer integer id, or supported
+                legacy layer name. Serialized V7 saved layer IDs are not
+                accepted here.
             net: Optional net name. The net is created if needed.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
@@ -2085,7 +2116,9 @@ class AltiumPcbDoc:
             start_angle_degrees: Start angle in degrees.
             end_angle_degrees: End angle in degrees.
             width_mils: Arc stroke width in mils.
-            layer: `PcbLayer`, native layer id, or supported layer name.
+            layer: `PcbLayer`, legacy/TV6 layer integer id, or supported
+                legacy layer name. Serialized V7 saved layer IDs are not
+                accepted here.
             net: Optional net name. The net is created if needed.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
@@ -2126,7 +2159,9 @@ class AltiumPcbDoc:
             corner1_mils: First fill corner as `(x_mils, y_mils)`.
             corner2_mils: Opposite fill corner as `(x_mils, y_mils)`.
             rotation_degrees: Fill rotation in degrees.
-            layer: `PcbLayer`, native layer id, or supported layer name.
+            layer: `PcbLayer`, legacy/TV6 layer integer id, or supported
+                legacy layer name. Serialized V7 saved layer IDs are not
+                accepted here.
             net: Optional net name. The net is created if needed.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
@@ -2197,7 +2232,8 @@ class AltiumPcbDoc:
                 frames.
             position_mils: Text anchor position as `(x_mils, y_mils)`.
             height_mils: Text height in mils.
-            layer: `PcbLayer` or native layer id.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
             rotation_degrees: Text rotation in degrees.
             stroke_width_mils: Stroke font line width in mils.
             font_kind: `PcbTextKind` or equivalent string.
@@ -2325,8 +2361,9 @@ class AltiumPcbDoc:
             position_mils: Pad center as `(x_mils, y_mils)`.
             width_mils: Pad X size in mils.
             height_mils: Pad Y size in mils.
-            layer: `PcbLayer` or native layer id. Use `PcbLayer.MULTI_LAYER`
-                for through-hole pads.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Use
+                `PcbLayer.MULTI_LAYER` for through-hole pads. Serialized V7
+                saved layer IDs are not accepted here.
             shape: `PadShape` or native pad shape id.
             rotation_degrees: Pad rotation in degrees.
             hole_size_mils: Drill diameter in mils. Use 0 for SMT pads.
@@ -2557,8 +2594,10 @@ class AltiumPcbDoc:
             position_mils: Via center as `(x_mils, y_mils)`.
             diameter_mils: Via pad diameter in mils.
             hole_size_mils: Via drill diameter in mils.
-            layer_start: Start layer as `PcbLayer` or native layer id.
-            layer_end: End layer as `PcbLayer` or native layer id.
+            layer_start: Start layer as `PcbLayer` or legacy/TV6 layer integer
+                id. Serialized V7 saved layer IDs are not accepted here.
+            layer_end: End layer as `PcbLayer` or legacy/TV6 layer integer id.
+                Serialized V7 saved layer IDs are not accepted here.
             net: Optional net name. The net is created if needed.
             ipc4761_via_type: Optional IPC-4761 via-protection type.
             ipc4761_features: Optional explicit IPC-4761 feature rows. Omit to
@@ -2633,7 +2672,8 @@ class AltiumPcbDoc:
 
         Args:
             outline_points_mils: Outer polygon vertices in mils.
-            layer: `PcbLayer` or native layer id.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
             hole_points_mils: Optional list of hole polygons in mils.
             outline_vertices: Optional native shape-based-region outline
                 vertices. Use this when line/arc segment semantics should be
@@ -4412,6 +4452,118 @@ class AltiumPcbDoc:
         return group_order, groups, len(unique_patterns)
 
     @staticmethod
+    def _primitive_component_index(prim: object, component_count: int) -> int | None:
+        value = getattr(prim, "component_index", None)
+        if not isinstance(value, int) or value < 0 or value >= component_count:
+            return None
+        return value
+
+    def _footprint_asset_counts(
+        self,
+        group_order: list[tuple[tuple[str, str], str, int]],
+        fp_groups: dict[tuple[str, str], list[int]],
+    ) -> list[tuple[int, int]]:
+        """
+        Return `(pad_count, primitive_count)` in footprint group order.
+
+        This mirrors the normal PcbDoc footprint extraction selection rules
+        without constructing localized footprint objects. Custom pads still use
+        the extraction path because their region localization can synthesize
+        footprint-local shape records.
+        """
+        representative_indices: list[int] = []
+        for group_key, _emitted_name, _occurrence in group_order:
+            component_indices = fp_groups[group_key]
+            if not component_indices:
+                raise RuntimeError(
+                    "PcbDoc footprint inventory group has no representative component"
+                )
+            representative_indices.append(component_indices[0])
+
+        component_count = len(self.components)
+        pad_counts = [0] * component_count
+        direct_primitive_counts = [0] * component_count
+        region_counts = [0] * component_count
+        shape_based_region_counts = [0] * component_count
+        component_body_counts = [0] * component_count
+        shape_based_component_body_counts = [0] * component_count
+        custom_pad_components: set[int] = set()
+
+        for pad in self.pads:
+            comp_idx = self._primitive_component_index(pad, component_count)
+            if comp_idx is None:
+                continue
+            pad_counts[comp_idx] += 1
+            direct_primitive_counts[comp_idx] += 1
+            if getattr(pad, "custom_shape", None) is not None:
+                custom_pad_components.add(comp_idx)
+
+        if any(comp_idx in custom_pad_components for comp_idx in representative_indices):
+            extracted_footprints = self._extract_footprints()
+            if len(extracted_footprints) != len(group_order):
+                raise RuntimeError(
+                    "PcbDoc footprint extraction count does not match inventory groups"
+                )
+            return [
+                (
+                    len(getattr(footprint, "pads", []) or []),
+                    len(getattr(footprint, "_record_order", []) or []),
+                )
+                for footprint in extracted_footprints
+            ]
+
+        for primitives in (self.vias, self.tracks, self.arcs, self.fills):
+            for prim in primitives:
+                comp_idx = self._primitive_component_index(prim, component_count)
+                if comp_idx is not None:
+                    direct_primitive_counts[comp_idx] += 1
+
+        for text in self.texts:
+            comp_idx = self._primitive_component_index(text, component_count)
+            if (
+                comp_idx is not None
+                and not getattr(text, "is_comment", False)
+                and not getattr(text, "is_designator", False)
+            ):
+                direct_primitive_counts[comp_idx] += 1
+
+        for region in self.regions:
+            comp_idx = self._primitive_component_index(region, component_count)
+            if comp_idx is not None:
+                region_counts[comp_idx] += 1
+                direct_primitive_counts[comp_idx] += 1
+
+        for region in self.shapebased_regions:
+            comp_idx = self._primitive_component_index(region, component_count)
+            if comp_idx is not None:
+                shape_based_region_counts[comp_idx] += 1
+
+        for body in self.component_bodies:
+            comp_idx = self._primitive_component_index(body, component_count)
+            if comp_idx is not None:
+                component_body_counts[comp_idx] += 1
+                direct_primitive_counts[comp_idx] += 1
+
+        for body in self.shapebased_component_bodies:
+            comp_idx = self._primitive_component_index(body, component_count)
+            if comp_idx is not None:
+                shape_based_component_body_counts[comp_idx] += 1
+
+        return [
+            (
+                pad_counts[comp_idx],
+                direct_primitive_counts[comp_idx]
+                + (0 if region_counts[comp_idx] else shape_based_region_counts[comp_idx])
+                + (
+                    0
+                    if component_body_counts[comp_idx]
+                    else shape_based_component_body_counts[comp_idx]
+                ),
+            )
+            for comp_idx in representative_indices
+        ]
+
+    @staticmethod
     def _component_transform_params(comp: Any) -> tuple[int, int, float, bool]:
         """
         Resolve component-local extraction transform parameters.
@@ -4778,7 +4930,35 @@ class AltiumPcbDoc:
         return footprints
 
     def _get_embedded_model_entries(self) -> list[tuple[AltiumPcbModel, bytes]]:
+        live_entries = live_embedded_model_entries_from_builder(self._authoring_builder)
+        if live_entries:
+            return list(live_entries)  # type: ignore[return-value]
         return collect_pcbdoc_embedded_model_entries(self._raw_streams, self.models)
+
+    def _embedded_model_references(
+        self, *, asset_index: int, asset_id: str
+    ) -> tuple[EmbeddedAssetReference, ...]:
+        normalized_asset_id = str(asset_id or "").upper()
+        if not normalized_asset_id:
+            return ()
+
+        references: list[EmbeddedAssetReference] = []
+        bodies = [*self.component_bodies, *self.shapebased_component_bodies]
+        for body_index, body in enumerate(bodies):
+            body_model_id = str(getattr(body, "model_id", "") or "").upper()
+            if body_model_id != normalized_asset_id:
+                continue
+            references.append(
+                EmbeddedAssetReference(
+                    source_object_kind="component_body",
+                    source_object_index=body_index,
+                    asset_kind="model",
+                    asset_index=asset_index,
+                    asset_id=asset_id,
+                    role="3d_model",
+                )
+            )
+        return tuple(references)
 
     @staticmethod
     def _sanitize_embedded_asset_name(name: str, fallback: str) -> str:
@@ -4796,6 +4976,246 @@ class AltiumPcbDoc:
             zlib-compressed bytes stored in the native `Models/<n>` streams.
         """
         return self._get_embedded_model_entries()
+
+    def embedded_model_summaries(
+        self, *, include_hashes: bool = False
+    ) -> tuple[EmbeddedPcbModelSummary, ...]:
+        """
+        Return read-only embedded 3D model inventory summaries.
+        """
+        summaries: list[EmbeddedPcbModelSummary] = []
+        for index, (model, compressed_payload) in enumerate(
+            self._get_embedded_model_entries()
+        ):
+            model_id = str(getattr(model, "id", "") or "")
+            summaries.append(
+                embedded_model_summary(
+                    index=index,
+                    source_kind="pcbdoc",
+                    source_path=self.filepath,
+                    model=model,
+                    compressed_payload=compressed_payload,
+                    references=self._embedded_model_references(
+                        asset_index=index,
+                        asset_id=model_id,
+                    ),
+                    include_hashes=include_hashes,
+                )
+            )
+        return tuple(summaries)
+
+    def embedded_font_summaries(
+        self, *, include_hashes: bool = False
+    ) -> tuple[EmbeddedPcbFontSummary, ...]:
+        """
+        Return read-only embedded TrueType font inventory summaries.
+        """
+        return tuple(
+            embedded_font_summary(
+                index=index,
+                source_kind="pcbdoc",
+                source_path=self.filepath,
+                font=font,
+                include_hashes=include_hashes,
+            )
+            for index, font in enumerate(self.embedded_fonts)
+        )
+
+    def get_embedded_model_payload(self, index: int) -> bytes:
+        """
+        Return one decompressed embedded model payload by inventory index.
+        """
+        entries = self._get_embedded_model_entries()
+        if index < 0 or index >= len(entries):
+            raise IndexError(f"embedded model index out of range: {index}")
+        return embedded_model_payload(entries[index][1], index=index)
+
+    def embedded_model_payloads(self) -> tuple[bytes, ...]:
+        """
+        Return decompressed embedded model payloads in summary order.
+        """
+        return tuple(
+            embedded_model_payload(compressed_payload, index=index)
+            for index, (_model, compressed_payload) in enumerate(
+                self._get_embedded_model_entries()
+            )
+        )
+
+    def get_embedded_font_payload(self, index: int) -> bytes:
+        """
+        Return one decompressed embedded font payload by inventory index.
+        """
+        if index < 0 or index >= len(self.embedded_fonts):
+            raise IndexError(f"embedded font index out of range: {index}")
+        return embedded_font_payload(self.embedded_fonts[index], index=index)
+
+    def embedded_font_payloads(self) -> tuple[bytes, ...]:
+        """
+        Return decompressed embedded font payloads in summary order.
+        """
+        return tuple(
+            embedded_font_payload(font, index=index)
+            for index, font in enumerate(self.embedded_fonts)
+        )
+
+    def embedded_asset_inventory(
+        self, *, include_hashes: bool = False
+    ) -> EmbeddedAssetInventory:
+        """
+        Return an aggregate read-only inventory for embedded PCB assets.
+        """
+        return EmbeddedAssetInventory(
+            source_kind="pcbdoc",
+            source_path=str(self.filepath) if self.filepath is not None else None,
+            models=self.embedded_model_summaries(include_hashes=include_hashes),
+            fonts=self.embedded_font_summaries(include_hashes=include_hashes),
+            opaque_assets=(),
+        )
+
+    def _footprint_asset_summaries(self) -> tuple[AltiumAssetSummary, ...]:
+        """
+        Return extractable footprint summaries in PcbLib extraction order.
+        """
+        group_order, fp_groups, _unique_pattern_count = self._build_footprint_group_index()
+        footprint_counts = self._footprint_asset_counts(group_order, fp_groups)
+        summaries: list[AltiumAssetSummary] = []
+        source_path = str(self.filepath) if self.filepath is not None else None
+        source_instance_id = source_instance_id_for(self, source_path)
+        for index, (group_key, emitted_name, occurrence) in enumerate(group_order):
+            pattern, source_footprint_library = group_key
+            component_indices = tuple(fp_groups[group_key])
+            pad_count, primitive_count = footprint_counts[index]
+            kind = "pcb_footprint"
+            filename_base = sanitize_embedded_asset_name(
+                emitted_name,
+                f"footprint_{index:03d}",
+            )
+            summaries.append(
+                AltiumAssetSummary(
+                    ref=AltiumAssetRef(
+                        source_kind="pcbdoc",
+                        source_path=source_path,
+                        kind=kind,
+                        key=semantic_asset_key(
+                            kind,
+                            pattern,
+                            source_footprint_library,
+                            occurrence,
+                        ),
+                        index=index,
+                        name=emitted_name,
+                        source_instance_id=source_instance_id,
+                    ),
+                    kind=kind,
+                    name=emitted_name,
+                    extraction_filename=f"{filename_base}.PcbLib",
+                    native_extension="PcbLib",
+                    can_extract=True,
+                    payload_available=False,
+                    details=PcbFootprintAssetDetails(
+                        pattern=pattern,
+                        occurrence=occurrence,
+                        component_indices=component_indices,
+                        component_designators=tuple(
+                            self.components[component_index].designator
+                            for component_index in component_indices
+                        ),
+                        component_count=len(component_indices),
+                        source_footprint_library=source_footprint_library,
+                        pad_count=pad_count,
+                        primitive_count=primitive_count,
+                    ),
+                )
+            )
+        return tuple(summaries)
+
+    def asset_inventory(self, *, include_hashes: bool = False) -> AltiumAssetInventory:
+        """
+        Return extractable asset inventory for this PcbDoc.
+        """
+        source_path = str(self.filepath) if self.filepath is not None else None
+        source_instance_id = source_instance_id_for(self, source_path)
+        embedded_assets = embedded_inventory_asset_summaries(
+            self.embedded_asset_inventory(include_hashes=include_hashes),
+            source_instance_id=source_instance_id,
+        )
+        return AltiumAssetInventory(
+            source_kind="pcbdoc",
+            source_path=source_path,
+            assets=embedded_assets + self._footprint_asset_summaries(),
+        )
+
+    def extract_footprint(
+        self,
+        ref_or_name_or_index: object,
+        *,
+        verbose: bool = False,
+    ) -> "AltiumPcbLib":
+        """
+        Extract one PcbDoc footprint as a single-footprint PcbLib.
+        """
+        summaries = self._footprint_asset_summaries()
+        index = selected_asset_index(
+            ref_or_name_or_index,
+            summaries=summaries,
+            expected_source_kind="pcbdoc",
+            expected_kind="pcb_footprint",
+        )
+        footprints = self._extract_footprints(verbose=verbose)
+        if index >= len(footprints):
+            raise IndexError(f"pcb_footprint asset index out of range: {index}")
+        return self._build_pcblib_with_builder([footprints[index]])
+
+    def extract_asset(self, ref: AltiumAssetRef) -> AltiumExtractedAsset:
+        """
+        Extract one asset selected from `asset_inventory()`.
+        """
+        if ref.source_kind != "pcbdoc":
+            raise ValueError(f"asset reference source mismatch: expected pcbdoc, got {ref.source_kind}")
+
+        if ref.kind == "embedded_model":
+            index = selected_asset_index(
+                ref,
+                summaries=self.asset_inventory().by_kind("embedded_model"),
+                expected_source_kind="pcbdoc",
+                expected_kind="embedded_model",
+            )
+            summary = self.embedded_model_summaries()[index]
+            return AltiumExtractedAsset(
+                ref=ref,
+                filename=summary.extraction_filename,
+                payload=self.get_embedded_model_payload(index),
+            )
+
+        if ref.kind == "embedded_font":
+            index = selected_asset_index(
+                ref,
+                summaries=self.asset_inventory().by_kind("embedded_font"),
+                expected_source_kind="pcbdoc",
+                expected_kind="embedded_font",
+            )
+            summary = self.embedded_font_summaries()[index]
+            return AltiumExtractedAsset(
+                ref=ref,
+                filename=summary.extraction_filename,
+                payload=self.get_embedded_font_payload(index),
+            )
+
+        if ref.kind == "pcb_footprint":
+            summaries = self._footprint_asset_summaries()
+            index = selected_asset_index(
+                ref,
+                summaries=summaries,
+                expected_source_kind="pcbdoc",
+                expected_kind="pcb_footprint",
+            )
+            return AltiumExtractedAsset(
+                ref=ref,
+                filename=summaries[index].extraction_filename or f"footprint_{index:03d}.PcbLib",
+                pcblib=self.extract_footprint(ref),
+            )
+
+        raise ValueError(f"unsupported PcbDoc extractable asset kind: {ref.kind}")
 
     def extract_embedded_fonts(
         self, output_dir: Path, verbose: bool = False

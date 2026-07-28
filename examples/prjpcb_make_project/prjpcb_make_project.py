@@ -553,7 +553,6 @@ def build_outjob(project_dir: Path, schdoc_path: Path, pcbdoc_path: Path) -> Pat
     outjob.add_odb(pcbdoc_path.name, enabled_medium=generated_medium)
     outjob.add_ipc2581(pcbdoc_path.name, enabled_medium=generated_medium)
     outjob.add_pick_place(pcbdoc_path.name, enabled_medium=generated_medium)
-    outjob.add_wirelist_netlist(pcbdoc_path.name, enabled_medium=generated_medium)
     outjob.add_bom_part_type(enabled_medium=generated_medium)
     outjob.add_export_step(pcbdoc_path.name, enabled_medium=generated_medium)
 
@@ -603,7 +602,6 @@ def write_manifest(
                 "ODB++",
                 "IPC-2581",
                 "Pick and Place",
-                "WireList Netlist",
                 "BOM",
                 "STEP 3D",
             ],

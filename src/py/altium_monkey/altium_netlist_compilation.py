@@ -25,8 +25,8 @@ def compile_netlist(
         netlist compilers.
     """
 
+    from .altium_design import AltiumDesign
     from .altium_netlist_options import NetlistOptions
-    from .altium_netlist_multi_sheet import AltiumNetlistMultiSheetCompiler
     from .altium_netlist_single_sheet import AltiumNetlistSingleSheetCompiler
 
     if not schdocs:
@@ -39,11 +39,12 @@ def compile_netlist(
             options=effective_options,
         ).generate()
 
-    return AltiumNetlistMultiSheetCompiler(
-        schdocs,
-        project,
-        effective_options,
-    ).build()
+    design = AltiumDesign(
+        project=project,
+        schdocs=list(schdocs),
+        _options=effective_options,
+    )
+    return design.to_netlist()
 
 
 __all__ = ["compile_netlist"]

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 Point = tuple[int, int]
+FRACTIONAL_ON_SEGMENT_TOLERANCE = 100
 
 
 class _PointLike(Protocol):
@@ -132,11 +133,19 @@ def point_on_segment_with_frac(
     if seg_start.y == seg_end.y:
         if abs(py - seg_start.y) > tolerance:
             return False
-        return not (py == seg_start.y and s_y_frac == e_y_frac and p_y_frac != s_y_frac)
+        return not (
+            py == seg_start.y
+            and s_y_frac == e_y_frac
+            and abs(p_y_frac - s_y_frac) > FRACTIONAL_ON_SEGMENT_TOLERANCE
+        )
     if seg_start.x == seg_end.x:
         if abs(px - seg_start.x) > tolerance:
             return False
-        return not (px == seg_start.x and s_x_frac == e_x_frac and p_x_frac != s_x_frac)
+        return not (
+            px == seg_start.x
+            and s_x_frac == e_x_frac
+            and abs(p_x_frac - s_x_frac) > FRACTIONAL_ON_SEGMENT_TOLERANCE
+        )
     return point_on_segment(
         (px, py),
         (seg_start.x, seg_start.y),
@@ -161,6 +170,7 @@ class WireGeometryIndex:
             list[tuple[Point, Point]],
         ] = defaultdict(list)
         self._endpoint_grid: dict[Point, list[Point]] = defaultdict(list)
+        self._endpoint_coord_grid: dict[Point, list[_PointLike]] = defaultdict(list)
         self._segment_coords: dict[Point, list[tuple[_PointLike, _PointLike]]] = (
             defaultdict(list)
         )
@@ -176,6 +186,12 @@ class WireGeometryIndex:
                 self._all_endpoints.append(last_point)
                 self._endpoint_grid[self._cell_key(first_point)].append(first_point)
                 self._endpoint_grid[self._cell_key(last_point)].append(last_point)
+                self._endpoint_coord_grid[self._cell_key(first_point)].append(
+                    raw_points[0]
+                )
+                self._endpoint_coord_grid[self._cell_key(last_point)].append(
+                    raw_points[-1]
+                )
             for index in range(len(int_points) - 1):
                 segment = (int_points[index], int_points[index + 1])
                 for cell in self._segment_cells(segment[0], segment[1]):
@@ -231,6 +247,14 @@ class WireGeometryIndex:
     def find_nearby_endpoints(self, location: Point, tolerance: int) -> Iterator[Point]:
         for cell in self._nearby_cells(location, tolerance):
             yield from self._endpoint_grid.get(cell, ())
+
+    def find_nearby_endpoint_coords(
+        self,
+        location: Point,
+        tolerance: int,
+    ) -> Iterator[_PointLike]:
+        for cell in self._nearby_cells(location, tolerance):
+            yield from self._endpoint_coord_grid.get(cell, ())
 
     def find_nearby_segments(
         self,

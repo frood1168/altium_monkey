@@ -10,7 +10,7 @@ import re
 import string
 from collections.abc import Iterable
 from collections import defaultdict
-from copy import deepcopy
+from copy import copy
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeGuard
 
@@ -24,8 +24,13 @@ from .altium_record_sch__designator import AltiumSchDesignator
 from .altium_record_sch__image import AltiumSchImage
 from .altium_record_sch__parameter import AltiumSchParameter
 from .altium_record_sch__pin import AltiumSchPin
-from .altium_record_types import SchRecordType
-from .altium_symbol_transform import normalize_rectangle_coords, to_symbol_space
+from .altium_record_types import CoordPoint, SchRecordType
+from .altium_sch_enums import Rotation90
+from .altium_symbol_transform import (
+    normalize_rectangle_coords,
+    transform_pin_orientation,
+    transform_point_to_symbol_space,
+)
 
 if TYPE_CHECKING:
     from .altium_schdoc import AltiumSchDoc
@@ -75,30 +80,136 @@ def extract_symbols_from_schdoc_file(
 
     # Parse SchDoc using the modern parser (handles OLE, hierarchy, embedded images)
     schdoc = AltiumSchDoc(schdoc_path)
+    return write_extracted_symbols(
+        schdoc,
+        output_dir,
+        combined_schlib=False,
+        split_schlibs=True,
+        debug=debug,
+        strip_parameters=strip_parameters,
+        strip_implementations=strip_implementations,
+    )
 
-    # Group components by DesignItemId (actual part number) or LibReference
-    components_by_symbol = _group_components_by_symbol(schdoc.components)
+
+def write_extracted_symbols(
+    schdoc: AltiumSchDoc,
+    output_dir: Path,
+    *,
+    combined_schlib: bool = False,
+    split_schlibs: bool = True,
+    debug: bool = False,
+    strip_parameters: bool = True,
+    strip_implementations: bool = True,
+) -> dict[str, bool]:
+    """
+    Extract symbols from a parsed SchDoc and write split/combined SchLib output.
+
+    This is the shared writer behind both the file helper and
+    `AltiumSchDoc.extract_symbols(...)`. It avoids reparsing when the caller
+    already has a parsed document.
+    """
+    from .altium_schlib import AltiumSchLib
+    from .altium_schlib_merger import merge_directory
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    expected_symbol_keys = set(_group_components_by_symbol(schdoc.components))
+    schlib = extract_schlib_from_schdoc(
+        schdoc,
+        debug=debug,
+        strip_parameters=strip_parameters,
+        strip_implementations=strip_implementations,
+    )
+    results = {symbol_key: False for symbol_key in expected_symbol_keys}
+    for symbol in schlib.symbols:
+        results[symbol.original_name or symbol.name] = True
 
     if debug:
-        log.info(f"Found {len(components_by_symbol)} unique symbol types")
+        log.info(f"Found {len(schlib.symbols)} unique symbol types")
+
+    split_dir = output_dir if split_schlibs else output_dir / "_temp_split"
+    if split_schlibs or combined_schlib:
+        split_results = schlib.split(split_dir, verbose=debug)
+        symbol_key_by_name = {
+            symbol.name: symbol.original_name or symbol.name for symbol in schlib.symbols
+        }
+        results = {
+            **{symbol_key: False for symbol_key in expected_symbol_keys},
+            **{
+                symbol_key_by_name.get(symbol_name, symbol_name): output_path is not None
+                for symbol_name, output_path in split_results.items()
+            },
+        }
+
+    successful = sum(1 for value in results.values() if value)
+    if combined_schlib:
+        if getattr(schdoc, "filepath", None) is None:
+            combined_name = "extracted.SchLib"
+        else:
+            combined_name = Path(schdoc.filepath).stem + ".SchLib"
+        combined_path = output_dir / combined_name
+
+        if successful == 0:
+            log.info(f"Creating empty combined SchLib: {combined_name}")
+            AltiumSchLib().save(combined_path)
+        else:
+            log.info(f"Creating combined SchLib: {combined_name}")
+            success = merge_directory(
+                split_dir,
+                combined_path,
+                pattern="*.SchLib",
+                handle_conflicts="skip",
+                verbose=debug,
+            )
+            if not success:
+                log.warning(f"Failed to create combined SchLib: {combined_name}")
+
+    if not split_schlibs and split_dir.exists():
+        import shutil
+
+        shutil.rmtree(split_dir)
+
+    log.info(f"Extracted {sum(results.values())}/{len(results)} symbols successfully")
+    return results
+
+
+def extract_schlib_from_schdoc(
+    schdoc: AltiumSchDoc,
+    *,
+    debug: bool = False,
+    strip_parameters: bool = True,
+    strip_implementations: bool = True,
+) -> AltiumSchLib:
+    """
+    Build a multi-symbol SchLib from a parsed SchDoc.
+    """
+    from .altium_schlib import AltiumSchLib
+
+    schlib = AltiumSchLib()
+    _copy_font_registry_from_schdoc(schlib, schdoc)
+
+    components_by_symbol = _group_components_by_symbol(schdoc.components)
+    if debug:
         for symbol_key, instances in components_by_symbol.items():
             log.info(f"  {symbol_key}: {len(instances)} instance(s)")
 
-    results: dict[str, bool] = {}
-
     for symbol_key, instances in components_by_symbol.items():
         try:
-            # Select best instance (prefer non-mirrored, non-rotated)
             template = _select_best_instance(instances)
-
             if debug and len(instances) > 1:
+                orientation = (
+                    template.orientation.value
+                    if hasattr(template.orientation, "value")
+                    else int(template.orientation)
+                )
                 log.info(
                     f"  Selected instance for {symbol_key}: "
-                    f"orientation={template.orientation.value}, "
-                    f"mirrored={template.is_mirrored}"
+                    f"orientation={orientation}, mirrored={template.is_mirrored}"
                 )
 
-            schlib, safe_name, symbol = _create_schlib_symbol_from_template(
+            _add_schlib_symbol_from_template(
+                schlib,
                 symbol_key,
                 template,
                 schdoc,
@@ -107,26 +218,14 @@ def extract_symbols_from_schdoc_file(
                 strip_implementations=strip_implementations,
                 debug=debug,
             )
-            output_path = output_dir / f"{safe_name}.SchLib"
-            schlib.save(output_path, sync_pin_text_data=True)
-            results[symbol_key] = True
-
-            if debug:
-                log.info(
-                    f"  Saved: {output_path.name} "
-                    f"({len(template.pins)} pins, {len(template.graphics)} graphics)"
-                )
-
         except Exception as e:
             log.error(f"Failed to extract {symbol_key}: {e}")
             if debug:
                 import traceback
 
                 traceback.print_exc()
-            results[symbol_key] = False
 
-    log.info(f"Extracted {sum(results.values())}/{len(results)} symbols successfully")
-    return results
+    return schlib
 
 
 def _group_components_by_symbol(
@@ -282,7 +381,30 @@ def _create_schlib_symbol_from_template(
 
     schlib = AltiumSchLib()
     _copy_font_registry_from_schdoc(schlib, schdoc)
+    symbol = _add_schlib_symbol_from_template(
+        schlib,
+        symbol_key,
+        template,
+        schdoc,
+        current_part_id=current_part_id,
+        strip_parameters=strip_parameters,
+        strip_implementations=strip_implementations,
+        debug=debug,
+    )
+    return schlib, symbol.name, symbol
 
+
+def _add_schlib_symbol_from_template(
+    schlib: AltiumSchLib,
+    symbol_key: str,
+    template: AltiumSchComponent,
+    schdoc: AltiumSchDoc,
+    *,
+    current_part_id: int | None = None,
+    strip_parameters: bool = True,
+    strip_implementations: bool = True,
+    debug: bool = False,
+) -> AltiumSymbol:
     display_name = _symbol_display_name(symbol_key, template)
     safe_name = _sanitize_filename(display_name)
     symbol = schlib.add_symbol(safe_name)
@@ -308,7 +430,7 @@ def _create_schlib_symbol_from_template(
     if not strip_implementations:
         _add_implementations(template, symbol)
 
-    return schlib, safe_name, symbol
+    return symbol
 
 
 def _ordered_component_children(template: AltiumSchComponent) -> list[object]:
@@ -350,6 +472,191 @@ def _clear_extracted_record_state(obj: object) -> None:
         setattr(obj, "_raw_record", None)
     if hasattr(obj, "_record_index"):
         setattr(obj, "_record_index", None)
+
+
+def _clone_coord_point(point: CoordPoint) -> CoordPoint:
+    return CoordPoint(point.x, point.y, point.x_frac, point.y_frac)
+
+
+def _clone_extraction_value(value: object) -> object:
+    if isinstance(value, CoordPoint):
+        return _clone_coord_point(value)
+    if isinstance(value, list):
+        return [_clone_extraction_value(item) for item in value]
+    if isinstance(value, dict):
+        return dict(value)
+    return value
+
+
+def _bounded_extraction_clone(obj: object) -> object:
+    """
+    Copy a schematic child without traversing SchDoc/component ownership graphs.
+
+    The extractor mutates only small value fields on the clone. Runtime
+    ownership fields are cleared separately before the object is inserted into
+    a SchLib symbol.
+    """
+    cloned = copy(obj)
+    if hasattr(obj, "__dict__") and hasattr(cloned, "__dict__"):
+        cloned.__dict__ = dict(obj.__dict__)
+
+    for attr in (
+        "location",
+        "corner",
+        "vertices",
+        "points",
+        "implementation_designators",
+        "defined_functions",
+        "selected_functions",
+    ):
+        if hasattr(obj, attr):
+            setattr(cloned, attr, _clone_extraction_value(getattr(obj, attr)))
+
+    for attr in ("name_settings", "designator_settings"):
+        if hasattr(obj, attr):
+            setattr(cloned, attr, copy(getattr(obj, attr)))
+
+    raw_record = getattr(obj, "_raw_record", None)
+    if isinstance(raw_record, dict):
+        setattr(cloned, "_raw_record", dict(raw_record))
+
+    record_view = getattr(obj, "_record", None)
+    if hasattr(record_view, "copy"):
+        setattr(cloned, "_record", record_view.copy())
+
+    return cloned
+
+
+def _orientation_to_int(value: object) -> int:
+    return int(value.value) if hasattr(value, "value") else int(value)
+
+
+def _component_transform_params(
+    component: AltiumSchComponent,
+) -> tuple[float, float, int, bool]:
+    return (
+        component.location.x_mils,
+        component.location.y_mils,
+        _orientation_to_int(component.orientation),
+        bool(component.is_mirrored),
+    )
+
+
+def _transform_coord_point_to_symbol_space(
+    point: CoordPoint,
+    comp_x: float,
+    comp_y: float,
+    orient: int,
+    mirror: bool,
+) -> CoordPoint:
+    x, y = transform_point_to_symbol_space(
+        point.x_mils,
+        point.y_mils,
+        comp_x,
+        comp_y,
+        orient,
+        mirror,
+    )
+    return CoordPoint.from_mils(x, y)
+
+
+def _transform_coord_list_to_symbol_space(
+    values: list[object],
+    comp_x: float,
+    comp_y: float,
+    orient: int,
+    mirror: bool,
+) -> list[object]:
+    transformed: list[object] = []
+    for value in values:
+        if isinstance(value, CoordPoint):
+            transformed.append(
+                _transform_coord_point_to_symbol_space(
+                    value,
+                    comp_x,
+                    comp_y,
+                    orient,
+                    mirror,
+                )
+            )
+        else:
+            transformed.append(value)
+    return transformed
+
+
+def _transform_pin_like_orientation(
+    obj: object,
+    comp_orient: int,
+    mirror: bool,
+) -> None:
+    if not isinstance(obj, AltiumSchPin) and not hasattr(obj, "pin_conglomerate"):
+        return
+    if not hasattr(obj, "orientation"):
+        return
+
+    new_orient = transform_pin_orientation(
+        _orientation_to_int(getattr(obj, "orientation")),
+        comp_orient,
+        mirror,
+    )
+    if isinstance(obj, AltiumSchPin):
+        obj.orientation = Rotation90(new_orient)
+    else:
+        setattr(obj, "orientation", new_orient)
+
+    if hasattr(obj, "pin_conglomerate"):
+        obj.pin_conglomerate = (obj.pin_conglomerate & ~0x03) | new_orient
+
+
+def _transform_child_to_symbol_space(
+    obj: object,
+    component: AltiumSchComponent,
+) -> object:
+    result = _bounded_extraction_clone(obj)
+    comp_x, comp_y, orient, mirror = _component_transform_params(component)
+
+    location = getattr(result, "location", None)
+    if isinstance(location, CoordPoint):
+        result.location = _transform_coord_point_to_symbol_space(
+            location,
+            comp_x,
+            comp_y,
+            orient,
+            mirror,
+        )
+
+    corner = getattr(result, "corner", None)
+    if isinstance(corner, CoordPoint):
+        result.corner = _transform_coord_point_to_symbol_space(
+            corner,
+            comp_x,
+            comp_y,
+            orient,
+            mirror,
+        )
+
+    vertices = getattr(result, "vertices", None)
+    if vertices:
+        result.vertices = _transform_coord_list_to_symbol_space(
+            vertices,
+            comp_x,
+            comp_y,
+            orient,
+            mirror,
+        )
+
+    points = getattr(result, "points", None)
+    if points:
+        result.points = _transform_coord_list_to_symbol_space(
+            points,
+            comp_x,
+            comp_y,
+            orient,
+            mirror,
+        )
+
+    _transform_pin_like_orientation(result, orient, mirror)
+    return result
 
 
 def _add_transformed_component_children(
@@ -403,7 +710,7 @@ def _add_transformed_component_children(
 
         if strip_parameters or child_id not in parameter_ids:
             continue
-        transformed = to_symbol_space(child, template)
+        transformed = _transform_child_to_symbol_space(child, template)
         _clear_extracted_record_state(transformed)
         symbol.add_object(transformed)
 
@@ -431,7 +738,7 @@ def _transform_designator_for_symbol(
     designator: AltiumSchDesignator,
     template: AltiumSchComponent,
 ) -> AltiumSchDesignator:
-    transformed = to_symbol_space(designator, template)
+    transformed = _transform_child_to_symbol_space(designator, template)
     _clear_extracted_record_state(transformed)
     if hasattr(transformed, "text"):
         transformed.text = _library_designator_text(getattr(designator, "text", ""))
@@ -442,15 +749,19 @@ def _transform_graphic_for_symbol(
     graphic: object,
     template: AltiumSchComponent,
 ) -> object:
-    transformed = to_symbol_space(graphic, template)
+    transformed = _transform_child_to_symbol_space(graphic, template)
     record_type = getattr(transformed, "record_type", None)
     if record_type in (
         SchRecordType.RECTANGLE,
         SchRecordType.ROUND_RECTANGLE,
     ):
         normalize_rectangle_coords(transformed)
+    if hasattr(transformed, "parent"):
+        setattr(transformed, "parent", None)
     if hasattr(transformed, "owner_index"):
         setattr(transformed, "owner_index", 0)
+    if hasattr(transformed, "_record_index"):
+        setattr(transformed, "_record_index", None)
     for attr in (
         "_has_location_x",
         "_has_location_y",
@@ -478,7 +789,7 @@ def _transform_graphic_for_symbol(
 
 
 def _clone_implementation_child(child: object) -> object:
-    cloned = deepcopy(child)
+    cloned = _bounded_extraction_clone(child)
     _clear_extracted_record_state(cloned)
     return cloned
 
@@ -497,8 +808,9 @@ def _add_implementations(
         for implementation in getattr(impl_list, "children", []):
             if not isinstance(implementation, AltiumSchImplementation):
                 continue
-            cloned_implementation = deepcopy(implementation)
+            cloned_implementation = _bounded_extraction_clone(implementation)
             _clear_extracted_record_state(cloned_implementation)
+            cloned_implementation.children = []
             children = [
                 _clone_implementation_child(child)
                 for child in getattr(implementation, "children", [])
@@ -715,11 +1027,17 @@ def _transform_pin_for_symbol(
     template: AltiumSchComponent,
     schdoc: AltiumSchDoc,
 ) -> AltiumSchPin:
-    transformed_pin = to_symbol_space(pin, template)
+    transformed_pin = _transform_child_to_symbol_space(pin, template)
+    if not isinstance(transformed_pin, AltiumSchPin):
+        raise TypeError("transformed pin did not preserve AltiumSchPin type")
+    if hasattr(transformed_pin, "parent"):
+        setattr(transformed_pin, "parent", None)
     if hasattr(transformed_pin, "owner_index"):
         setattr(transformed_pin, "owner_index", 0)
     if hasattr(transformed_pin, "index_in_sheet"):
         setattr(transformed_pin, "index_in_sheet", None)
+    if hasattr(transformed_pin, "_record_index"):
+        setattr(transformed_pin, "_record_index", None)
     if hasattr(transformed_pin, "_raw_record"):
         setattr(transformed_pin, "_raw_record", None)
     if hasattr(transformed_pin, "_source_is_binary"):

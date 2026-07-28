@@ -358,10 +358,11 @@ class AltiumNetlistSingleSheetCompiler:
                 are registered so they can participate in union-find connectivity,
                 enabling hierarchical net bridging in multi-sheet designs.
 
-                Entry connection point formula (validated against native behavior):
+                Entry connection point formula:
                     Left side (0):  hotspot = (sym.location.x, sym.location.y - dist)
                     Right side (1): hotspot = (sym.location.x + sym.x_size, sym.location.y - dist)
-                where dist = entry.distance_from_top * 10 (in CoordPoint/10-mil units).
+                where dist is the rounded fractional DistanceFromTop offset in
+                native 10-mil units.
         """
         for sheet_sym_info in self.schdoc.get_sheet_symbols():
             ss = sheet_sym_info.record
@@ -373,10 +374,8 @@ class AltiumNetlistSingleSheetCompiler:
                 if not entry_name:
                     continue
 
-                # Compute connection hotspot based on entry side
-                dist = (
-                    entry.distance_from_top * 10
-                )  # Convert to CoordPoint (10-mil) units
+                # Compute connection hotspot based on entry side.
+                dist = entry._rounded_distance_from_top_native_units()
                 side = entry.side
 
                 if side == 0:  # Left
@@ -534,12 +533,18 @@ class AltiumNetlistSingleSheetCompiler:
         )
 
     def _find_wire_point_for_location(
-        self, loc: tuple[int, int]
+        self,
+        loc: tuple[int, int],
+        *,
+        tolerance: int | None = None,
     ) -> tuple[int, int] | None:
         """
         Find wire point that the location connects to.
         """
-        return self._require_geo_index().find_wire_connection(loc, self.tolerance)
+        return self._require_geo_index().find_wire_connection(
+            loc,
+            self.tolerance if tolerance is None else tolerance,
+        )
 
     def _find_wire_point_for_netlabel(
         self,
@@ -557,6 +562,8 @@ class AltiumNetlistSingleSheetCompiler:
         location: tuple[int, int],
         uf: UnionFind,
         pin_groups: dict[tuple[int, int], list],
+        *,
+        tolerance: int | None = None,
     ) -> tuple[tuple[int, int] | None, bool]:
         """
         Find union-find root for a location: wire point first, then direct pin fallback.
@@ -565,15 +572,54 @@ class AltiumNetlistSingleSheetCompiler:
                     (root, pin_found): root is the UF root if connected (wire or pin),
                     None if floating. pin_found=True if a direct pin connection was used.
         """
-        wp = self._find_wire_point_for_location(location)
+        effective_tolerance = self.tolerance if tolerance is None else tolerance
+        wp = self._find_wire_point_for_location(
+            location,
+            tolerance=effective_tolerance,
+        )
         if wp is not None:
             return uf.find(wp), False
         for pin in self._pins:
-            if _points_connected(location, pin.connection_point, self.tolerance):
+            if _points_connected(location, pin.connection_point, effective_tolerance):
                 uf.add_root(location)
                 pin_groups[location].append(pin)
                 return location, True
         return None, False
+
+    def _find_wire_point_for_precise_port_endpoint(
+        self,
+        location: tuple[int, int],
+        port_obj: SchPortInfo,
+    ) -> tuple[int, int] | None:
+        """
+        Find a wire endpoint for a port whose integer endpoint is off by <1 unit.
+
+        Some AD26 projects preserve fractional coordinates on the port origin and
+        wire endpoint. Their integer coordinates can differ by one even when the
+        underlying fractional positions are separated by less than one internal
+        unit. Larger exact integer gaps remain disconnected because the
+        fractional distance is exactly one unit, not less than one.
+        """
+        record_location = getattr(port_obj.record, "location", None)
+        if record_location is None:
+            return None
+        scale = 100000
+        x_frac = int(getattr(record_location, "x_frac", 0) or 0)
+        y_frac = int(getattr(record_location, "y_frac", 0) or 0)
+        precise_x = location[0] * scale + x_frac
+        precise_y = location[1] * scale + y_frac
+        matches: dict[tuple[int, int], tuple[int, int]] = {}
+        for endpoint in self._require_geo_index().find_nearby_endpoint_coords(
+            location,
+            1,
+        ):
+            endpoint_x = endpoint.x * scale + int(getattr(endpoint, "x_frac", 0) or 0)
+            endpoint_y = endpoint.y * scale + int(getattr(endpoint, "y_frac", 0) or 0)
+            if abs(endpoint_x - precise_x) < scale and abs(endpoint_y - precise_y) < scale:
+                matches[(endpoint.x, endpoint.y)] = (endpoint.x, endpoint.y)
+        if len(matches) == 1:
+            return next(iter(matches.values()))
+        return None
 
     @staticmethod
     def _remap_list_maps(
@@ -702,7 +748,7 @@ class AltiumNetlistSingleSheetCompiler:
         """
         net_label_roots: dict[str, list[tuple[int, int]]] = defaultdict(list)
         root_to_label_names: dict[tuple[int, int], list[str]] = defaultdict(list)
-        floating_net_labels: set[str] = set()
+        floating_net_labels: dict[str, list[str]] = defaultdict(list)
         net_label_ids_by_root: dict[tuple[int, int], list[str]] = defaultdict(list)
 
         for nl_loc, name in self._net_labels.items():
@@ -733,7 +779,10 @@ class AltiumNetlistSingleSheetCompiler:
                         found_pin = True
                         break
                 if not found_pin:
-                    floating_net_labels.add(name)
+                    if nl_obj and nl_obj.unique_id:
+                        floating_net_labels[name].append(nl_obj.unique_id)
+                    else:
+                        floating_net_labels.setdefault(name, [])
 
         # Merge same-named net labels
         for _name, roots in net_label_roots.items():
@@ -870,6 +919,14 @@ class AltiumNetlistSingleSheetCompiler:
             port_obj = self._port_objects.get(port_loc)
             port_uid = port_obj.unique_id if port_obj else None
             root, pin_found = self._find_connectivity_root(port_loc, uf, pin_groups)
+            if root is None and port_obj is not None:
+                wire_point = self._find_wire_point_for_precise_port_endpoint(
+                    port_loc,
+                    port_obj,
+                )
+                if wire_point is not None:
+                    root = uf.find(wire_point)
+                    pin_found = False
 
             if root is not None:
                 # Connected via wire or direct pin connection
@@ -1170,7 +1227,7 @@ class AltiumNetlistSingleSheetCompiler:
         final_port_ids: dict,
         final_se_ids: dict,
         final_label_names: dict,
-        floating_net_labels: set[str],
+        floating_net_labels: dict[str, list[str]],
         floating_pin_roots: set[tuple[int, int]],
         port_roots: dict,
         se_roots: dict,
@@ -1276,7 +1333,7 @@ class AltiumNetlistSingleSheetCompiler:
         create_net: _CreateNetFn,
         final_name_to_root: dict[str, RootPoint],
         final_pin_groups: PinGroupsByRoot,
-        floating_net_labels: set[str],
+        floating_net_labels: dict[str, list[str]],
     ) -> None:
         """
         Emit named nets: net labels + power ports + floating labels (Order 1).
@@ -1284,7 +1341,7 @@ class AltiumNetlistSingleSheetCompiler:
         all_named_nets = (
             set(self._net_label_names_ordered)
             | set(self._power_port_names_ordered)
-            | floating_net_labels
+            | set(floating_net_labels)
         )
         named_nets_sorted = sorted(
             all_named_nets, key=_altium_net_total_sort_key, reverse=True
@@ -1302,11 +1359,23 @@ class AltiumNetlistSingleSheetCompiler:
                         nets.append(create_net(name, [], root))
                         processed_roots.add(root)
             elif name in floating_net_labels:
+                label_ids = list(dict.fromkeys(floating_net_labels[name]))
                 nets.append(
                     Net(
                         name=name,
                         terminals=[],
+                        graphical=NetGraphical(labels=label_ids),
                         auto_named=False,
+                        endpoints=[
+                            NetEndpoint(
+                                endpoint_id=f"net_label:{label_id}",
+                                role="net_label",
+                                element_id=label_id,
+                                object_id=label_id,
+                                name=name,
+                            )
+                            for label_id in label_ids
+                        ],
                     )
                 )
 

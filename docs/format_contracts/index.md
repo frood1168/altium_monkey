@@ -8,6 +8,9 @@ ship with the public package docs.
 The contracts cover stable behavior, known boundaries, and the test gates that
 protect the behavior. Detailed record layout notes, reverse-engineering logs,
 and case-specific discoveries stay in canonical-format or historical plan docs.
+For PCB primitive authoring and rendering, the public PCB layers guide defines
+the distinction between legacy `PcbLayer` values, V7 saved layer ids, stack
+rows, and mechanical-kind metadata.
 
 ## Contracts
 

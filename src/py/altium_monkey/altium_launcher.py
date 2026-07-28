@@ -5,9 +5,21 @@ import os
 import platform
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AltiumProcessInfo:
+    """
+    Minimal process record for a running Altium X2.exe instance.
+    """
+
+    pid: int
+    executable: str
+
 
 class AltiumLauncher:
     """
@@ -199,6 +211,53 @@ class AltiumLauncher:
 
         return os.system(cmd)
 
+    @staticmethod
+    def running_x2_processes() -> tuple[AltiumProcessInfo, ...]:
+        """
+        Return running Altium X2.exe processes on this machine.
+
+        The returned executable path may be empty if Windows cannot expose it
+        to the current process.
+        """
+        if os.name != "nt":
+            return ()
+
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    (
+                        "Get-CimInstance Win32_Process -Filter "
+                        "'Name = \"X2.EXE\"' | ForEach-Object { "
+                        '"{0}`t{1}" -f $_.ProcessId, $_.ExecutablePath }'
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return ()
+
+        if result.returncode != 0:
+            return ()
+
+        processes: list[AltiumProcessInfo] = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            pid_text, _separator, executable = line.partition("\t")
+            try:
+                pid = int(pid_text.strip())
+            except ValueError:
+                continue
+            processes.append(
+                AltiumProcessInfo(pid=pid, executable=executable.strip())
+            )
+        return tuple(processes)
+
     def open(self, file_path: str | Path) -> bool:
         """
         Open a file in Altium Designer.
@@ -220,11 +279,12 @@ class AltiumLauncher:
 
     def kill(self) -> bool:
         """
-        Kill all running Altium Designer processes.
+        Kill all running Altium Designer processes on this machine.
         
         Terminate running Altium processes.
         
-        Uses Windows taskkill to forcefully terminate X2.EXE processes.
+        Uses Windows taskkill to forcefully terminate every X2.EXE process. It
+        is not scoped to an instance launched by this object.
         
         Returns:
             True if Altium was killed or wasn't running

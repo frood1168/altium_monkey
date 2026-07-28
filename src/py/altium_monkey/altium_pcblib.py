@@ -14,6 +14,27 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
 from .altium_api_markers import public_api
+from .altium_embedded_assets import (
+    EmbeddedAssetInventory,
+    EmbeddedAssetReference,
+    EmbeddedPcbFontSummary,
+    EmbeddedPcbModelSummary,
+    embedded_model_payload,
+    embedded_model_summary,
+    live_embedded_model_entries_from_builder,
+    opaque_pcblib_embedded_fonts_summary,
+)
+from .altium_extractable_assets import (
+    AltiumAssetInventory,
+    AltiumAssetRef,
+    AltiumAssetSummary,
+    AltiumExtractedAsset,
+    PcbFootprintAssetDetails,
+    embedded_inventory_asset_summaries,
+    semantic_asset_key,
+    selected_asset_index,
+    source_instance_id_for,
+)
 from .altium_embedded_files import sanitize_embedded_asset_name
 from .altium_pcb_stream_helpers import (
     build_length_prefixed_ascii as _build_length_prefixed_ascii,
@@ -619,9 +640,10 @@ class AltiumPcbFootprint:
             start_mils: Track start as `(x_mils, y_mils)`.
             end_mils: Track end as `(x_mils, y_mils)`.
             width_mils: Track width in mils.
-            layer: `PcbLayer` or native layer id.
-            v7_layer_id: Optional explicit V7 layer-kind id for compatibility
-                with source libraries that store it separately.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
+            v7_layer_id: Optional explicit serialized V7 saved layer id for
+                compatibility with source libraries that store it separately.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
@@ -665,8 +687,9 @@ class AltiumPcbFootprint:
             start_angle_degrees: Start angle in degrees.
             end_angle_degrees: End angle in degrees.
             width_mils: Arc stroke width in mils.
-            layer: `PcbLayer` or native layer id.
-            v7_layer_id: Optional explicit V7 layer-kind id.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
+            v7_layer_id: Optional explicit serialized V7 saved layer id.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
@@ -705,9 +728,10 @@ class AltiumPcbFootprint:
         Args:
             corner1_mils: First fill corner as `(x_mils, y_mils)`.
             corner2_mils: Opposite fill corner as `(x_mils, y_mils)`.
-            layer: `PcbLayer` or native layer id.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
             rotation_degrees: Fill rotation in degrees.
-            v7_layer_id: Optional explicit V7 layer-kind id.
+            v7_layer_id: Optional explicit serialized V7 saved layer id.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
 
@@ -758,8 +782,10 @@ class AltiumPcbFootprint:
             position_mils: Via center as `(x_mils, y_mils)`.
             diameter_mils: Via pad diameter in mils.
             hole_size_mils: Via drill diameter in mils.
-            layer_start: Start layer as `PcbLayer` or native layer id.
-            layer_end: End layer as `PcbLayer` or native layer id.
+            layer_start: Start layer as `PcbLayer` or legacy/TV6 layer integer
+                id. Serialized V7 saved layer IDs are not accepted here.
+            layer_end: End layer as `PcbLayer` or legacy/TV6 layer integer id.
+                Serialized V7 saved layer IDs are not accepted here.
             ipc4761_via_type: Optional IPC-4761 via-protection type.
             ipc4761_features: Optional explicit IPC-4761 feature rows. Omit to
                 use Altium's default rows for `ipc4761_via_type`.
@@ -826,7 +852,8 @@ class AltiumPcbFootprint:
 
         Args:
             outline_points_mils: Outer polygon vertices in mils.
-            layer: `PcbLayer` or native layer id.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
             hole_points_mils: Optional list of hole polygons in mils.
             kind: Native region kind. Prefer `PcbRegionKind` values when
                 authoring new public examples.
@@ -907,7 +934,8 @@ class AltiumPcbFootprint:
             text: Text content.
             position_mils: Text anchor position as `(x_mils, y_mils)`.
             height_mils: Text height in mils.
-            layer: `PcbLayer` or native layer id.
+            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
+                saved layer IDs are not accepted here.
             rotation_degrees: Text rotation in degrees.
             stroke_width_mils: Stroke font line width in mils.
             font_kind: Text rendering mode, `"stroke"`, `"truetype"`, or
@@ -1012,7 +1040,9 @@ class AltiumPcbFootprint:
         Args:
             outline_points_mils: Footprint-local 2D projection polygon vertices
                 in mils.
-            layer: `PcbLayer` or native layer id that owns the projection.
+            layer: `PcbLayer` or legacy/TV6 layer integer id that owns the
+                projection. Serialized V7 saved layer IDs are not accepted
+                here.
             overall_height_mils: Top Z height of the body in mils.
             standoff_height_mils: Bottom Z height of the body in mils.
             cavity_height_mils: Native cavity height field in mils.
@@ -1136,8 +1166,9 @@ class AltiumPcbFootprint:
         Args:
             outline_points_mils: Footprint-local polygon vertices for the 2D
                 projection in mils.
-            layer: Mechanical `PcbLayer` or native layer id that owns the 3D
-                body projection.
+            layer: Mechanical `PcbLayer` or legacy/TV6 layer integer id that
+                owns the 3D body projection. Serialized V7 saved layer IDs are
+                not accepted here.
             overall_height_mils: Top Z of the extruded body in mils.
             standoff_height_mils: Bottom Z of the extruded body in mils.
             side: `PcbBodyProjection` board side/projection for the body.
@@ -1312,7 +1343,9 @@ class AltiumPcbFootprint:
                 bottom_mils, right_mils, top_mils)`.
             projection_outline_mils: Optional non-rectangular projection polygon
                 vertices in mils.
-            layer: `PcbLayer` or native layer id that owns the projection.
+            layer: `PcbLayer` or legacy/TV6 layer integer id that owns the
+                projection. Serialized V7 saved layer IDs are not accepted
+                here.
             side: `PcbBodyProjection` side/projection mode.
             location_mils: Model XY placement point in mils.
             rotation_x_degrees: Optional X-axis rotation override in degrees.
@@ -2309,8 +2342,9 @@ class AltiumPcbLib:
         Return the semantic kind assigned to a mechanical layer, if present.
 
         Args:
-            layer: Mechanical layer token, enum, native layer id, or mechanical
-                layer number.
+            layer: Mechanical layer token, `PcbLayer`, LayerKindMapping/Data
+                layer id, or mechanical layer number. Serialized V7 saved
+                layer IDs are not accepted here.
         """
         return self.mechanical_layer_kinds.get(
             coerce_layer_kind_mapping_layer_id(layer)
@@ -2325,9 +2359,10 @@ class AltiumPcbLib:
         Set the semantic kind assigned to a mechanical layer.
 
         Args:
-            layer: Mechanical layer token, enum, native layer id, or mechanical
-                layer number.
-            kind: `MechanicalLayerKind`, enum name, or native kind value.
+            layer: Mechanical layer token, `PcbLayer`, LayerKindMapping/Data
+                layer id, or mechanical layer number. Serialized V7 saved
+                layer IDs are not accepted here.
+            kind: `MechanicalLayerKind`, enum name, or raw kind integer value.
         """
         builder = self._ensure_authoring_builder()
         builder.set_mechanical_layer_kind(layer, kind)
@@ -2413,10 +2448,270 @@ class AltiumPcbLib:
             zlib-compressed bytes stored in the native `Library/Models/<n>`
             streams.
         """
+        live_entries = live_embedded_model_entries_from_builder(self._authoring_builder)
+        if live_entries:
+            return list(live_entries)  # type: ignore[return-value]
         return collect_pcblib_embedded_model_entries(
             self.raw_models_data,
             self.raw_models,
         )
+
+    def _current_footprints_for_inventory(self) -> tuple[AltiumPcbFootprint, ...]:
+        builder = self._authoring_builder
+        specs = getattr(builder, "_footprints", None)
+        if specs:
+            return tuple(
+                spec.footprint
+                for spec in specs
+                if getattr(spec, "footprint", None) is not None
+            )
+        return tuple(self.footprints)
+
+    def _embedded_model_references(
+        self, *, asset_index: int, asset_id: str
+    ) -> tuple[EmbeddedAssetReference, ...]:
+        normalized_asset_id = str(asset_id or "").upper()
+        if not normalized_asset_id:
+            return ()
+
+        references: list[EmbeddedAssetReference] = []
+        for footprint_index, footprint in enumerate(self._current_footprints_for_inventory()):
+            for body_index, body in enumerate(footprint.component_bodies):
+                body_model_id = str(getattr(body, "model_id", "") or "").upper()
+                if body_model_id != normalized_asset_id:
+                    continue
+                references.append(
+                    EmbeddedAssetReference(
+                        source_object_kind="footprint",
+                        source_object_index=footprint_index,
+                        asset_kind="model",
+                        asset_index=asset_index,
+                        asset_id=asset_id,
+                        role=f"component_body:{body_index}:3d_model",
+                    )
+                )
+        return tuple(references)
+
+    def embedded_model_summaries(
+        self, *, include_hashes: bool = False
+    ) -> tuple[EmbeddedPcbModelSummary, ...]:
+        """
+        Return read-only embedded 3D model inventory summaries.
+        """
+        summaries: list[EmbeddedPcbModelSummary] = []
+        for index, (model, compressed_payload) in enumerate(
+            self.get_embedded_model_entries()
+        ):
+            model_id = str(getattr(model, "id", "") or "")
+            summaries.append(
+                embedded_model_summary(
+                    index=index,
+                    source_kind="pcblib",
+                    source_path=self.filepath,
+                    model=model,
+                    compressed_payload=compressed_payload,
+                    references=self._embedded_model_references(
+                        asset_index=index,
+                        asset_id=model_id,
+                    ),
+                    include_hashes=include_hashes,
+                )
+            )
+        return tuple(summaries)
+
+    def embedded_font_summaries(
+        self, *, include_hashes: bool = False
+    ) -> tuple[EmbeddedPcbFontSummary, ...]:
+        """
+        Return typed embedded-font summaries.
+
+        PcbLib `Library/EmbeddedFonts` is currently represented through
+        aggregate `opaque_assets` until its raw stream shape is proven
+        compatible with the PcbDoc font parser.
+        """
+        _ = include_hashes
+        return ()
+
+    def get_embedded_model_payload(self, index: int) -> bytes:
+        """
+        Return one decompressed embedded model payload by inventory index.
+        """
+        entries = self.get_embedded_model_entries()
+        if index < 0 or index >= len(entries):
+            raise IndexError(f"embedded model index out of range: {index}")
+        return embedded_model_payload(entries[index][1], index=index)
+
+    def embedded_model_payloads(self) -> tuple[bytes, ...]:
+        """
+        Return decompressed embedded model payloads in summary order.
+        """
+        return tuple(
+            embedded_model_payload(compressed_payload, index=index)
+            for index, (_model, compressed_payload) in enumerate(
+                self.get_embedded_model_entries()
+            )
+        )
+
+    def embedded_asset_inventory(
+        self, *, include_hashes: bool = False
+    ) -> EmbeddedAssetInventory:
+        """
+        Return an aggregate read-only inventory for embedded PCB assets.
+        """
+        return EmbeddedAssetInventory(
+            source_kind="pcblib",
+            source_path=str(self.filepath) if self.filepath is not None else None,
+            models=self.embedded_model_summaries(include_hashes=include_hashes),
+            fonts=self.embedded_font_summaries(include_hashes=include_hashes),
+            opaque_assets=opaque_pcblib_embedded_fonts_summary(
+                raw_embedded_fonts=self.raw_embedded_fonts,
+                source_path=self.filepath,
+                include_hashes=include_hashes,
+            ),
+        )
+
+    def _footprint_asset_summaries(self) -> tuple[AltiumAssetSummary, ...]:
+        """
+        Return extractable footprint summaries in library order.
+        """
+        source_path = str(self.filepath) if self.filepath is not None else None
+        source_instance_id = source_instance_id_for(self, source_path)
+        summaries: list[AltiumAssetSummary] = []
+        for index, footprint in enumerate(self._current_footprints_for_inventory()):
+            name = str(getattr(footprint, "name", "") or f"footprint_{index:03d}")
+            kind = "pcb_footprint"
+            filename_base = sanitize_embedded_asset_name(name, f"footprint_{index:03d}")
+            summaries.append(
+                AltiumAssetSummary(
+                    ref=AltiumAssetRef(
+                        source_kind="pcblib",
+                        source_path=source_path,
+                        kind=kind,
+                        key=semantic_asset_key(kind, name, index + 1),
+                        index=index,
+                        name=name,
+                        source_instance_id=source_instance_id,
+                    ),
+                    kind=kind,
+                    name=name,
+                    extraction_filename=f"{filename_base}.PcbLib",
+                    native_extension="PcbLib",
+                    can_extract=True,
+                    payload_available=False,
+                    details=PcbFootprintAssetDetails(
+                        pattern=name,
+                        occurrence=index + 1,
+                        pad_count=len(getattr(footprint, "pads", []) or []),
+                        primitive_count=len(getattr(footprint, "_record_order", []) or []),
+                    ),
+                )
+            )
+        return tuple(summaries)
+
+    def asset_inventory(self, *, include_hashes: bool = False) -> AltiumAssetInventory:
+        """
+        Return extractable asset inventory for this PcbLib.
+        """
+        source_path = str(self.filepath) if self.filepath is not None else None
+        source_instance_id = source_instance_id_for(self, source_path)
+        embedded_assets = embedded_inventory_asset_summaries(
+            self.embedded_asset_inventory(include_hashes=include_hashes),
+            source_instance_id=source_instance_id,
+        )
+        return AltiumAssetInventory(
+            source_kind="pcblib",
+            source_path=source_path,
+            assets=embedded_assets + self._footprint_asset_summaries(),
+        )
+
+    def extract_footprint(self, ref_or_name_or_index: object) -> "AltiumPcbLib":
+        """
+        Extract one PcbLib footprint as a single-footprint PcbLib.
+        """
+        footprints = self._current_footprints_for_inventory()
+        summaries = self._footprint_asset_summaries()
+        index = selected_asset_index(
+            ref_or_name_or_index,
+            summaries=summaries,
+            expected_source_kind="pcblib",
+            expected_kind="pcb_footprint",
+        )
+
+        from .altium_pcblib_builder import PcbLibBuilder
+
+        builder = PcbLibBuilder(profile=self._profile_for_authoring_builder())
+        builder.layer_kind_mapping_data = self._layer_kind_mapping_data
+        model_entries = self.get_embedded_model_entries()
+        seen_model_signatures: set[tuple] = set()
+        footprint = footprints[index]
+        copy_footprint_with_models_into_builder(
+            builder,
+            footprint,
+            model_entries,
+            seen_model_signatures=seen_model_signatures,
+            height=footprint.parameters.get("HEIGHT", "0mil"),
+            description=footprint.parameters.get("DESCRIPTION", ""),
+            item_guid=footprint.parameters.get("ITEMGUID", ""),
+            revision_guid=footprint.parameters.get("REVISIONGUID", ""),
+        )
+        return builder.build()
+
+    def extract_asset(self, ref: AltiumAssetRef) -> AltiumExtractedAsset:
+        """
+        Extract one asset selected from `asset_inventory()`.
+        """
+        if ref.source_kind != "pcblib":
+            raise ValueError(
+                f"asset reference source mismatch: expected pcblib, got {ref.source_kind}"
+            )
+
+        if ref.kind == "embedded_model":
+            index = selected_asset_index(
+                ref,
+                summaries=self.asset_inventory().by_kind("embedded_model"),
+                expected_source_kind="pcblib",
+                expected_kind="embedded_model",
+            )
+            summary = self.embedded_model_summaries()[index]
+            return AltiumExtractedAsset(
+                ref=ref,
+                filename=summary.extraction_filename,
+                payload=self.get_embedded_model_payload(index),
+            )
+
+        if ref.kind == "opaque_embedded":
+            summaries = self.asset_inventory().by_kind("opaque_embedded")
+            index = selected_asset_index(
+                ref,
+                summaries=summaries,
+                expected_source_kind="pcblib",
+                expected_kind="opaque_embedded",
+            )
+            if self.raw_embedded_fonts is None:
+                raise ValueError("opaque embedded payload is not available")
+            return AltiumExtractedAsset(
+                ref=ref,
+                filename=summaries[index].extraction_filename
+                or f"opaque_embedded_{index:03d}.bin",
+                payload=self.raw_embedded_fonts,
+            )
+
+        if ref.kind == "pcb_footprint":
+            summaries = self._footprint_asset_summaries()
+            index = selected_asset_index(
+                ref,
+                summaries=summaries,
+                expected_source_kind="pcblib",
+                expected_kind="pcb_footprint",
+            )
+            return AltiumExtractedAsset(
+                ref=ref,
+                filename=summaries[index].extraction_filename
+                or f"footprint_{index:03d}.PcbLib",
+                pcblib=self.extract_footprint(ref),
+            )
+
+        raise ValueError(f"unsupported PcbLib extractable asset kind: {ref.kind}")
 
     def extract_embedded_models(
         self,

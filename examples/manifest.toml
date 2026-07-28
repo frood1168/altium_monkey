@@ -1311,7 +1311,7 @@ tags = ["generation", "library", "footprint", "through-hole", "embedded-model", 
 [[examples]]
 id = "hello_altium_design"
 title = "Load an existing project with AltiumDesign"
-summary = "Load an existing PrjPcb, print variants and document paths, and write summary, BOM, design JSON, netlist, and wirelist artifacts."
+summary = "Load an existing PrjPcb, print variants and document paths, and write summary, BOM, design JSON, physical-page SVGs, compiled net-name examples, and netlist artifacts."
 areas = ["design", "prjpcb", "netlist", "bom", "pnp"]
 status = "ready"
 entrypoint = "hello_altium_design/hello_altium_design.py"
@@ -1325,13 +1325,16 @@ assets = []
 outputs = [
   "hello_altium_design/output/project_summary.json",
   "hello_altium_design/output/altium_design.json",
+  "hello_altium_design/output/physical_pages_summary.json",
+  "hello_altium_design/output/physical_svg_manifest.json",
+  "hello_altium_design/output/physical_svgs/",
   "hello_altium_design/output/netlist.json",
-  "hello_altium_design/output/wirelist.txt",
+  "hello_altium_design/output/compiled_net_name_examples.json",
   "hello_altium_design/output/bom_all.json",
   "hello_altium_design/output/variant_boms/",
 ]
 requires_extra = []
-tags = ["project", "design", "variants", "netlist", "bom", "pnp"]
+tags = ["project", "design", "compiled-design", "physical-pages", "svg", "variants", "netlist", "bom", "pnp"]
 
 [[examples]]
 id = "pcbdoc_pick_n_place"
@@ -1789,6 +1792,60 @@ outputs = [
 ]
 requires_extra = []
 tags = ["intlib", "library", "source-extraction", "schlib", "pcblib"]
+
+[[examples]]
+id = "embedded_asset_inventory"
+title = "Inventory embedded PCB assets"
+summary = "Load PcbDoc and PcbLib fixtures, write focused embedded-asset inventories, and extract one selected model/font payload by direct embedded asset index."
+areas = ["asset-extraction", "pcbdoc", "pcblib"]
+status = "ready"
+entrypoint = "embedded_asset_inventory/embedded_asset_inventory.py"
+doc = "embedded_asset_inventory/README.md"
+inputs = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PCBdoc",
+  "assets/pcblib/RT_SUPER_C1.PcbLib",
+]
+assets = []
+outputs = [
+  "embedded_asset_inventory/output/embedded_asset_inventory_manifest.json",
+  "embedded_asset_inventory/output/inventories/pcbdoc.json",
+  "embedded_asset_inventory/output/inventories/pcblib.json",
+  "embedded_asset_inventory/output/selected/pcbdoc_model.step",
+  "embedded_asset_inventory/output/selected/pcbdoc_font.ttf",
+  "embedded_asset_inventory/output/selected/pcblib_model.step",
+]
+requires_extra = []
+tags = ["inventory", "embedded-asset", "model", "font", "opaque", "json"]
+
+[[examples]]
+id = "extractable_asset_inventory"
+title = "Inventory and extract selected assets"
+summary = "Load SchDoc, SchLib, PcbDoc, and PcbLib fixtures, write typed extractable-asset inventories, and extract one selected symbol, footprint, and embedded model by AltiumAssetRef."
+areas = ["asset-extraction", "schdoc", "schlib", "pcbdoc", "pcblib"]
+status = "ready"
+entrypoint = "extractable_asset_inventory/extractable_asset_inventory.py"
+doc = "extractable_asset_inventory/README.md"
+inputs = [
+  "assets/projects/rt_super_c1/RT_SUPER_C1.SchDoc",
+  "assets/schlib/RT_SUPER_C1.SCHLIB",
+  "assets/projects/rt_super_c1/RT_SUPER_C1.PCBdoc",
+  "assets/pcblib/RT_SUPER_C1.PcbLib",
+]
+assets = []
+outputs = [
+  "extractable_asset_inventory/output/extractable_asset_inventory_manifest.json",
+  "extractable_asset_inventory/output/inventories/schdoc.json",
+  "extractable_asset_inventory/output/inventories/schlib.json",
+  "extractable_asset_inventory/output/inventories/pcbdoc.json",
+  "extractable_asset_inventory/output/inventories/pcblib.json",
+  "extractable_asset_inventory/output/selected/schdoc_symbol.SchLib",
+  "extractable_asset_inventory/output/selected/schlib_symbol.SchLib",
+  "extractable_asset_inventory/output/selected/pcbdoc_footprint.PcbLib",
+  "extractable_asset_inventory/output/selected/pcblib_footprint.PcbLib",
+  "extractable_asset_inventory/output/selected/pcbdoc_model.step",
+]
+requires_extra = []
+tags = ["inventory", "extract", "asset-ref", "symbol", "footprint", "embedded-model", "json"]
 
 [[examples]]
 id = "schdoc_clean"

@@ -5,11 +5,15 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Callable, TypeAlias
 
 from .altium_netlist_model import HierarchyPath, NetGraphical, UnionFind
 from .altium_prjpcb import NetIdentifierScope
+from .altium_sch_record_helpers import (
+    _basic_entry_distance_to_rounded_native_units,
+)
 
 if TYPE_CHECKING:
     from .altium_netlist_model import Net, Terminal
@@ -21,15 +25,6 @@ log = logging.getLogger(__name__)
 
 SheetNetEntries: TypeAlias = list[tuple[int, "Net"]]
 SheetSymbolRef: TypeAlias = tuple[int, "SchSheetSymbolInfo"]
-
-
-class _HarnessPortNameResolver(Protocol):
-    def _find_harness_port_name(
-        self,
-        connector: object,
-        signal_harnesses: object,
-        port_location_map: dict[tuple[int, int], str],
-    ) -> str | None: ...
 
 
 @dataclass
@@ -112,11 +107,15 @@ def _build_port_location_map(schdoc: "AltiumSchDoc") -> dict[tuple[int, int], st
             distance_from_top = getattr(entry, "distance_from_top", None)
             if entry_side is None or distance_from_top is None:
                 continue
+            distance_from_top_frac1 = getattr(entry, "distance_from_top_frac1", 0)
             if entry_side == 1:
                 entry_x = record.location.x + record.x_size
             else:
                 entry_x = record.location.x
-            entry_y = record.location.y - distance_from_top * 10
+            entry_y = record.location.y - _basic_entry_distance_to_rounded_native_units(
+                distance_from_top,
+                distance_from_top_frac1,
+            )
             port_location_map[(entry_x, entry_y)] = entry_name
 
     return port_location_map
@@ -493,15 +492,69 @@ def _reinsert_bridge_groups(
             port_net_map[f"__bridge_{group_idx}"] = members
 
 
+def find_harness_bundle_info(
+    connector: object,
+    signal_harnesses: object,
+    port_location_map: dict[tuple[int, int], str],
+) -> dict[str, object]:
+    """Find the port and signal-harness objects physically touching a harness connector."""
+    result: dict[str, object] = {"port_name": "", "signal_harness_ids": []}
+    if not signal_harnesses:
+        return result
+    if not isinstance(signal_harnesses, Iterable):
+        return result
+    connector_location = getattr(connector, "location", None)
+    if connector_location is None:
+        return result
+    harness_y = int(connector_location.y) - int(getattr(connector, "primary_connection_position", 0) or 0)
+    harness_x_left = int(connector_location.x)
+    harness_x_right = harness_x_left + int(getattr(connector, "xsize", 0) or 0)
+    signal_harness_ids = []
+    seen_signal_harness_ids = set()
+    for signal_harness in signal_harnesses:
+        points = getattr(signal_harness, "points", None)
+        if not points or len(points) < 2:
+            continue
+        touches_connector = False
+        for point in points:
+            if point.y == harness_y and (point.x == harness_x_left or point.x == harness_x_right):
+                touches_connector = True
+                break
+        if not touches_connector:
+            continue
+        signal_harness_id = str(getattr(signal_harness, "unique_id", "") or "").strip()
+        if signal_harness_id and signal_harness_id not in seen_signal_harness_ids:
+            seen_signal_harness_ids.add(signal_harness_id)
+            signal_harness_ids.append(signal_harness_id)
+        for point in points:
+            port_name = port_location_map.get((point.x, point.y))
+            if port_name:
+                result["port_name"] = port_name
+                result["signal_harness_ids"] = signal_harness_ids
+                return result
+    result["signal_harness_ids"] = signal_harness_ids
+    return result
+
+
+def find_harness_port_name(
+    connector: object,
+    signal_harnesses: object,
+    port_location_map: dict[tuple[int, int], str],
+) -> str | None:
+    """Return the harness port name physically connected to a harness connector."""
+    info = find_harness_bundle_info(connector, signal_harnesses, port_location_map)
+    port_name = info.get("port_name")
+    return port_name if isinstance(port_name, str) and port_name else None
+
+
 def _build_child_harness_entry_map(
-    resolver: _HarnessPortNameResolver,
     child_schdoc: "AltiumSchDoc",
 ) -> dict[str, list[dict[str, str]]]:
     """Build `port_name -> [{name, object_id}]` lookup for child harness connectors."""
     child_harness_entries = {}
     child_port_location_map = _build_port_location_map(child_schdoc)
     for harness_connector in child_schdoc.harness_connectors:
-        harness_port = resolver._find_harness_port_name(
+        harness_port = find_harness_port_name(
             harness_connector,
             child_schdoc.signal_harnesses,
             child_port_location_map,
@@ -663,6 +716,8 @@ __all__ = [
     "ChannelInstance",
     "RoomDetails",
     "SheetEntryLink",
+    "find_harness_bundle_info",
+    "find_harness_port_name",
     "_bridge_power_keys_by_net_labels",
     "_build_child_harness_entry_map",
     "_build_port_location_map",

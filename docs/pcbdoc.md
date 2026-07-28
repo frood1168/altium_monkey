@@ -14,6 +14,7 @@ Use it when you need to:
 6. place footprints from `.PcbLib`
 7. add component bodies and embedded 3D model payloads
 8. inspect and author user-defined PCB unions
+9. inventory extractable footprints and embedded payloads before selecting one
 
 ## Object Model
 
@@ -122,6 +123,23 @@ methods until metric helper functions are added.
 Low-level PCB record fields may expose Altium internal integer units. Prefer
 public helper methods for authored geometry.
 
+## Layer Arguments
+
+Current PcbDoc primitive authoring helpers are legacy-layer-first. Arguments
+named `layer`, `layer_start`, and `layer_end` accept documented `PcbLayer`
+values and supported legacy layer-name tokens such as `"Top Layer"`.
+
+`PcbLayer` mirrors Altium's compact legacy/TV6 enum. It includes Top, Mid1
+through Mid30, Bottom, and Mechanical 1 through Mechanical 16 only; values 73,
+74, and 75 are Drill Drawing, Multi-Layer, and Connect. Do not pass serialized
+V7 saved layer ids such as `16908305` for Mechanical 17 or `16777248` for
+Mid31 as `layer=` unless a method explicitly documents a V7 override.
+
+Board layer-stack and mechanical-kind metadata can describe extended V7 layer
+identities, but that metadata is distinct from primitive `layer=` authoring
+support. See [PCB layers](api_patterns/pcb_layers.md) for the current public
+boundary.
+
 ## Pads
 
 `AltiumPcbDoc.add_pad(...)` accepts `hole_shape="round"`, `"square"`, or
@@ -184,6 +202,53 @@ geometry-equivalent STEP import.
 Use explicit `bounds_mils`, `projection_outline_mils`, and
 `overall_height_mils` when the package projection or height is known.
 
+## Embedded Asset Inventory
+
+`AltiumPcbDoc.embedded_asset_inventory(include_hashes=False)` lists embedded
+3D models and embedded TrueType fonts without writing files. The focused
+inventory returns typed model/font summaries and can emit the
+`altium_monkey.pcb.embedded_assets.a0` JSON shape through `to_dict()`.
+
+Use direct indexed payload helpers when a consumer wants one embedded payload:
+
+```python
+inventory = pcbdoc.embedded_asset_inventory(include_hashes=True)
+model = next((item for item in inventory.models if item.payload_available), None)
+if model is None:
+    raise RuntimeError("no available embedded model payload found")
+payload = pcbdoc.get_embedded_model_payload(model.index)
+```
+
+Corrupt supported payloads remain visible in the inventory with
+`payload_available=False`, no hash, and no decompressed size. Selecting that
+payload raises a clear decompression error. For the focused JSON contract, see
+[embedded PCB assets](api_patterns/embedded_assets.md).
+
+## Extractable Assets
+
+`AltiumPcbDoc.asset_inventory(include_hashes=False)` lists selectable board
+assets, including embedded 3D models, embedded fonts, and footprints extracted
+from placed components. Use the returned `AltiumAssetRef` with
+`extract_asset(...)` to extract exactly one payload or one footprint.
+
+```python
+inventory = pcbdoc.asset_inventory(include_hashes=True)
+footprint = next(
+    (item for item in inventory.by_kind("pcb_footprint") if item.can_extract),
+    None,
+)
+if footprint is None:
+    raise RuntimeError("no extractable footprint found")
+selected = pcbdoc.extract_asset(footprint.ref)
+selected.pcblib.save("selected_footprint.PcbLib")
+```
+
+Embedded payload selections return `payload` bytes and a suggested
+`extraction_filename`. Footprint selections return a single-footprint
+`AltiumPcbLib`. The JSON-ready inventory uses
+`altium_monkey.extractable_assets.a0`. For the shared reference and JSON
+contract, see [extractable assets](api_patterns/extractable_assets.md).
+
 ## SVG Rendering
 
 `AltiumPcbDoc.to_svg(...)`, `to_layer_svgs(...)`, and
@@ -194,12 +259,16 @@ Set `PcbSvgRenderOptions(include_view_box=False)` when a downstream consumer
 needs width and height without a root viewBox. This does not change geometry,
 layer keys, filenames, or metadata identifiers.
 
-Layer identifiers remain token-based. `PcbLayer.to_json_name()` returns stable
-tokens such as `TOP`, `BOTTOM`, and `TOPOVERLAY`. `PcbLayer.to_display_name()`
-returns default user-facing labels such as `Top Layer` and `Top Overlay`.
+Layer identifiers remain token-based for the current public SVG contract.
+`PcbLayer.to_json_name()` returns stable tokens such as `TOP`, `BOTTOM`, and
+`TOPOVERLAY`. `PcbLayer.to_display_name()` returns default user-facing labels
+such as `Top Layer` and `Top Overlay`.
 For parsed PcbDoc files, prefer `ResolvedLayerStack` when actual board-specific
 layer names are required; SVG `data-layer-display-name` uses resolved names
 when available and falls back to `PcbLayer.to_display_name()`.
+Mechanical 17+ and AD 26.8.1 Mid31+ primitive rendering/export is future
+V7-aware layer-reference work and is not represented by adding more `PcbLayer`
+enum values.
 
 ## Layer Stack Inspection
 
@@ -388,7 +457,9 @@ pcbdoc.save("mechanical_kind.PcbDoc")
 
 Mechanical layers 1 through 16 use classic PCB layer ids in the mapping.
 Mechanical layers 17 through 32 use Altium's extended
-`0x04000000 | mechanical_number` id form.
+`0x04000000 | mechanical_number` id form. This is the mechanical-kind mapping
+id family, not the primitive `PcbLayer` enum and not the serialized V7
+saved-layer id family.
 
 ## Via Protection, Tenting, And Delay
 
@@ -523,6 +594,7 @@ Start with:
 39. [`pcbdoc_extract_pcblib`](../examples/pcbdoc_extract_pcblib/README.md)
 40. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
 41. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
+42. [`embedded_asset_inventory`](../examples/embedded_asset_inventory/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.

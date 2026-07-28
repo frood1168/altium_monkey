@@ -10,6 +10,7 @@ Use it when you need to:
 3. split or merge schematic libraries
 4. extract symbols from schematic documents
 5. render symbols and multipart symbols to SVG
+6. inventory symbols and extract one selected symbol
 
 ## Object Model
 
@@ -52,6 +53,38 @@ You can also set `schlib.show_comments_designators = True` before saving.
 For parsed libraries, prefer `AltiumSchLib.get_symbol(...)` and symbol views
 over scanning raw streams.
 
+## Extraction From SchDoc
+
+`AltiumSchDoc.extract_schlib(...)` returns an in-memory `AltiumSchLib` built
+from the placed component symbols in a schematic. Use it when another API wants
+to inspect, render, merge, or save the extracted library without first writing
+split files.
+
+`AltiumSchDoc.extract_symbols(...)` remains the file-oriented helper for split
+or combined `.SchLib` output. It uses the same extraction model as
+`extract_schlib(...)`.
+
+## Extractable Assets
+
+`AltiumSchLib.asset_inventory()` lists library symbols with typed
+`SchSymbolAssetDetails`. Use the returned ref with `extract_asset(...)` when a
+tool needs exactly one symbol as a new single-symbol `AltiumSchLib`.
+
+```python
+inventory = schlib.asset_inventory()
+symbol = next(
+    (item for item in inventory.by_kind("sch_symbol") if item.can_extract),
+    None,
+)
+if symbol is None:
+    raise RuntimeError("no extractable schematic symbol found")
+selected = schlib.extract_asset(symbol.ref)
+selected.schlib.save("selected_symbol.SchLib")
+```
+
+For the shared reference and JSON contract, see
+[extractable assets](api_patterns/extractable_assets.md).
+
 ## SVG Rendering
 
 `AltiumSchLib.symbol_to_svg(...)` and `to_svg(...)` accept
@@ -70,7 +103,7 @@ Start with:
 4. [`schlib_merge`](../examples/schlib_merge/README.md)
 5. [`schlib_svg`](../examples/schlib_svg/README.md)
 6. [`schdoc_extract_schlib`](../examples/schdoc_extract_schlib/README.md)
+7. [`extractable_asset_inventory`](../examples/extractable_asset_inventory/README.md)
 
 See [API patterns](api_patterns/index.md) for the shared `ObjectCollection`
 rules used by SchDoc and SchLib.
-

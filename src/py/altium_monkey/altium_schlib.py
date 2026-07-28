@@ -23,6 +23,16 @@ from . import (
     AltiumSchTextFrame,
 )
 from .altium_api_markers import public_api
+from .altium_extractable_assets import (
+    AltiumAssetInventory,
+    AltiumAssetRef,
+    AltiumAssetSummary,
+    AltiumExtractedAsset,
+    SchSymbolAssetDetails,
+    semantic_asset_key,
+    selected_asset_index,
+    source_instance_id_for,
+)
 from .altium_font_manager import FontIDManager
 from .altium_json_apply_helpers import JsonApplyMixin
 from .altium_object_collection import ObjectCollection, ObjectCollectionView
@@ -46,6 +56,7 @@ from .altium_sch_record_factory import (
     create_record_from_record,
     create_record_from_type,
 )
+from .altium_schdoc_symbol_extractor import _sanitize_filename
 from .altium_schlib_aux_streams import (
     build_pinfrac_stream_for_pins,
     build_pintextdata_stream_for_pins,
@@ -2574,6 +2585,120 @@ class AltiumSchLib(JsonApplyMixin):
             if symbol.name == name:
                 return symbol
         return None
+
+    def _symbol_asset_summaries(self) -> tuple[AltiumAssetSummary, ...]:
+        """
+        Return extractable symbol summaries in library order.
+        """
+        source_path = str(self.filepath) if self.filepath is not None else None
+        source_instance_id = source_instance_id_for(self, source_path)
+        summaries: list[AltiumAssetSummary] = []
+        for index, symbol in enumerate(self.symbols):
+            name = str(getattr(symbol, "name", "") or f"symbol_{index:03d}")
+            kind = "sch_symbol"
+            summaries.append(
+                AltiumAssetSummary(
+                    ref=AltiumAssetRef(
+                        source_kind="schlib",
+                        source_path=source_path,
+                        kind=kind,
+                        key=semantic_asset_key(kind, name, index),
+                        index=index,
+                        name=name,
+                        source_instance_id=source_instance_id,
+                    ),
+                    kind=kind,
+                    name=name,
+                    extraction_filename=f"{_sanitize_filename(name)}.SchLib",
+                    native_extension="SchLib",
+                    can_extract=True,
+                    payload_available=False,
+                    details=SchSymbolAssetDetails(
+                        display_name=name,
+                        safe_name=_sanitize_filename(name),
+                        component_count=0,
+                        lib_reference=name,
+                        original_name=getattr(symbol, "original_name", name),
+                        description=getattr(symbol, "description", ""),
+                        pin_count=len(getattr(symbol, "pins", []) or []),
+                        object_count=len(getattr(symbol, "objects", []) or []) + 1,
+                        part_count=getattr(symbol, "part_count", None),
+                    ),
+                )
+            )
+        return tuple(summaries)
+
+    def asset_inventory(self, *, include_hashes: bool = False) -> AltiumAssetInventory:
+        """
+        Return extractable asset inventory for this SchLib.
+        """
+        _ = include_hashes
+        source_path = str(self.filepath) if self.filepath is not None else None
+        return AltiumAssetInventory(
+            source_kind="schlib",
+            source_path=source_path,
+            assets=self._symbol_asset_summaries(),
+        )
+
+    def extract_symbol(self, ref_or_name_or_index: object) -> "AltiumSchLib":
+        """
+        Extract one symbol as a single-symbol SchLib.
+        """
+        summaries = self._symbol_asset_summaries()
+        index = selected_asset_index(
+            ref_or_name_or_index,
+            summaries=summaries,
+            expected_source_kind="schlib",
+            expected_kind="sch_symbol",
+        )
+        symbol = self.symbols[index]
+
+        single = AltiumSchLib()
+        single.font_manager = self.font_manager
+        single._weight_policy = "serialized_data_records"
+
+        new_sym = single.add_symbol(
+            symbol.name,
+            symbol.description,
+            original_name=symbol.original_name,
+        )
+        new_sym.part_count = symbol.part_count
+        new_sym.component_record = symbol.component_record
+        for obj in symbol.objects:
+            new_sym.objects.append(obj)
+        new_sym.raw_records = symbol.raw_records
+        new_sym._original_streams = dict(symbol._original_streams)
+
+        for img in symbol.images:
+            filename = getattr(img, "filename", None)
+            if filename and filename in self.embedded_images:
+                single.embedded_images[filename] = self.embedded_images[filename]
+
+        return single
+
+    def extract_asset(self, ref: AltiumAssetRef) -> AltiumExtractedAsset:
+        """
+        Extract one asset selected from `asset_inventory()`.
+        """
+        if ref.source_kind != "schlib":
+            raise ValueError(
+                f"asset reference source mismatch: expected schlib, got {ref.source_kind}"
+            )
+        if ref.kind != "sch_symbol":
+            raise ValueError(f"unsupported SchLib extractable asset kind: {ref.kind}")
+
+        summaries = self._symbol_asset_summaries()
+        index = selected_asset_index(
+            ref,
+            summaries=summaries,
+            expected_source_kind="schlib",
+            expected_kind="sch_symbol",
+        )
+        return AltiumExtractedAsset(
+            ref=ref,
+            filename=summaries[index].extraction_filename or f"symbol_{index:03d}.SchLib",
+            schlib=self.extract_symbol(ref),
+        )
 
     def get_summary(self) -> dict[str, object]:
         """

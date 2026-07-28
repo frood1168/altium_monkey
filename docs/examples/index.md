@@ -4,7 +4,7 @@
 
 Public examples are indexed from `examples/manifest.toml`.
 
-Total examples: `105`
+Total examples: `107`
 
 ## Generate
 
@@ -16,11 +16,18 @@ uv run python tools\generate_docs.py
 
 ## By Area
 
+### `asset-extraction`
+
+| Example | Areas | Summary | Tags |
+| --- | --- | --- | --- |
+| [`embedded_asset_inventory`](../../examples/embedded_asset_inventory/README.md)<br>Inventory embedded PCB assets | asset-extraction, pcbdoc, pcblib | Load PcbDoc and PcbLib fixtures, write focused embedded-asset inventories, and extract one selected model/font payload by direct embedded asset index. | inventory, embedded-asset, model, font, opaque, json |
+| [`extractable_asset_inventory`](../../examples/extractable_asset_inventory/README.md)<br>Inventory and extract selected assets | asset-extraction, schdoc, schlib, pcbdoc, pcblib | Load SchDoc, SchLib, PcbDoc, and PcbLib fixtures, write typed extractable-asset inventories, and extract one selected symbol, footprint, and embedded model by AltiumAssetRef. | inventory, extract, asset-ref, symbol, footprint, embedded-model |
+
 ### `design`
 
 | Example | Areas | Summary | Tags |
 | --- | --- | --- | --- |
-| [`hello_altium_design`](../../examples/hello_altium_design/README.md)<br>Load an existing project with AltiumDesign | design, prjpcb, netlist, bom, pnp | Load an existing PrjPcb, print variants and document paths, and write summary, BOM, design JSON, netlist, and wirelist artifacts. | project, design, variants, netlist, bom, pnp |
+| [`hello_altium_design`](../../examples/hello_altium_design/README.md)<br>Load an existing project with AltiumDesign | design, prjpcb, netlist, bom, pnp | Load an existing PrjPcb, print variants and document paths, and write summary, BOM, design JSON, physical-page SVGs, compiled net-name examples, and netlist artifacts. | project, design, compiled-design, physical-pages, svg, variants |
 | [`pcbdoc_pick_n_place`](../../examples/pcbdoc_pick_n_place/README.md)<br>Export pick-and-place data from an Altium project | design, pnp, pcbdoc | Load an existing PrjPcb with AltiumDesign, read the design JSON PNP block, and write all-placement plus no-BOM-filtered JSON files. | project, design, pnp, pick-and-place, no-bom, json |
 
 ### `draftsman`
@@ -245,7 +252,7 @@ uv run python tools\generate_docs.py
 | [`pcblib_split`](../../examples/pcblib_split/README.md)<br>Split a multi-footprint PcbLib | pcblib | Load an existing PcbLib and split it into one PcbLib file per footprint. | library, footprint, split |
 | [`pcblib_find_footprint`](../../examples/pcblib_find_footprint/README.md)<br>Find footprints across PcbLib files | pcblib | Scan a folder of PcbLib files, build a library-to-footprint index, print all discovered footprints, and demonstrate fuzzy footprint search. | library, footprint, search, index, fuzzy-match |
 | [`pcblib_synthesize_power_resistor_lib`](../../examples/pcblib_synthesize_power_resistor_lib/README.md)<br>Synthesize power-resistor PcbLibs with generated STEP models | pcblib, 3d | Generate SQP20 through-hole resistor footprints, synthesize value-specific STEP models with dot-matrix markings, embed the models, and save one PcbLib per part. | generation, library, footprint, through-hole, embedded-model, step |
-| [`hello_altium_design`](../../examples/hello_altium_design/README.md)<br>Load an existing project with AltiumDesign | design, prjpcb, netlist, bom, pnp | Load an existing PrjPcb, print variants and document paths, and write summary, BOM, design JSON, netlist, and wirelist artifacts. | project, design, variants, netlist, bom, pnp |
+| [`hello_altium_design`](../../examples/hello_altium_design/README.md)<br>Load an existing project with AltiumDesign | design, prjpcb, netlist, bom, pnp | Load an existing PrjPcb, print variants and document paths, and write summary, BOM, design JSON, physical-page SVGs, compiled net-name examples, and netlist artifacts. | project, design, compiled-design, physical-pages, svg, variants |
 | [`pcbdoc_pick_n_place`](../../examples/pcbdoc_pick_n_place/README.md)<br>Export pick-and-place data from an Altium project | design, pnp, pcbdoc | Load an existing PrjPcb with AltiumDesign, read the design JSON PNP block, and write all-placement plus no-BOM-filtered JSON files. | project, design, pnp, pick-and-place, no-bom, json |
 | [`schdoc_add_note`](../../examples/schdoc_add_note/README.md)<br>Add a note to an existing SchDoc | schdoc, mutation | Load an existing schematic, create one detached note, add it to the document, and save the modified SchDoc. | schdoc, mutation, note, blank-template |
 | [`schdoc_add_text_frame`](../../examples/schdoc_add_text_frame/README.md)<br>Add text frames to an existing SchDoc | schdoc, mutation | Load a blank schematic, create several detached text frames with different alignments, border widths, and fonts, add them to the document, and save the modified SchDoc. | schdoc, mutation, text-frame, font, geometry |
@@ -272,6 +279,8 @@ uv run python tools\generate_docs.py
 | [`schlib_split`](../../examples/schlib_split/README.md)<br>Split a multi-symbol SchLib | schlib | Load an existing SchLib and split it into one SchLib file per symbol. | schlib, symbol, split |
 | [`schlib_merge`](../../examples/schlib_merge/README.md)<br>Merge SchLib files | schlib | Scan a folder of SchLib files, merge all symbols into one combined SchLib, and write a merge manifest. | schlib, symbol, merge, library |
 | [`intlib_extract_sources`](../../examples/intlib_extract_sources/README.md)<br>Extract source libraries from an IntLib | intlib, schlib, pcblib | Open an Altium integrated library, extract its embedded SchLib and PcbLib source files, and write an extraction manifest. | intlib, library, source-extraction, schlib, pcblib |
+| [`embedded_asset_inventory`](../../examples/embedded_asset_inventory/README.md)<br>Inventory embedded PCB assets | asset-extraction, pcbdoc, pcblib | Load PcbDoc and PcbLib fixtures, write focused embedded-asset inventories, and extract one selected model/font payload by direct embedded asset index. | inventory, embedded-asset, model, font, opaque, json |
+| [`extractable_asset_inventory`](../../examples/extractable_asset_inventory/README.md)<br>Inventory and extract selected assets | asset-extraction, schdoc, schlib, pcbdoc, pcblib | Load SchDoc, SchLib, PcbDoc, and PcbLib fixtures, write typed extractable-asset inventories, and extract one selected symbol, footprint, and embedded model by AltiumAssetRef. | inventory, extract, asset-ref, symbol, footprint, embedded-model |
 | [`schdoc_clean`](../../examples/schdoc_clean/README.md)<br>Clean and normalize project schematics | schdoc, mutation | Open every Hydroscope schematic, iterate through components and sheet-level records, normalize fonts, colors, fills, and line widths, and save cleaned SchDoc copies. | schdoc, mutation, clean, normalize, project |
 | [`schdoc_svg`](../../examples/schdoc_svg/README.md)<br>Render project schematics to SVG | schdoc, svg, prjpcb | Open the Hydroscope PrjPcb, pass project parameters into the schematic SVG renderer, and write one SVG per schematic page. | schdoc, svg, rendering, project, parameters |
 | [`schlib_svg`](../../examples/schlib_svg/README.md)<br>Extract and render SchLib symbols to SVG | schdoc, schlib, svg | Extract a combined SchLib from the RT Super C1 schematic, iterate every symbol and symbol part, render each part to SVG, and write a manifest of generated symbol artwork. | schdoc, schlib, svg, rendering, symbol-extraction, multipart |
