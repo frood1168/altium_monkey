@@ -5613,9 +5613,12 @@ class AltiumSchDoc(JsonApplyMixin):
         Returns:
             Set of (x, y) tuples in Altium coordinates where junctions render
         """
+        from collections.abc import Iterable
         from collections import Counter
 
-        def object_points_signature(objects: object) -> tuple[tuple[tuple[int, int], ...], ...]:
+        def object_points_signature(
+            objects: Iterable[object],
+        ) -> tuple[tuple[tuple[int, int], ...], ...]:
             return tuple(
                 tuple((int(point.x), int(point.y)) for point in getattr(obj, "points", ()))
                 for obj in objects

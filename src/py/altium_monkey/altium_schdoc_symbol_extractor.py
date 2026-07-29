@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from collections import defaultdict
 from copy import copy
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING, TypeGuard, cast
 
 from .altium_font_manager import FontIDManager
 from .altium_record_sch__component import AltiumSchComponent
@@ -144,10 +144,11 @@ def write_extracted_symbols(
 
     successful = sum(1 for value in results.values() if value)
     if combined_schlib:
-        if getattr(schdoc, "filepath", None) is None:
+        schdoc_filepath = getattr(schdoc, "filepath", None)
+        if schdoc_filepath is None:
             combined_name = "extracted.SchLib"
         else:
-            combined_name = Path(schdoc.filepath).stem + ".SchLib"
+            combined_name = Path(schdoc_filepath).stem + ".SchLib"
         combined_path = output_dir / combined_name
 
         if successful == 0:
@@ -521,14 +522,16 @@ def _bounded_extraction_clone(obj: object) -> object:
         setattr(cloned, "_raw_record", dict(raw_record))
 
     record_view = getattr(obj, "_record", None)
-    if hasattr(record_view, "copy"):
-        setattr(cloned, "_record", record_view.copy())
+    record_copy = getattr(record_view, "copy", None)
+    if callable(record_copy):
+        setattr(cloned, "_record", record_copy())
 
     return cloned
 
 
 def _orientation_to_int(value: object) -> int:
-    return int(value.value) if hasattr(value, "value") else int(value)
+    raw_value = getattr(value, "value", value)
+    return int(cast(int | float | str, raw_value))
 
 
 def _component_transform_params(
@@ -604,8 +607,9 @@ def _transform_pin_like_orientation(
     else:
         setattr(obj, "orientation", new_orient)
 
-    if hasattr(obj, "pin_conglomerate"):
-        obj.pin_conglomerate = (obj.pin_conglomerate & ~0x03) | new_orient
+    pin_conglomerate = getattr(obj, "pin_conglomerate", None)
+    if isinstance(pin_conglomerate, int):
+        setattr(obj, "pin_conglomerate", (pin_conglomerate & ~0x03) | new_orient)
 
 
 def _transform_child_to_symbol_space(
@@ -617,42 +621,58 @@ def _transform_child_to_symbol_space(
 
     location = getattr(result, "location", None)
     if isinstance(location, CoordPoint):
-        result.location = _transform_coord_point_to_symbol_space(
-            location,
-            comp_x,
-            comp_y,
-            orient,
-            mirror,
+        setattr(
+            result,
+            "location",
+            _transform_coord_point_to_symbol_space(
+                location,
+                comp_x,
+                comp_y,
+                orient,
+                mirror,
+            ),
         )
 
     corner = getattr(result, "corner", None)
     if isinstance(corner, CoordPoint):
-        result.corner = _transform_coord_point_to_symbol_space(
-            corner,
-            comp_x,
-            comp_y,
-            orient,
-            mirror,
+        setattr(
+            result,
+            "corner",
+            _transform_coord_point_to_symbol_space(
+                corner,
+                comp_x,
+                comp_y,
+                orient,
+                mirror,
+            ),
         )
 
     vertices = getattr(result, "vertices", None)
     if vertices:
-        result.vertices = _transform_coord_list_to_symbol_space(
-            vertices,
-            comp_x,
-            comp_y,
-            orient,
-            mirror,
+        setattr(
+            result,
+            "vertices",
+            _transform_coord_list_to_symbol_space(
+                vertices,
+                comp_x,
+                comp_y,
+                orient,
+                mirror,
+            ),
         )
 
     points = getattr(result, "points", None)
     if points:
-        result.points = _transform_coord_list_to_symbol_space(
-            points,
-            comp_x,
-            comp_y,
-            orient,
-            mirror,
+        setattr(
+            result,
+            "points",
+            _transform_coord_list_to_symbol_space(
+                points,
+                comp_x,
+                comp_y,
+                orient,
+                mirror,
+            ),
         )
 
     _transform_pin_like_orientation(result, orient, mirror)
@@ -738,10 +758,10 @@ def _transform_designator_for_symbol(
     designator: AltiumSchDesignator,
     template: AltiumSchComponent,
 ) -> AltiumSchDesignator:
-    transformed = _transform_child_to_symbol_space(designator, template)
+    transformed = cast(AltiumSchDesignator, _transform_child_to_symbol_space(designator, template))
     _clear_extracted_record_state(transformed)
     if hasattr(transformed, "text"):
-        transformed.text = _library_designator_text(getattr(designator, "text", ""))
+        setattr(transformed, "text", _library_designator_text(getattr(designator, "text", "")))
     return transformed
 
 
@@ -808,9 +828,12 @@ def _add_implementations(
         for implementation in getattr(impl_list, "children", []):
             if not isinstance(implementation, AltiumSchImplementation):
                 continue
-            cloned_implementation = _bounded_extraction_clone(implementation)
+            cloned_implementation = cast(
+                AltiumSchImplementation,
+                _bounded_extraction_clone(implementation),
+            )
             _clear_extracted_record_state(cloned_implementation)
-            cloned_implementation.children = []
+            setattr(cloned_implementation, "children", [])
             children = [
                 _clone_implementation_child(child)
                 for child in getattr(implementation, "children", [])

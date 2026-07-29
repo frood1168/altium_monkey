@@ -523,6 +523,137 @@ def _find_default_outjob_for_project(project_path: Path) -> Path:
     )
 
 
+def _resolve_run_bound_pcbdoc(
+    project: Path,
+    *,
+    bind_pcbdoc_path: Path | str | None,
+    auto_bind_pcbdoc: bool,
+) -> Path | None:
+    if bind_pcbdoc_path is None and auto_bind_pcbdoc:
+        return _find_project_pcbdoc(project)
+    if bind_pcbdoc_path is None:
+        return None
+    bound_pcbdoc = Path(bind_pcbdoc_path).resolve()
+    if not bound_pcbdoc.is_file():
+        raise FileNotFoundError(f"Bind .PcbDoc not found: {bound_pcbdoc}")
+    return bound_pcbdoc
+
+
+def _ensure_no_existing_x2_for_kill_after_run() -> None:
+    existing_x2 = AltiumLauncher.running_x2_processes()
+    if not existing_x2:
+        return
+    process_list = ", ".join(
+        f"{process.pid}:{process.executable or '<unknown>'}"
+        for process in existing_x2
+    )
+    raise RuntimeError(
+        "kill_after_run requires no pre-existing X2.exe processes because "
+        f"cleanup kills all X2.exe instances: {process_list}"
+    )
+
+
+def _outjob_run_script_dir(
+    project: Path,
+    script_directory: Path | str | None,
+) -> Path:
+    script_dir = project.parent if script_directory is None else Path(script_directory).resolve()
+    script_dir.mkdir(parents=True, exist_ok=True)
+    return script_dir
+
+
+def _stage_working_outjob(
+    outjob: Path,
+    *,
+    stage_outjob_copy: bool,
+) -> tuple[Path, Path | None]:
+    if not stage_outjob_copy:
+        return outjob, None
+    with tempfile.NamedTemporaryFile(
+        prefix=".__outjob_run_",
+        suffix=".OutJob",
+        dir=str(outjob.parent),
+        delete=False,
+    ) as staged_file:
+        staged_outjob = Path(staged_file.name)
+    shutil.copy2(outjob, staged_outjob)
+    return staged_outjob, staged_outjob
+
+
+def _outjob_runner_artifact_paths(
+    tmp_dir: Path,
+    unit_name: str,
+) -> tuple[Path, Path, Path, Path]:
+    return (
+        tmp_dir / f"{unit_name}.pas",
+        tmp_dir / f"{unit_name}.PrjScr",
+        tmp_dir / f"{unit_name}.done",
+        tmp_dir / f"{unit_name}.log",
+    )
+
+
+def _write_outjob_runner_artifacts(
+    *,
+    pas_path: Path,
+    prjscr_path: Path,
+    project: Path,
+    working_outjob: Path,
+    marker_path: Path,
+    run_log_path: Path,
+) -> None:
+    pas_path.write_text(
+        _render_outjob_runner_pas(
+            project_path=project,
+            outjob_path=working_outjob,
+            script_project_path=prjscr_path,
+            marker_path=marker_path,
+            log_path=run_log_path,
+        ),
+        encoding="utf-8",
+    )
+    AltiumPrjScr.create(pas_path.name).save(prjscr_path)
+
+
+def _clear_outjob_run_artifacts(*paths: Path) -> None:
+    for path in paths:
+        if path.exists():
+            path.unlink()
+
+
+def _wait_for_outjob_marker(
+    marker_path: Path,
+    *,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> tuple[str, int, bool]:
+    marker_text = ""
+    error_count = -1
+    timed_out = True
+    start = time.time()
+    while (time.time() - start) < timeout_seconds:
+        if marker_path.exists():
+            time.sleep(0.1)
+            marker_text = marker_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).strip()
+            if marker_text.startswith(_DONE_PREFIX):
+                try:
+                    error_count = int(marker_text[len(_DONE_PREFIX) :])
+                except ValueError:
+                    error_count = -1
+            timed_out = False
+            break
+        time.sleep(poll_interval_seconds)
+    return marker_text, error_count, timed_out
+
+
+def _read_outjob_run_log(run_log_path: Path) -> str:
+    if not run_log_path.exists():
+        return ""
+    return run_log_path.read_text(encoding="utf-8", errors="replace")
+
+
 class AltiumOutJobRunner:
     """
     Runner for Altium OutJobs.
@@ -601,14 +732,11 @@ class AltiumOutJobRunner:
         if not outjob.is_file():
             raise FileNotFoundError(f"OutJob not found: {outjob}")
 
-        if bind_pcbdoc_path is None and auto_bind_pcbdoc:
-            bound_pcbdoc = _find_project_pcbdoc(project)
-        elif bind_pcbdoc_path is not None:
-            bound_pcbdoc = Path(bind_pcbdoc_path).resolve()
-            if not bound_pcbdoc.is_file():
-                raise FileNotFoundError(f"Bind .PcbDoc not found: {bound_pcbdoc}")
-        else:
-            bound_pcbdoc = None
+        bound_pcbdoc = _resolve_run_bound_pcbdoc(
+            project,
+            bind_pcbdoc_path=bind_pcbdoc_path,
+            auto_bind_pcbdoc=auto_bind_pcbdoc,
+        )
         staged_outjob: Path | None = None
         pas_path: Path | None = None
         prjscr_path: Path | None = None
@@ -616,37 +744,17 @@ class AltiumOutJobRunner:
         run_log_path: Path | None = None
         try:
             if kill_after_run:
-                existing_x2 = AltiumLauncher.running_x2_processes()
-                if existing_x2:
-                    process_list = ", ".join(
-                        f"{process.pid}:{process.executable or '<unknown>'}"
-                        for process in existing_x2
-                    )
-                    raise RuntimeError(
-                        "kill_after_run requires no pre-existing X2.exe "
-                        f"processes because cleanup kills all X2.exe instances: {process_list}"
-                    )
+                _ensure_no_existing_x2_for_kill_after_run()
 
-            if script_directory is None:
-                script_dir = project.parent
-            else:
-                script_dir = Path(script_directory).resolve()
-            script_dir.mkdir(parents=True, exist_ok=True)
+            script_dir = _outjob_run_script_dir(project, script_directory)
 
             # Keep all transient execution files in one directory to avoid
             # path-resolution differences in Altium when running scripts.
             tmp_dir = script_dir
-            working_outjob = outjob
-            if stage_outjob_copy:
-                with tempfile.NamedTemporaryFile(
-                    prefix=".__outjob_run_",
-                    suffix=".OutJob",
-                    dir=str(outjob.parent),
-                    delete=False,
-                ) as staged_file:
-                    staged_outjob = Path(staged_file.name)
-                shutil.copy2(outjob, staged_outjob)
-                working_outjob = staged_outjob
+            working_outjob, staged_outjob = _stage_working_outjob(
+                outjob,
+                stage_outjob_copy=stage_outjob_copy,
+            )
 
             normalization = normalize_outjob_generated_paths(
                 working_outjob,
@@ -657,27 +765,19 @@ class AltiumOutJobRunner:
             )
 
             unit_name = "run_outjob"
-            pas_path = tmp_dir / f"{unit_name}.pas"
-            prjscr_path = tmp_dir / f"{unit_name}.PrjScr"
-            marker_path = tmp_dir / f"{unit_name}.done"
-            run_log_path = tmp_dir / f"{unit_name}.log"
-
-            pas_path.write_text(
-                _render_outjob_runner_pas(
-                    project_path=project,
-                    outjob_path=working_outjob,
-                    script_project_path=prjscr_path,
-                    marker_path=marker_path,
-                    log_path=run_log_path,
-                ),
-                encoding="utf-8",
+            pas_path, prjscr_path, marker_path, run_log_path = (
+                _outjob_runner_artifact_paths(tmp_dir, unit_name)
             )
-            AltiumPrjScr.create(pas_path.name).save(prjscr_path)
+            _write_outjob_runner_artifacts(
+                pas_path=pas_path,
+                prjscr_path=prjscr_path,
+                project=project,
+                working_outjob=working_outjob,
+                marker_path=marker_path,
+                run_log_path=run_log_path,
+            )
 
-            if marker_path.exists():
-                marker_path.unlink()
-            if run_log_path.exists():
-                run_log_path.unlink()
+            _clear_outjob_run_artifacts(marker_path, run_log_path)
 
             launcher = AltiumLauncher(
                 altium_path=self._altium_path,
@@ -686,28 +786,12 @@ class AltiumOutJobRunner:
             try:
                 launch_code = launcher.run_script(prjscr_path, unit_name, "Run")
 
-                marker_text = ""
-                error_count = -1
-                timed_out = True
-                start = time.time()
-                while (time.time() - start) < timeout_seconds:
-                    if marker_path.exists():
-                        time.sleep(0.1)
-                        marker_text = marker_path.read_text(
-                            encoding="utf-8", errors="replace"
-                        ).strip()
-                        if marker_text.startswith(_DONE_PREFIX):
-                            try:
-                                error_count = int(marker_text[len(_DONE_PREFIX) :])
-                            except ValueError:
-                                error_count = -1
-                        timed_out = False
-                        break
-                    time.sleep(poll_interval_seconds)
-
-                log_text = ""
-                if run_log_path.exists():
-                    log_text = run_log_path.read_text(encoding="utf-8", errors="replace")
+                marker_text, error_count, timed_out = _wait_for_outjob_marker(
+                    marker_path,
+                    timeout_seconds=timeout_seconds,
+                    poll_interval_seconds=poll_interval_seconds,
+                )
+                log_text = _read_outjob_run_log(run_log_path)
             finally:
                 if kill_after_run:
                     launcher.kill()

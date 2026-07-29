@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, cast
 
 from .altium_compiled_design_model import (
     AltiumCompiledDesign,
     AltiumCompiledNet,
     AltiumCompiledNetEndpoint,
     AltiumCompiledNetTerminal,
+    AltiumCompiledPhysicalDocument,
 )
 from .altium_netlist_multi_sheet_support import (
     _build_port_location_map,
     find_harness_bundle_info,
+)
+from .altium_netlist_common import (
+    _component_part_alpha_suffix,
+    _sheet_entry_display_name as _entry_display_name,
+    _unique_nonempty_strings as _unique_nonempty,
 )
 from .altium_netlist_model import (
     GraphicalPinRef,
@@ -26,19 +34,10 @@ from .altium_netlist_model import (
     Terminal,
 )
 
+if TYPE_CHECKING:
+    from .altium_schdoc import AltiumSchDoc
+
 SCHEMATIC_HIERARCHY_SCHEMA = "altium_monkey.schematic_hierarchy.a1"
-
-
-def _component_part_alpha_suffix(*, part_count: int, current_part_id: int) -> str:
-    if part_count <= 1 or current_part_id <= 0:
-        return ""
-    index = current_part_id
-    letters = ""
-    while index > 0:
-        index -= 1
-        letters = chr(ord("A") + (index % 26)) + letters
-        index //= 26
-    return letters
 
 
 def _legacy_terminal_designator_map(
@@ -180,18 +179,6 @@ def _compiled_graphical(
             append_unique(graphical.sheet_entries, element_id)
     return graphical
 
-
-def _unique_nonempty(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        clean = str(value or "").strip()
-        if clean and clean not in seen:
-            seen.add(clean)
-            result.append(clean)
-    return result
-
-
 def _compiled_net_aliases(compiled_net: AltiumCompiledNet) -> list[str]:
     aliases = list(compiled_net.aliases)
     for endpoint in compiled_net.endpoints:
@@ -281,18 +268,6 @@ def _sheet_entry_graphical_id(sheet_symbol_uid: str, entry_name: str) -> str:
         return entry_name
     return f"{sheet_symbol_uid}_{entry_name}"
 
-
-def _unique_nonempty(values: list[str] | tuple[str, ...]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        clean = str(value or "").strip()
-        if clean and clean not in seen:
-            seen.add(clean)
-            result.append(clean)
-    return result
-
-
 def _parse_sheet_symbol_repeat(designator: str) -> dict[str, object]:
     repeat: dict[str, object] = {
         "is_repeated": False,
@@ -328,15 +303,15 @@ def _parse_entry_repeat_name(entry_name: str) -> str:
 
 def _source_schdoc_by_logical_id(
     compiled: AltiumCompiledDesign,
-    schdocs: list[object] | tuple[object, ...] | None,
-) -> dict[str, object]:
+    schdocs: Sequence["AltiumSchDoc"] | None,
+) -> dict[str, "AltiumSchDoc"]:
     if not schdocs:
         return {}
-    result: dict[str, object] = {}
+    result: dict[str, AltiumSchDoc | None] = {}
     for logical in compiled.logical_documents:
         if 0 <= logical.ordinal < len(schdocs):
             result[logical.id] = schdocs[logical.ordinal]
-    file_name_map: dict[str, object] = {}
+    file_name_map: dict[str, AltiumSchDoc] = {}
     for schdoc in schdocs:
         filepath = getattr(schdoc, "filepath", None)
         file_name = getattr(filepath, "name", "") if filepath else ""
@@ -357,20 +332,11 @@ def _source_sheet_symbol_for(
     get_sheet_symbols = getattr(schdoc, "get_sheet_symbols", None)
     if not callable(get_sheet_symbols):
         return None
-    for symbol in get_sheet_symbols():
+    for symbol in cast(Iterable[object], get_sheet_symbols()):
         unique_id = str(getattr(symbol, "unique_id", "") or "")
         if unique_id in {source_object_id, symbol_id}:
             return symbol
     return None
-
-
-def _entry_display_name(entry: object) -> str:
-    return str(
-        getattr(entry, "display_name", "")
-        or getattr(entry, "name", "")
-        or ""
-    )
-
 
 def _build_compiled_hierarchy_documents(compiled: AltiumCompiledDesign) -> list[dict]:
     return [
@@ -387,7 +353,7 @@ def _build_compiled_hierarchy_documents(compiled: AltiumCompiledDesign) -> list[
 
 def _build_compiled_hierarchy_sheet_symbols(
     compiled: AltiumCompiledDesign,
-    schdocs: list[object] | tuple[object, ...] | None,
+    schdocs: Sequence["AltiumSchDoc"] | None,
 ) -> list[dict]:
     logical_by_id = {document.id: document for document in compiled.logical_documents}
     schdoc_by_logical_id = _source_schdoc_by_logical_id(compiled, schdocs)
@@ -648,7 +614,7 @@ def _build_compiled_channels(
 def _document_pair_for_link_net(
     compiled: AltiumCompiledDesign,
     net: AltiumCompiledNet,
-) -> tuple[object | None, object | None]:
+) -> tuple[AltiumCompiledPhysicalDocument | None, AltiumCompiledPhysicalDocument | None]:
     physical_by_id = {document.id: document for document in compiled.physical_documents}
     candidates = [physical_by_id[doc_id] for doc_id in net.physical_document_ids if doc_id in physical_by_id]
     for document in candidates:
@@ -766,10 +732,10 @@ def _build_compiled_hierarchy_links(
 
 def _build_harness_bundle_endpoint_map(
     compiled: AltiumCompiledDesign,
-    schdocs: list[object] | tuple[object, ...] | None,
+    schdocs: Sequence["AltiumSchDoc"] | None,
 ) -> dict[str, list[dict]]:
     schdoc_by_logical_id = _source_schdoc_by_logical_id(compiled, schdocs)
-    first_physical_by_logical_id: dict[str, object] = {}
+    first_physical_by_logical_id = {}
     for document in sorted(compiled.physical_documents, key=lambda item: item.ordinal):
         first_physical_by_logical_id.setdefault(document.logical_document_id, document)
     logical_by_id = {document.id: document for document in compiled.logical_documents}
@@ -827,7 +793,7 @@ def _build_harness_bundle_endpoint_map(
 
 def _build_compiled_harness_bundle_links(
     compiled: AltiumCompiledDesign,
-    schdocs: list[object] | tuple[object, ...] | None,
+    schdocs: Sequence["AltiumSchDoc"] | None,
     hierarchy_links: list[dict],
 ) -> list[dict]:
     endpoints_by_name = _build_harness_bundle_endpoint_map(compiled, schdocs)
@@ -977,7 +943,7 @@ def _build_compiled_harness_bundle_links(
 
 def _build_compiled_hierarchy_unresolved(
     compiled: AltiumCompiledDesign,
-    schdocs: list[object] | tuple[object, ...] | None,
+    schdocs: Sequence["AltiumSchDoc"] | None,
     hierarchy_links: list[dict],
 ) -> list[dict]:
     if compiled.options.effective_hierarchy_mode not in {
@@ -1060,7 +1026,7 @@ def _build_compiled_hierarchy_unresolved(
 
 def compiled_design_schematic_hierarchy(
     compiled: AltiumCompiledDesign,
-    schdocs: list[object] | tuple[object, ...] | None = None,
+    schdocs: Sequence["AltiumSchDoc"] | None = None,
 ) -> dict:
     """Build public design-JSON schematic hierarchy metadata from compiled rows."""
     hierarchy_paths, path_id_by_physical_id = _build_compiled_hierarchy_paths(compiled)

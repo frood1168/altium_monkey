@@ -248,8 +248,10 @@ def _basic_entry_distance_to_rounded_native_units(
     """
     if not isinstance(value, (int, float, str)):
         frac1 = getattr(value, "distance_from_top_frac1", frac1)
-        value = getattr(value, "distance_from_top")
-    numerator = int(value) * 1_000_000 + int(frac1)
+        value = getattr(value, "distance_from_top", 0)
+    value_scalar = value if isinstance(value, (int, float, str)) else 0
+    frac_scalar = frac1 if isinstance(frac1, (int, float, str)) else 0
+    numerator = int(value_scalar) * 1_000_000 + int(frac_scalar)
     magnitude = (abs(numerator) + 50_000) // 100_000
     return int(magnitude if numerator >= 0 else -magnitude)
 

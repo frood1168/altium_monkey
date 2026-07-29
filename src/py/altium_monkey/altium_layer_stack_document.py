@@ -24,6 +24,7 @@ from .altium_pcb_stream_helpers import (
 )
 from .altium_pcb_stream_helpers import parse_altium_int_token as _parse_int_token
 from .altium_record_types import PcbLayer
+from .altium_text_helpers import normalized_object_text as _text
 
 if TYPE_CHECKING:
     from .altium_pcbdoc_builder import (
@@ -169,10 +170,6 @@ def is_layer_stack_source_entry_key(key: str | None) -> bool:
     Return true for Board6/Data entries owned by the layer-stack source model.
     """
     return bool(key and _STACK_ENTRY_KEY_RE.match(str(key)))
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
 
 
 def _normalized_rigid_flex_mode(value: object) -> str:

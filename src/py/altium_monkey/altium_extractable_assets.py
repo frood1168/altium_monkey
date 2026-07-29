@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Literal, Mapping, TypeAlias
+from typing import Literal, Mapping, TypeAlias, cast
 
 from .altium_api_markers import public_api
 from .altium_embedded_assets import EmbeddedAssetInventory, EmbeddedAssetReference
+from .altium_json_helpers import json_ready as _json_ready
 
 _EXTRACTABLE_ASSET_SCHEMA = "altium_monkey.extractable_assets.a0"
 
@@ -152,7 +153,7 @@ class AltiumAssetInventory:
 
     def to_dict(self, *, include_schema: bool = True) -> dict[str, object]:
         """Return the stable downstream JSON-ready inventory shape."""
-        data = _json_ready(asdict(self))
+        data = cast(dict[str, object], _json_ready(asdict(self)))
         if include_schema:
             return {"schema": _EXTRACTABLE_ASSET_SCHEMA, **data}
         return data
@@ -173,16 +174,6 @@ class AltiumExtractedAsset:
 def extractable_asset_schema_id() -> str:
     """Return the current extractable asset inventory JSON schema id."""
     return _EXTRACTABLE_ASSET_SCHEMA
-
-
-def _json_ready(value: object) -> object:
-    if isinstance(value, tuple):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, list):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _json_ready(item) for key, item in value.items()}
-    return value
 
 
 def asset_key(kind: AssetKind, index: int) -> str:
@@ -393,9 +384,9 @@ def embedded_inventory_asset_summaries(
                 payload_available=opaque.payload_available,
                 payload_sha256=opaque.payload_sha256,
                 details=OpaqueEmbeddedAssetDetails(
-                    raw_size=opaque.raw_size,
+                    raw_size=opaque.raw_size or 0,
                     support_status=opaque.support_status,
-                    reason=opaque.reason,
+                    reason=opaque.reason or "",
                 ),
             )
         )

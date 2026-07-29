@@ -1,9 +1,9 @@
-# altium-monkey 2026.07.26 Release Notes
+# altium-monkey 2026.07.29 Release Notes
 
-Package version: `2026.7.26`
+Package version: `2026.7.29`
 
-`2026.07.26` is represented in Python package metadata as the PEP 440
-canonical form `2026.7.26`.
+`2026.07.29` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.29`.
 
 This release promotes the project-level schematic compiler to the default
 project netlisting and design-JSON path. It adds a new `design.a2` JSON

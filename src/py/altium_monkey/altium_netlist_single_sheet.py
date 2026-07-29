@@ -739,7 +739,12 @@ class AltiumNetlistSingleSheetCompiler:
         pin_groups: dict[tuple[int, int], list],
         net_names: dict[tuple[int, int], str],
         name_to_root: dict[str, tuple[int, int]],
-    ) -> tuple[dict, dict, set, dict]:
+    ) -> tuple[
+        dict[str, list[tuple[int, int]]],
+        dict[tuple[int, int], list[str]],
+        dict[str, list[str]],
+        dict[tuple[int, int], list[str]],
+    ]:
         """
         Priority 1: Process net labels - find roots, merge same-named, assign names.
 

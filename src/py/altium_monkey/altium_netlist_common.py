@@ -49,6 +49,37 @@ def _altium_net_total_sort_key(s: str) -> tuple[list, str]:
     return (_altium_net_sort_key(s), s)
 
 
+def _component_part_alpha_suffix(*, part_count: int, current_part_id: int) -> str:
+    if part_count <= 1 or current_part_id <= 0:
+        return ""
+    index = current_part_id
+    letters = ""
+    while index > 0:
+        index -= 1
+        letters = chr(ord("A") + (index % 26)) + letters
+        index //= 26
+    return letters
+
+
+def _sheet_entry_display_name(entry: object) -> str:
+    return str(
+        getattr(entry, "display_name", "")
+        or getattr(entry, "name", "")
+        or ""
+    )
+
+
+def _unique_nonempty_strings(values: list[str] | tuple[str, ...]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
+    return result
+
+
 CHAR_REPLACEMENTS = {
     "Ω": "O",
 }

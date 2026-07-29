@@ -7,7 +7,7 @@ composition so record-level to_svg() implementations can plug in incrementally.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 import hashlib
 import html
@@ -18,7 +18,7 @@ import math
 import re
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .altium_board import resolve_outline_arc_segment
 from .altium_pcb_drill_rendering import should_render_via_drill_hole
@@ -2528,6 +2528,107 @@ class PcbSvgRenderer:
         )
         return layer_color, base_primitives, drill_primitives, overlay_primitives
 
+    def _layer_group_attrs_from_primitives(
+        self,
+        ctx: PcbSvgRenderContext,
+        layer: PcbLayer,
+        *,
+        layer_color: str,
+        total_primitive_count: int,
+        clip_path_id: str | None,
+        mask_id: str | None,
+        split_drill_overlay: bool,
+    ) -> list[str]:
+        attrs = [
+            f'id="layer-{html.escape(layer.to_json_name())}"',
+        ]
+        if clip_path_id and not split_drill_overlay:
+            attrs.append(f'clip-path="url(#{html.escape(clip_path_id)})"')
+        if mask_id and not split_drill_overlay:
+            attrs.append(f'mask="url(#{html.escape(mask_id)})"')
+        if self.options.include_metadata:
+            attrs.extend(ctx.layer_metadata_attrs(layer.value))
+            attrs.extend(
+                [
+                    f'data-color="{html.escape(layer_color)}"',
+                    f'data-primitive-count="{total_primitive_count}"',
+                ]
+            )
+        return attrs
+
+    @staticmethod
+    def _clip_mask_group_attrs(
+        *,
+        clip_path_id: str | None,
+        mask_id: str | None = None,
+    ) -> list[str]:
+        attrs: list[str] = []
+        if clip_path_id:
+            attrs.append(f'clip-path="url(#{html.escape(clip_path_id)})"')
+        if mask_id:
+            attrs.append(f'mask="url(#{html.escape(mask_id)})"')
+        return attrs
+
+    @staticmethod
+    def _append_nested_layer_primitives(
+        lines: list[str],
+        primitives: list[str] | tuple[str, ...],
+        group_attrs: list[str],
+        *,
+        emit_empty_group: bool = False,
+    ) -> None:
+        if not primitives and not (group_attrs and emit_empty_group):
+            return
+        if group_attrs:
+            lines.append(f"      <g {' '.join(group_attrs)}>")
+        prefix = "        " if group_attrs else "      "
+        for primitive in primitives:
+            lines.append(f"{prefix}{primitive}")
+        if group_attrs:
+            lines.append("      </g>")
+
+    def _append_split_drill_overlay_primitives(
+        self,
+        lines: list[str],
+        *,
+        base_primitives: list[str] | tuple[str, ...],
+        drill_primitives: list[str] | tuple[str, ...],
+        overlay_primitives: list[str] | tuple[str, ...],
+        clip_path_id: str | None,
+        mask_id: str | None,
+    ) -> None:
+        base_group_attrs = self._clip_mask_group_attrs(
+            clip_path_id=clip_path_id,
+            mask_id=mask_id,
+        )
+        self._append_nested_layer_primitives(
+            lines,
+            base_primitives,
+            base_group_attrs,
+            emit_empty_group=True,
+        )
+        overlay_group_attrs = self._clip_mask_group_attrs(clip_path_id=clip_path_id)
+        self._append_nested_layer_primitives(
+            lines,
+            drill_primitives,
+            overlay_group_attrs,
+            emit_empty_group=True,
+        )
+        self._append_nested_layer_primitives(
+            lines,
+            overlay_primitives,
+            overlay_group_attrs,
+        )
+
+    @staticmethod
+    def _append_unsplit_layer_primitives(
+        lines: list[str],
+        *primitive_groups: list[str] | tuple[str, ...],
+    ) -> None:
+        for primitives in primitive_groups:
+            for primitive in primitives:
+                lines.append(f"      {primitive}")
+
     def _render_layer_group_from_primitives(
         self,
         ctx: PcbSvgRenderContext,
@@ -2540,9 +2641,6 @@ class PcbSvgRenderer:
         clip_path_id: str | None = None,
         mask_id: str | None = None,
     ) -> list[str]:
-        layer_name = layer.to_json_name()
-        include_meta = self.options.include_metadata
-
         drill_mode = (self.options.drill_hole_mode or "knockout").strip().lower()
         split_drill_overlay = (
             bool(mask_id)
@@ -2556,78 +2654,32 @@ class PcbSvgRenderer:
         if total_primitive_count == 0 and not self.options.show_empty_layers:
             return []
 
-        attrs = [
-            f'id="layer-{html.escape(layer_name)}"',
-        ]
-        if clip_path_id and not split_drill_overlay:
-            attrs.append(f'clip-path="url(#{html.escape(clip_path_id)})"')
-        if mask_id and not split_drill_overlay:
-            attrs.append(f'mask="url(#{html.escape(mask_id)})"')
-        if include_meta:
-            attrs.extend(ctx.layer_metadata_attrs(layer.value))
-            attrs.extend(
-                [
-                    f'data-color="{html.escape(layer_color)}"',
-                    f'data-primitive-count="{total_primitive_count}"',
-                ]
-            )
-
+        attrs = self._layer_group_attrs_from_primitives(
+            ctx,
+            layer,
+            layer_color=layer_color,
+            total_primitive_count=total_primitive_count,
+            clip_path_id=clip_path_id,
+            mask_id=mask_id,
+            split_drill_overlay=split_drill_overlay,
+        )
         lines = [f"    <g {' '.join(attrs)}>"]
         if split_drill_overlay:
-            base_group_attrs: list[str] = []
-            if clip_path_id:
-                base_group_attrs.append(
-                    f'clip-path="url(#{html.escape(clip_path_id)})"'
-                )
-            if mask_id:
-                base_group_attrs.append(f'mask="url(#{html.escape(mask_id)})"')
-            if base_group_attrs:
-                lines.append(f"      <g {' '.join(base_group_attrs)}>")
-            for primitive in base_primitives:
-                lines.append(
-                    f"        {primitive}" if base_group_attrs else f"      {primitive}"
-                )
-            if base_group_attrs:
-                lines.append("      </g>")
-
-            overlay_group_attrs: list[str] = []
-            if clip_path_id:
-                overlay_group_attrs.append(
-                    f'clip-path="url(#{html.escape(clip_path_id)})"'
-                )
-            if overlay_group_attrs:
-                lines.append(f"      <g {' '.join(overlay_group_attrs)}>")
-            for primitive in drill_primitives:
-                lines.append(
-                    f"        {primitive}"
-                    if overlay_group_attrs
-                    else f"      {primitive}"
-                )
-            if overlay_group_attrs:
-                lines.append("      </g>")
-            if overlay_primitives:
-                label_group_attrs: list[str] = []
-                if clip_path_id:
-                    label_group_attrs.append(
-                        f'clip-path="url(#{html.escape(clip_path_id)})"'
-                    )
-                if label_group_attrs:
-                    lines.append(f"      <g {' '.join(label_group_attrs)}>")
-                for primitive in overlay_primitives:
-                    lines.append(
-                        f"        {primitive}"
-                        if label_group_attrs
-                        else f"      {primitive}"
-                    )
-                if label_group_attrs:
-                    lines.append("      </g>")
+            self._append_split_drill_overlay_primitives(
+                lines,
+                base_primitives=base_primitives,
+                drill_primitives=drill_primitives,
+                overlay_primitives=overlay_primitives,
+                clip_path_id=clip_path_id,
+                mask_id=mask_id,
+            )
         else:
-            for primitive in base_primitives:
-                lines.append(f"      {primitive}")
-            for primitive in drill_primitives:
-                lines.append(f"      {primitive}")
-            for primitive in overlay_primitives:
-                lines.append(f"      {primitive}")
+            self._append_unsplit_layer_primitives(
+                lines,
+                base_primitives,
+                drill_primitives,
+                overlay_primitives,
+            )
         lines.append("    </g>")
         return lines
 
@@ -2836,27 +2888,32 @@ class PcbSvgRenderer:
         if not self._pad_designator_should_render_on_layer(pad, layer):
             return None
 
-        source_layer = pad._source_layer()  # noqa: SLF001
-        geometry = pad._pad_svg_geometry_state(  # noqa: SLF001
+        source_layer_fn = getattr(pad, "_source_layer", None)
+        geometry_fn = getattr(pad, "_pad_svg_geometry_state", None)
+        if not callable(source_layer_fn) or not callable(geometry_fn):
+            return None
+        source_layer = source_layer_fn()
+        geometry = geometry_fn(
             ctx,
             layer=layer,
             source_layer=source_layer,
         )
         if geometry is None:
             return None
+        geometry_map = cast(Mapping[str, object], geometry)
 
         font_size = self._pad_designator_font_size_mm(
             label,
-            width_mm=float(geometry["width_mm"]),
-            height_mm=float(geometry["height_mm"]),
+            width_mm=float(cast(int | float | str, geometry_map["width_mm"])),
+            height_mm=float(cast(int | float | str, geometry_map["height_mm"])),
         )
         if font_size is None:
             return None
 
         attrs = [
             'class="pcb-pad-designator-label"',
-            f'x="{ctx.fmt(float(geometry["cx"]))}"',
-            f'y="{ctx.fmt(float(geometry["cy"]))}"',
+            f'x="{ctx.fmt(float(cast(int | float | str, geometry_map["cx"])))}"',
+            f'y="{ctx.fmt(float(cast(int | float | str, geometry_map["cy"])))}"',
             f'font-family="{html.escape(self.options.pad_designator_font_family)}"',
             f'font-size="{ctx.fmt(font_size)}"',
             'text-anchor="middle"',
@@ -2900,11 +2957,21 @@ class PcbSvgRenderer:
         if not layer.is_copper():
             return False
         try:
-            if not pad._should_render_on_layer(  # noqa: SLF001
-                layer
-            ) and not pad._should_force_svg_copper_render(layer):  # noqa: SLF001
+            should_render = getattr(pad, "_should_render_on_layer", None)
+            should_force = getattr(pad, "_should_force_svg_copper_render", None)
+            layer_size = getattr(pad, "_layer_size", None)
+            if (
+                not callable(should_render)
+                or not callable(should_force)
+                or not callable(layer_size)
+            ):
                 return False
-            width_iu, height_iu = pad._layer_size(layer)  # noqa: SLF001
+            if not should_render(layer) and not should_force(layer):
+                return False
+            size = layer_size(layer)
+            if not isinstance(size, (list, tuple)) or len(size) < 2:
+                return False
+            width_iu, height_iu = size[0], size[1]
         except Exception:
             return False
         return int(width_iu) > 0 and int(height_iu) > 0

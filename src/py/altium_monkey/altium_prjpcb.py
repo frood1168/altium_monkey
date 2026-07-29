@@ -595,13 +595,17 @@ class AltiumPrjPcb:
 
             doc_num += 1
 
+        def _device_sheet_index(section: str) -> int:
+            match = re.search(r"\d+", section)
+            return int(match.group(0)) if match else 0
+
         device_sheet_sections = sorted(
             (
                 section
                 for section in self.config.sections()
                 if re.fullmatch(r"DeviceSheet\d+", section, re.IGNORECASE)
             ),
-            key=lambda section: int(re.search(r"\d+", section).group(0)),
+            key=_device_sheet_index,
         )
         for section in device_sheet_sections:
             doc_path = self.config.get(section, "DocumentPath", fallback="")

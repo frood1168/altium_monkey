@@ -5,13 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, cast
 import uuid
 from xml.etree import ElementTree as ET
 from xml.etree.ElementTree import Element
 
 from .altium_pcb_stream_helpers import format_mil_value as _format_mil_value
 from .altium_record_types import PcbLayer
+from .altium_text_helpers import normalized_object_text as _value_text
 
 if TYPE_CHECKING:
     from .altium_layer_stack_document import (
@@ -407,7 +409,7 @@ class AltiumStackupXDocument:
             features=(
                 tuple(
                     StackupXFeature(id=str(item[0]), name=str(item[1]))
-                    for item in source_features
+                    for item in cast(Iterable[tuple[object, object]], source_features)
                 )
                 if source_features
                 else _export_features(
@@ -1170,10 +1172,6 @@ def _raw_attributes(element: Element) -> tuple[tuple[str, str], ...]:
 
 def _text(element: Element) -> str:
     return str(element.text or "").strip()
-
-
-def _value_text(value: object) -> str:
-    return str(value or "").strip()
 
 
 def _local_name(tag: str) -> str:

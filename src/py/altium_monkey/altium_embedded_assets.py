@@ -7,7 +7,9 @@ import hashlib
 import zlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+
+from .altium_json_helpers import json_ready as _json_ready
+from typing import Literal, cast
 
 from .altium_api_markers import public_api
 from .altium_embedded_files import (
@@ -116,20 +118,10 @@ class EmbeddedAssetInventory:
 
     def to_dict(self, *, include_schema: bool = True) -> dict[str, object]:
         """Return the stable downstream JSON-ready inventory shape."""
-        data = _json_ready(asdict(self))
+        data = cast(dict[str, object], _json_ready(asdict(self)))
         if include_schema:
             return {"schema": _EMBEDDED_ASSET_SCHEMA, **data}
         return data
-
-
-def _json_ready(value: object) -> object:
-    if isinstance(value, tuple):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, list):
-        return [_json_ready(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _json_ready(item) for key, item in value.items()}
-    return value
 
 
 def embedded_asset_schema_id() -> str:
@@ -280,6 +272,7 @@ def opaque_pcblib_embedded_fonts_summary(
     """Represent the PcbLib raw embedded-font stream without implying parsing support."""
     if not _has_nonempty_pcblib_embedded_font_stream(raw_embedded_fonts):
         return ()
+    payload = raw_embedded_fonts or b""
     return (
         EmbeddedOpaqueAssetSummary(
             kind="opaque",
@@ -288,10 +281,10 @@ def opaque_pcblib_embedded_fonts_summary(
             source_path=source_path_text(source_path),
             stream_name="Library/EmbeddedFonts",
             extraction_filename=None,
-            raw_size=len(raw_embedded_fonts),
+            raw_size=len(payload),
             payload_available=True,
             payload_sha256=payload_sha256(
-                raw_embedded_fonts, include_hashes=include_hashes
+                payload, include_hashes=include_hashes
             ),
             support_status="opaque",
             reason=(
