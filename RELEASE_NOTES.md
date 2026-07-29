@@ -1,17 +1,11 @@
-# altium-monkey 2026.07.26b1 Prerelease Notes
+# altium-monkey 2026.07.26 Release Notes
 
-Package version: `2026.7.26b1`
+Package version: `2026.7.26`
 
-`2026.07.26b1` is represented in Python package metadata as the PEP 440
-canonical form `2026.7.26b1`.
+`2026.07.26` is represented in Python package metadata as the PEP 440
+canonical form `2026.7.26`.
 
-This is a testing prerelease for the new project-level schematic compiler,
-`design.a2` JSON contract, and physical SVG/IR rendering features. Downstream
-integrators should pin this exact package version while validating repeated
-and channelized project flows. General users should stay on the latest stable
-release unless they are explicitly testing these new features.
-
-This prerelease promotes the project-level schematic compiler to the default
+This release promotes the project-level schematic compiler to the default
 project netlisting and design-JSON path. It adds a new `design.a2` JSON
 contract for compiled physical pages, repeated/channel sheet identity,
 resolved physical designators, physical SVG/IR rendering, and net-name
@@ -31,6 +25,16 @@ resolved physical designators, active-variant `dnp` / `fitted` metadata,
 net-name aliases, and optional name-source provenance. Compact compile
 metadata and diagnostics remain opt-in through
 `AltiumDesign.to_json(include_compile_metadata=True)`.
+
+Net-name `aliases` are emitted in deterministic Altium-compatible total sort
+order with the winning `name` excluded, so review tools can diff or cache
+alternate-name lists reliably.
+
+Public issue #26 nested multi-placement is resolved for the Python compiled
+design path. The nested multi-placement fixture now expands the two-by-two
+`Main -> Mid -> Leaf` hierarchy to `R1.1`, `R1.2`, `R1.3`, and `R1.4`; the
+compatibility `compile_netlist(..., project=...)` facade also preserves the
+project channel designator format when explicit options are not supplied.
 
 Strict validators pinned to `altium_monkey.design.a1` should refresh to
 `design.a2`. The `design_a2.schema.json` file is self-contained for strict
@@ -98,6 +102,13 @@ Release validation covers package formatting/lint, schema validation against
 real design JSON payloads, generated-doc checks, example execution, public
 export, wheel build, clean install, the Python L3/L4/L5 release rack, and a
 compiled-design corpus performance baseline.
+
+Performance closeout repaired the duplicate-SchDoc load regression and
+optimized the RMEGA repeated-sheet stress path from the initial benchmark
+matrix `19.8s` compile / `32.8s` total without DR to `6.7s` compile /
+`18.0s` total without DR. Remaining `design.a2` cost is accepted as the
+broader contract cost for physical pages, resolved designators, aliases,
+name_sources, and repeated/channel-safe indexes.
 
 ---
 # altium-monkey 2026.07.15 Release Notes

@@ -234,8 +234,18 @@ class AltiumDesign:
         project = AltiumPrjPcb(path)
 
         options = NetlistOptions.from_prjpcb(project)
+        schdoc_by_path: dict[Path, AltiumSchDoc] = {}
+
+        def load_schdoc(schdoc_path: Path) -> AltiumSchDoc:
+            resolved_path = schdoc_path.resolve()
+            schdoc = schdoc_by_path.get(resolved_path)
+            if schdoc is None:
+                schdoc = AltiumSchDoc(schdoc_path)
+                schdoc_by_path[resolved_path] = schdoc
+            return schdoc
+
         schdoc_paths = project.get_reachable_schdoc_paths()
-        schdocs = [AltiumSchDoc(schdoc_path) for schdoc_path in schdoc_paths]
+        schdocs = [load_schdoc(schdoc_path) for schdoc_path in schdoc_paths]
         effective_scope = cls(
             project=project,
             schdocs=schdocs,
@@ -250,13 +260,13 @@ class AltiumDesign:
                     if resolved_path not in loaded_paths:
                         loaded_paths.add(resolved_path)
                         schdoc_paths.append(schdoc_path)
-                schdocs = [AltiumSchDoc(schdoc_path) for schdoc_path in schdoc_paths]
+                schdocs = [load_schdoc(schdoc_path) for schdoc_path in schdoc_paths]
         else:
             all_schdoc_paths = project.get_schdoc_paths()
             if [path.resolve() for path in all_schdoc_paths] != [
                 path.resolve() for path in schdoc_paths
             ]:
-                schdocs = [AltiumSchDoc(schdoc_path) for schdoc_path in all_schdoc_paths]
+                schdocs = [load_schdoc(schdoc_path) for schdoc_path in all_schdoc_paths]
 
         # Sheet parameters are merged so later sheets can override earlier ones.
         sheet_params = {}
@@ -370,12 +380,21 @@ class AltiumDesign:
                         summary/options/annotation state and diagnostics. The
                         default keeps the user-facing design projection compact.
 
-                Returns:
-                    JSON-compatible dict with design data
+        Returns:
+            JSON-compatible dict with design data
         """
+        compiled = self.compile()
+        if self._has_repeated_physical_instances(compiled):
+            return self._design_json_from_netlist(
+                None,
+                include_indexes,
+                compiled=compiled,
+                include_compile_metadata=include_compile_metadata,
+            )
         return self._design_json_from_netlist(
             self.to_netlist(),
             include_indexes,
+            compiled=compiled,
             include_compile_metadata=include_compile_metadata,
         )
 
@@ -669,9 +688,10 @@ class AltiumDesign:
 
     def _design_json_from_netlist(
         self,
-        netlist: Netlist,
+        netlist: Netlist | None,
         include_indexes: bool,
         *,
+        compiled: AltiumCompiledDesign | None = None,
         include_compile_metadata: bool,
     ) -> dict:
         """
@@ -681,7 +701,7 @@ class AltiumDesign:
         from .altium_netlist_options import NetlistOptions
 
         options = self._options or NetlistOptions()
-        compiled = self.compile()
+        compiled = compiled or self.compile()
 
         options_data = {
             "net_identifier_scope": options.net_identifier_scope.name,
@@ -702,17 +722,23 @@ class AltiumDesign:
         has_repeated_physical_instances = self._has_repeated_physical_instances(
             compiled
         )
-        comp_data_map = self._build_component_data_map(
-            netlist,
-            compiled if has_repeated_physical_instances else None,
-        )
+        comp_data_map = {}
+        if not has_repeated_physical_instances:
+            if netlist is None:
+                netlist = self.to_netlist()
+            comp_data_map = self._build_component_data_map(
+                netlist,
+                None,
+            )
         components_data = []
         if has_repeated_physical_instances:
             components_data = self._build_compiled_components_data(
                 compiled,
                 active_variant_dnp=active_variant_dnp,
             )
-        if not components_data:
+        if not components_data and not has_repeated_physical_instances:
+            if netlist is None:
+                netlist = self.to_netlist()
             components_data = []
             for comp in netlist.components:
                 is_dnp = comp.designator in active_variant_dnp
@@ -730,9 +756,13 @@ class AltiumDesign:
                         },
                     )
                 )
+        net_name_sources_by_id: dict[str, list[dict]] = {}
+        net_aliases_by_key: dict[tuple[str, str, tuple[str, ...]], list[str]] = {}
         physical_pages_data = self._build_physical_pages_data(
             compiled,
             active_variant_dnp=active_variant_dnp,
+            net_name_sources_by_id=net_name_sources_by_id,
+            net_aliases_by_key=net_aliases_by_key,
         )
 
         result = {
@@ -751,7 +781,10 @@ class AltiumDesign:
             {
                 "sheets": sheets_data,
                 "components": components_data,
-                "schematic_hierarchy": self._build_schematic_hierarchy_data(netlist),
+                "schematic_hierarchy": self._build_schematic_hierarchy_data(
+                    netlist,
+                    compiled=compiled,
+                ),
                 "physical_pages": physical_pages_data,
             }
         )
@@ -761,9 +794,20 @@ class AltiumDesign:
             result["pnp"] = pnp_data
 
         if has_repeated_physical_instances:
-            nets_data = self._build_compiled_nets_data(compiled)
+            nets_data = self._build_compiled_nets_data(
+                compiled,
+                net_name_sources_by_id=net_name_sources_by_id,
+                net_aliases_by_key=net_aliases_by_key,
+            )
         else:
-            nets_data = self._build_legacy_json_nets_data(netlist, compiled)
+            if netlist is None:
+                netlist = self.to_netlist()
+            nets_data = self._build_legacy_json_nets_data(
+                netlist,
+                compiled,
+                net_name_sources_by_id=net_name_sources_by_id,
+                net_aliases_by_key=net_aliases_by_key,
+            )
         result["nets"] = nets_data
 
         if include_indexes:
@@ -839,7 +883,12 @@ class AltiumDesign:
         self,
         netlist: Netlist,
         compiled: AltiumCompiledDesign,
+        *,
+        net_name_sources_by_id: dict[str, list[dict]] | None = None,
+        net_aliases_by_key: dict[tuple[str, str, tuple[str, ...]], list[str]] | None = None,
     ) -> list[dict]:
+        name_source_cache = net_name_sources_by_id if net_name_sources_by_id is not None else {}
+        alias_cache = net_aliases_by_key if net_aliases_by_key is not None else {}
         compiled_flat_by_id = {
             net.id: net for net in compiled.nets if net.scope == "compiled_flat"
         }
@@ -847,15 +896,24 @@ class AltiumDesign:
         for index, net_data in enumerate(nets_data, start=1):
             compiled_net = compiled_flat_by_id.get(str(net_data.get("uid") or ""))
             if compiled_net is not None:
-                name_sources = self._compiled_net_name_sources(compiled_net)
-                aliases = self._design_net_aliases(
-                    str(net_data.get("name") or ""),
-                    list(net_data.get("aliases") or []),
+                name_sources = name_source_cache.get(compiled_net.id)
+                if name_sources is None:
+                    name_sources = self._compiled_net_name_sources(compiled_net)
+                    name_source_cache[compiled_net.id] = name_sources
+                net_name = str(net_data.get("name") or "")
+                source_aliases = list(net_data.get("aliases") or [])
+                aliases = self._design_net_aliases_cached(
+                    alias_cache,
+                    compiled_net.id,
+                    net_name,
+                    source_aliases,
                     name_sources,
                 )
                 net_data["aliases"] = aliases
                 if len(name_sources) > 1:
-                    net_data["name_sources"] = name_sources
+                    net_data["name_sources"] = self._copy_net_name_sources(
+                        name_sources
+                    )
             net_data["uid"] = f"{index:012x}"
         return nets_data
 
@@ -952,19 +1010,29 @@ class AltiumDesign:
     def _build_compiled_nets_data(
         self,
         compiled: AltiumCompiledDesign,
+        *,
+        net_name_sources_by_id: dict[str, list[dict]] | None = None,
+        net_aliases_by_key: dict[tuple[str, str, tuple[str, ...]], list[str]] | None = None,
     ) -> list[dict]:
         """
         Build top-level design JSON net rows from compiled-flat nets.
         """
+        name_source_cache = net_name_sources_by_id if net_name_sources_by_id is not None else {}
+        alias_cache = net_aliases_by_key if net_aliases_by_key is not None else {}
         nets_data: list[dict] = []
         flat_nets = [net for net in compiled.nets if net.scope == "compiled_flat"]
         for index, net in enumerate(flat_nets, start=1):
-            name_sources = self._compiled_net_name_sources(net)
+            name_sources = name_source_cache.get(net.id)
+            if name_sources is None:
+                name_sources = self._compiled_net_name_sources(net)
+                name_source_cache[net.id] = name_sources
             net_data = {
                 "id": net.id,
                 "uid": f"{index:012x}",
                 "name": net.name,
-                "aliases": self._design_net_aliases(
+                "aliases": self._design_net_aliases_cached(
+                    alias_cache,
+                    net.id,
                     net.name,
                     list(net.aliases),
                     name_sources,
@@ -981,17 +1049,28 @@ class AltiumDesign:
                 "single_pin": net.single_pin,
             }
             if len(name_sources) > 1:
-                net_data["name_sources"] = name_sources
+                net_data["name_sources"] = self._copy_net_name_sources(name_sources)
             nets_data.append(net_data)
         return nets_data
 
-    def _build_schematic_hierarchy_data(self, netlist: Netlist) -> dict:
+    def _build_schematic_hierarchy_data(
+        self,
+        netlist: Netlist | None,
+        *,
+        compiled: AltiumCompiledDesign | None = None,
+    ) -> dict:
         """
         Build schematic hierarchy JSON for the design payload.
         """
         hierarchy = getattr(netlist, "schematic_hierarchy", None)
         if isinstance(hierarchy, dict) and hierarchy:
             return hierarchy
+        if compiled is not None:
+            from .altium_compiled_design_netlist import (
+                compiled_design_schematic_hierarchy,
+            )
+
+            return compiled_design_schematic_hierarchy(compiled, self.schdocs)
 
         from .altium_netlist_options import NetlistOptions
 
@@ -1178,6 +1257,8 @@ class AltiumDesign:
         compiled: AltiumCompiledDesign,
         *,
         active_variant_dnp: set[str] | None = None,
+        net_name_sources_by_id: dict[str, list[dict]] | None = None,
+        net_aliases_by_key: dict[tuple[str, str, tuple[str, ...]], list[str]] | None = None,
     ) -> list[dict]:
         """
         Build the user-facing physical page index for design JSON consumers.
@@ -1271,9 +1352,11 @@ class AltiumDesign:
             tuple[str, str],
             list[object],
         ] = {}
-        net_name_sources_by_id: dict[str, list[dict]] = {}
+        name_source_cache = net_name_sources_by_id if net_name_sources_by_id is not None else {}
+        alias_cache = net_aliases_by_key if net_aliases_by_key is not None else {}
         for net in flat_nets:
-            net_name_sources_by_id[net.id] = self._compiled_net_name_sources(net)
+            if net.id not in name_source_cache:
+                name_source_cache[net.id] = self._compiled_net_name_sources(net)
             net_physical_document_ids = {
                 str(physical_document_id)
                 for physical_document_id in net.physical_document_ids
@@ -1324,7 +1407,7 @@ class AltiumDesign:
                     if endpoint.designator in page_designators
                     or endpoint.parent_id in {document.source_path, document.file_name}
                 ]
-                name_sources = net_name_sources_by_id[net.id]
+                name_sources = name_source_cache[net.id]
                 graphical = self._compiled_page_net_graphical(items)
                 fallback_pins = []
                 for terminal in page_terminal_objects:
@@ -1372,12 +1455,14 @@ class AltiumDesign:
                     {
                         "id": net.id,
                         "name": net.name,
-                        "aliases": self._design_net_aliases(
+                        "aliases": self._design_net_aliases_cached(
+                            alias_cache,
+                            net.id,
                             net.name,
                             list(net.aliases),
                             name_sources,
                         ),
-                        "name_sources": name_sources,
+                        "name_sources": self._copy_net_name_sources(name_sources),
                         "terminal_count": len(terminals),
                         "terminals": terminals,
                         "graphical": graphical,
@@ -1571,6 +1656,26 @@ class AltiumDesign:
             if source_name != net_name:
                 values.append(source_name)
         return sorted(_unique_nonempty_strings(values))
+
+    @staticmethod
+    def _copy_net_name_sources(name_sources: list[dict]) -> list[dict]:
+        return [dict(row) for row in name_sources]
+
+    @staticmethod
+    def _design_net_aliases_cached(
+        cache: dict[tuple[str, str, tuple[str, ...]], list[str]],
+        net_id: str,
+        net_name: str,
+        aliases: list[str],
+        name_sources: list[dict],
+    ) -> list[str]:
+        key = (str(net_id or ""), str(net_name or ""), tuple(str(alias) for alias in aliases))
+        cached = cache.get(key)
+        if cached is not None:
+            return list(cached)
+        value = AltiumDesign._design_net_aliases(net_name, aliases, name_sources)
+        cache[key] = value
+        return list(value)
 
     def _build_sheets_data(self, options: NetlistOptions) -> list[dict]:
         """

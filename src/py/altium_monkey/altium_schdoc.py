@@ -364,6 +364,14 @@ class AltiumSchDoc(JsonApplyMixin):
         self.embedded_images: dict[str, bytes] = {}
         self._raw_storage_entries: dict[str, tuple[bytes, bytes]] = {}
         self._schlib_cache: dict[Path, Any] = {}
+        self._connection_points_cache: dict[
+            tuple[
+                bool,
+                tuple[tuple[tuple[int, int], ...], ...],
+                tuple[tuple[int, int], ...],
+            ],
+            frozenset[tuple[int, int]],
+        ] = {}
 
         # Object definitions for custom power port graphics
         self.object_definitions: dict[str, list[dict]] = {}
@@ -5607,6 +5615,34 @@ class AltiumSchDoc(JsonApplyMixin):
         """
         from collections import Counter
 
+        def object_points_signature(objects: object) -> tuple[tuple[tuple[int, int], ...], ...]:
+            return tuple(
+                tuple((int(point.x), int(point.y)) for point in getattr(obj, "points", ()))
+                for obj in objects
+            )
+
+        connectable_signature = (
+            *object_points_signature(self.wires),
+            *object_points_signature(self.buses),
+            *object_points_signature(self.signal_harnesses),
+        )
+        explicit_junction_signature = (
+            tuple(
+                (int(junction.location.x), int(junction.location.y))
+                for junction in self.junctions
+            )
+            if include_explicit_junctions
+            else ()
+        )
+        cache_key = (
+            include_explicit_junctions,
+            connectable_signature,
+            explicit_junction_signature,
+        )
+        cached = self._connection_points_cache.get(cache_key)
+        if cached is not None:
+            return set(cached)
+
         def point_on_segment(
             px: int, py: int, x1: int, y1: int, x2: int, y2: int
         ) -> bool:
@@ -5680,6 +5716,45 @@ class AltiumSchDoc(JsonApplyMixin):
         # Find T-junctions: wire/bus endpoint lies ON another object's segment
         # These count as 3+ objects in native Altium (endpoint + 2 segment halves)
         t_junctions: set[tuple[int, int]] = set()
+        vertical_segments: dict[int, list[tuple[object, int, int, int, int]]] = {}
+        horizontal_segments: dict[int, list[tuple[object, int, int, int, int]]] = {}
+        diagonal_segments: list[tuple[object, int, int, int, int]] = []
+
+        for other in all_connectable:
+            if len(other.points) < 2:
+                continue
+            for i in range(len(other.points) - 1):
+                p1 = other.points[i]
+                p2 = other.points[i + 1]
+                segment = (other, p1.x, p1.y, p2.x, p2.y)
+                if p1.x == p2.x:
+                    vertical_segments.setdefault(p1.x, []).append(segment)
+                elif p1.y == p2.y:
+                    horizontal_segments.setdefault(p1.y, []).append(segment)
+                else:
+                    diagonal_segments.append(segment)
+
+        def any_indexed_segment_contains_point(
+            obj: object,
+            px: int,
+            py: int,
+        ) -> bool:
+            for other, x1, y1, x2, y2 in vertical_segments.get(px, ()):
+                if other is obj:
+                    continue
+                if point_on_segment(px, py, x1, y1, x2, y2):
+                    return True
+            for other, x1, y1, x2, y2 in horizontal_segments.get(py, ()):
+                if other is obj:
+                    continue
+                if point_on_segment(px, py, x1, y1, x2, y2):
+                    return True
+            for other, x1, y1, x2, y2 in diagonal_segments:
+                if other is obj:
+                    continue
+                if point_on_segment(px, py, x1, y1, x2, y2):
+                    return True
+            return False
 
         for obj in all_connectable:
             if len(obj.points) < 1:
@@ -5687,19 +5762,8 @@ class AltiumSchDoc(JsonApplyMixin):
             # Check each endpoint of this object
             for pt in obj.points:
                 px, py = pt.x, pt.y
-                # Check if this point lies on any other object's segment
-                for other in all_connectable:
-                    if other is obj:
-                        continue
-                    if len(other.points) < 2:
-                        continue
-                    # Check each segment of the other object
-                    for i in range(len(other.points) - 1):
-                        p1 = other.points[i]
-                        p2 = other.points[i + 1]
-                        if point_on_segment(px, py, p1.x, p1.y, p2.x, p2.y):
-                            t_junctions.add((px, py))
-                            break  # Found T-junction for this point
+                if any_indexed_segment_contains_point(obj, px, py):
+                    t_junctions.add((px, py))
 
         # Connection points where junctions render:
         # 1. Points with 3+ endpoints (star junctions)
@@ -5713,6 +5777,7 @@ class AltiumSchDoc(JsonApplyMixin):
             for junction in self.junctions:
                 connection_points.add((junction.location.x, junction.location.y))
 
+        self._connection_points_cache[cache_key] = frozenset(connection_points)
         return connection_points
 
     def _build_native_manual_junction_status_render_hints(

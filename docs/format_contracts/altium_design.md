@@ -100,6 +100,11 @@ Consumers that need search, review, or graphical explanation can include
 `aliases` and `name_sources` to show labels, ports, sheet entries, power ports,
 and other source objects that contributed alternate names.
 
+`aliases` are emitted in deterministic Altium-compatible total sort order with
+the winning `name` excluded. Case-only ties therefore remain stable across
+processes, which is important for review bundles and visualizers that diff or
+cache alternate-name lists.
+
 ## Variants and DNP
 
 `project.current_variant` reports the active project variant from the

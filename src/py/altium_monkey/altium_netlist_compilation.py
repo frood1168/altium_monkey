@@ -13,6 +13,23 @@ if TYPE_CHECKING:
     from .altium_schdoc import AltiumSchDoc
 
 
+def _default_options_for_compile_netlist(
+    schdocs: list["AltiumSchDoc"],
+    project: "AltiumPrjPcb | None",
+) -> "NetlistOptions":
+    from .altium_netlist_options import NetlistOptions
+
+    if project is None:
+        return NetlistOptions()
+
+    result = NetlistOptions.from_prjpcb(project)
+    sheet_params: dict[str, str] = {}
+    for schdoc in schdocs:
+        sheet_params.update(schdoc.get_parameter_dict())
+    result.sheet_parameters = sheet_params
+    return result
+
+
 def compile_netlist(
     schdocs: list["AltiumSchDoc"],
     project: "AltiumPrjPcb | None" = None,
@@ -32,7 +49,10 @@ def compile_netlist(
     if not schdocs:
         raise ValueError("compile_netlist() requires at least one schematic document")
 
-    effective_options = options or NetlistOptions()
+    effective_options = options or _default_options_for_compile_netlist(
+        schdocs,
+        project,
+    )
     if len(schdocs) == 1:
         return AltiumNetlistSingleSheetCompiler(
             schdocs[0],

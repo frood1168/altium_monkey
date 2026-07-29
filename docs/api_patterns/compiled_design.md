@@ -77,6 +77,10 @@ The compiled net row `name` is the winning Altium-style net name. `aliases`
 contains alternate discovered names from the same compiled net. `name_sources`
 explains the candidates when provenance is available.
 
+`aliases` are deterministic and exclude the winning `name`. They are sorted
+with the same Altium-compatible total ordering used by the compiler for
+case-insensitive net-name ties.
+
 ```python
 for page in payload["physical_pages"]:
     for net in page["nets"]:

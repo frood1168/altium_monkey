@@ -541,24 +541,27 @@ def parse_byte_record(record: bytes) -> list[bytes]:
     """
     Parse byte array into list of sub-arrays, splitting on '|' and stopping at null.
     """
-    result = []
-    current_array = bytearray()
+    if not record:
+        return []
 
     # Skip leading | if present
-    start_index = 1 if record and record[0] == ord("|") else 0
+    if record[0] == ord("|"):
+        record = record[1:]
 
-    for byte in record[start_index:]:
-        if byte == 0:  # Null terminator - stop processing
-            break
-        elif byte == ord("|"):  # ASCII '|' = 124
-            result.append(bytes(current_array))
-            current_array = bytearray()
-        else:
-            current_array.append(byte)
+    # Null terminator stops processing.
+    null_index = record.find(b"\x00")
+    if null_index != -1:
+        record = record[:null_index]
 
-    # Add the final array if it has content
-    if current_array:
-        result.append(bytes(current_array))
+    if not record:
+        return []
+
+    result = record.split(b"|")
+
+    # Preserve interior empty pairs but match the historical byte-loop behavior
+    # that omitted a final empty pair after a trailing delimiter.
+    if result and result[-1] == b"":
+        result.pop()
 
     return result
 
