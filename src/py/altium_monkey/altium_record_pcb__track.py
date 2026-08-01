@@ -7,9 +7,18 @@ import logging
 import struct
 from typing import TYPE_CHECKING
 
+from .altium_pcb_layer_ref import PcbLayerRef, resolve_pcb_primitive_layer_state
+from .altium_record_pcb__svg_support import (
+    svg_layer_ref,
+    svg_matches_requested_layer,
+)
 from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 
 if TYPE_CHECKING:
+    from .altium_pcb_layer_ref import (
+        PcbLayerRegistry,
+        PcbPrimitiveLayerState,
+    )
     from .altium_pcb_svg_renderer import PcbSvgRenderContext
 
 log = logging.getLogger(__name__)
@@ -73,6 +82,22 @@ class AltiumPcbTrack(PcbGraphicalObject):
         Return the PCB track record discriminator.
         """
         return PcbRecordType.TRACK
+
+    def layer_state(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbPrimitiveLayerState":
+        """Return the V7-aware layer identity plus stored layer diagnostics."""
+
+        return resolve_pcb_primitive_layer_state(self, registry=registry)
+
+    def layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbLayerRef":
+        """Return the V7-aware layer identity for this track."""
+
+        return self.layer_state(registry=registry).ref
 
     def parse_from_binary(self, data: bytes, offset: int = 0) -> int:
         """
@@ -402,7 +427,7 @@ class AltiumPcbTrack(PcbGraphicalObject):
         *,
         stroke: str | None = None,
         include_metadata: bool = True,
-        for_layer: PcbLayer | None = None,
+        for_layer: PcbLayer | PcbLayerRef | None = None,
     ) -> list[str]:
         """
         Render track to SVG as a stroked line segment.
@@ -417,7 +442,8 @@ class AltiumPcbTrack(PcbGraphicalObject):
         """
         if ctx is None:
             return []
-        if for_layer is not None and int(self.layer) != for_layer.value:
+        layer_ref = svg_layer_ref(self)
+        if not svg_matches_requested_layer(self, for_layer, layer_ref):
             return []
 
         try:
@@ -443,7 +469,12 @@ class AltiumPcbTrack(PcbGraphicalObject):
 
         if include_metadata:
             attrs.append('data-primitive="track"')
-            attrs.extend(ctx.layer_metadata_attrs(int(self.layer)))
+            if layer_ref is not None:
+                attrs.extend(ctx.layer_metadata_attrs_for_ref(layer_ref))
+                layer_identifier = ctx.layer_identifier_for_ref(layer_ref)
+            else:
+                attrs.extend(ctx.layer_metadata_attrs(int(self.layer)))
+                layer_identifier = int(self.layer)
             attrs.extend(
                 ctx.relationship_metadata_attrs(
                     net_index=self.net_index,
@@ -453,7 +484,7 @@ class AltiumPcbTrack(PcbGraphicalObject):
             element_id_attr = ctx.primitive_id_attr(
                 "track",
                 self,
-                layer_id=int(self.layer),
+                layer_id=layer_identifier,
                 role="main",
             )
             if element_id_attr:

@@ -10,13 +10,19 @@ from __future__ import annotations
 import uuid
 from typing import Sequence
 
-from .altium_pcb_stream_helpers import format_mil_value as _format_mil_value
-from .altium_record_pcb__region import AltiumPcbRegion, RegionVertex
 from .altium_pcb_enums import (
     PcbRegionKind,
     pcb_region_kind_from_native_kind,
     pcb_region_kind_to_native_kind,
 )
+from .altium_pcb_layer_ref import (
+    PcbLayerRegistry,
+    PcbLayerLike,
+    PcbLayerRef,
+    _coerce_region_authoring_layer_storage,
+)
+from .altium_pcb_stream_helpers import format_mil_value as _format_mil_value
+from .altium_record_pcb__region import AltiumPcbRegion, RegionVertex
 from .altium_record_pcb__shapebased_region import (
     AltiumPcbShapeBasedRegion,
     PcbExtendedVertex,
@@ -78,7 +84,7 @@ def build_shapebased_region_stream(
 def build_authored_region_pair(
     *,
     outline_points_mils: list[tuple[float, float]],
-    layer: int | PcbLayer = PcbLayer.TOP,
+    layer: PcbLayerLike = PcbLayer.TOP,
     hole_points_mils: list[list[tuple[float, float]]] | None = None,
     outline_vertices: Sequence[PcbExtendedVertex] | None = None,
     net_index: int | None = None,
@@ -92,6 +98,7 @@ def build_authored_region_pair(
     keepout_restrictions: int = 0,
     cavity_height_mils: float = 0.0,
     v7_layer: str | None = None,
+    registry: PcbLayerRegistry | None = None,
 ) -> tuple[AltiumPcbRegion, AltiumPcbShapeBasedRegion]:
     """
     Create a logical REGION plus rendered ShapeBasedRegion from first principles.
@@ -99,7 +106,12 @@ def build_authored_region_pair(
     if len(outline_points_mils) < 3:
         raise ValueError("Region outline requires at least 3 points")
 
-    layer_id = int(layer)
+    layer_storage, explicit_v7_layer_token = _coerce_region_authoring_layer_storage(
+        layer,
+        v7_layer,
+        registry=registry,
+    )
+    layer_id = layer_storage.legacy_layer_id
     holes = hole_points_mils or []
     parsed_region_kind = (
         region_kind
@@ -116,7 +128,7 @@ def build_authored_region_pair(
         parsed_region_kind,
         is_board_cutout=effective_board_cutout,
     )
-    v7_layer_text = _v7_layer_text(layer_id, v7_layer)
+    v7_layer_text = region_v7_layer_text(layer_storage.ref, explicit_v7_layer_token)
     shapebased_text = "TRUE" if is_shapebased else "FALSE"
     cavity_height_internal = int(round(float(cavity_height_mils) * 10000.0))
     cavity_height_text = _format_mil_value(float(cavity_height_mils))
@@ -239,13 +251,14 @@ def build_authored_region_pair(
     return region, shape_region
 
 
-def _v7_layer_text(layer_id: int, override: str | None) -> str:
+def region_v7_layer_text(layer_ref: PcbLayerRef, override: str | None = None) -> str:
+    """Return native V7_LAYER text for a public layer ref."""
+
     if override is not None:
         return str(override)
-    try:
-        return PcbLayer(layer_id).to_json_name()
-    except ValueError:
-        return str(int(layer_id))
+    if layer_ref.legacy_layer is not None:
+        return layer_ref.legacy_layer.to_json_name()
+    return str(layer_ref.token)
 
 
 def make_authored_region_guid(region: AltiumPcbRegion, ordinal: int) -> uuid.UUID:

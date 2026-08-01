@@ -47,6 +47,13 @@ from .altium_pcb_embedded_model_compose import (
     parse_model_records_from_bytes,
     resolve_footprint_body_model_entries,
 )
+from .altium_pcb_corner_radius_chamfer import (
+    AltiumPcbCornerRadiusChamfer,
+    attach_corner_radius_chamfer_to_pads,
+    corner_radius_chamfer_records_for_pads,
+    parse_corner_radius_chamfer_footprint_stream,
+    serialize_corner_radius_chamfer_footprint_stream,
+)
 from .altium_pcb_custom_shapes import resolve_pcblib_custom_pad_shapes
 from .altium_pcb_extended_primitive_information import (
     AltiumPcbExtendedPrimitiveInformation,
@@ -67,6 +74,12 @@ from .altium_pcb_enums import (
 )
 from .altium_pcb_layer_kind_mapping import (
     coerce_layer_kind_mapping_layer_id,
+)
+from .altium_pcb_layer_ref import (
+    PcbLayerFamily,
+    PcbLayerLike,
+    PcbLayerRef,
+    PcbLayerResolutionError,
 )
 from .altium_pcbdoc_builder_text import (
     PCB_TEXT_BARCODE_MARGIN_MILS,
@@ -110,7 +123,12 @@ from .altium_record_pcb__component_body import AltiumPcbComponentBody
 from .altium_utilities import encode_altium_record
 
 if TYPE_CHECKING:
-    from .altium_pcblib_builder import PcbLibBuildProfile
+    from .altium_pcblib_builder import (
+        PcbLibBuildProfile,
+        PcbLibLayerTable,
+        PcbLibLegacyLayerEntry,
+        PcbLibV7LayerEntry,
+    )
     from .altium_pcb_svg_renderer import PcbSvgRenderOptions
     from .altium_pcbdoc import AltiumPcbDoc
 
@@ -118,6 +136,89 @@ log = logging.getLogger(__name__)
 
 PcbPointMils = Sequence[float]
 PcbBoundsMils = Sequence[float]
+_PcbLibSvgLayerCacheEntry = tuple[int, str, bool]
+
+
+def _pcblib_svg_layer_cache_entry_from_ref(
+    ref: PcbLayerRef,
+    *,
+    name: str,
+    mechanical_enabled: bool,
+) -> _PcbLibSvgLayerCacheEntry | None:
+    if ref.family != PcbLayerFamily.MECHANICAL or ref.v7_saved_layer_id is None:
+        return None
+    return ref.v7_saved_layer_id, name, mechanical_enabled
+
+
+def _pcblib_svg_layer_cache_entry_from_legacy(
+    entry: "PcbLibLegacyLayerEntry",
+) -> _PcbLibSvgLayerCacheEntry | None:
+    try:
+        ref = PcbLayerRef.from_legacy(entry.layer_number)
+    except PcbLayerResolutionError:
+        return None
+    return _pcblib_svg_layer_cache_entry_from_ref(
+        ref,
+        name=entry.name,
+        mechanical_enabled=entry.mechanical_enabled,
+    )
+
+
+def _pcblib_svg_layer_cache_entry_from_v7(
+    entry: "PcbLibV7LayerEntry",
+) -> _PcbLibSvgLayerCacheEntry | None:
+    try:
+        ref = PcbLayerRef.from_v7_saved_layer_id(entry.layer_id)
+    except PcbLayerResolutionError:
+        return None
+    return _pcblib_svg_layer_cache_entry_from_ref(
+        ref,
+        name=entry.name,
+        mechanical_enabled=entry.mechanical_enabled,
+    )
+
+
+def _pcblib_svg_layer_cache_from_layer_table(
+    layer_table: "PcbLibLayerTable",
+) -> tuple[dict[int, str], tuple[int, ...]]:
+    names_by_v7_id: dict[int, str] = {}
+    enabled_mechanical_v7_ids: list[int] = []
+
+    for entry in layer_table.legacy_layers:
+        cache_entry = _pcblib_svg_layer_cache_entry_from_legacy(entry)
+        if cache_entry is None:
+            continue
+        v7_layer_id, name, mechanical_enabled = cache_entry
+        names_by_v7_id[v7_layer_id] = name
+        if mechanical_enabled:
+            enabled_mechanical_v7_ids.append(v7_layer_id)
+
+    for entry in layer_table.v7_layers:
+        cache_entry = _pcblib_svg_layer_cache_entry_from_v7(entry)
+        if cache_entry is None:
+            continue
+        v7_layer_id, name, mechanical_enabled = cache_entry
+        names_by_v7_id[v7_layer_id] = name
+        if mechanical_enabled:
+            enabled_mechanical_v7_ids.append(v7_layer_id)
+
+    return names_by_v7_id, tuple(sorted(set(enabled_mechanical_v7_ids)))
+
+
+def _pcblib_svg_board_record(
+    names_by_v7_id: Mapping[int, str],
+    enabled_mechanical_v7_ids: Sequence[int],
+) -> dict[str, str]:
+    enabled_ids = {int(layer_id) for layer_id in enabled_mechanical_v7_ids}
+    record: dict[str, str] = {}
+    for index, layer_id in enumerate(sorted(names_by_v7_id), start=1):
+        prefix = f"V9_CACHE_LAYER{index}"
+        record[f"{prefix}_LAYERID"] = str(int(layer_id))
+        record[f"{prefix}_NAME"] = str(names_by_v7_id[layer_id])
+        record[f"{prefix}_MECHENABLED"] = (
+            "TRUE" if int(layer_id) in enabled_ids else "FALSE"
+        )
+    return record
 
 
 @public_api
@@ -325,6 +426,8 @@ class AltiumPcbFootprint:
         ] = []
         self.raw_uniqueid_info: bytes | None = None
         self.raw_uniqueid_info_header: bytes | None = None
+        self.raw_corner_radius_chamfer: bytes | None = None
+        self.corner_radius_chamfer: list[AltiumPcbCornerRadiusChamfer] = []
         self.raw_via_structure_manager: bytes | None = None
         self.raw_via_structures: bytes | None = None
         self.via_structures: list[AltiumPcbViaStructure] = []
@@ -336,6 +439,8 @@ class AltiumPcbFootprint:
         ) = None
         self._via_structure_parse_failed: bool = False
         self._authoring_builder: Any | None = None
+        self._pcblib_svg_layer_names_by_v7_id: dict[int, str] = {}
+        self._pcblib_svg_enabled_mechanical_v7_ids: tuple[int, ...] = ()
 
     @property
     def primitives(self) -> tuple[object, ...]:
@@ -384,6 +489,34 @@ class AltiumPcbFootprint:
     def _bind_authoring_builder(self, builder: Any) -> None:
         self._authoring_builder = builder
 
+    def _bind_pcblib_svg_layer_cache(
+        self,
+        names_by_v7_id: Mapping[int, str],
+        enabled_mechanical_v7_ids: Sequence[int],
+    ) -> None:
+        self._pcblib_svg_layer_names_by_v7_id = {
+            int(layer_id): str(name)
+            for layer_id, name in names_by_v7_id.items()
+            if str(name)
+        }
+        self._pcblib_svg_enabled_mechanical_v7_ids = tuple(
+            sorted({int(layer_id) for layer_id in enabled_mechanical_v7_ids})
+        )
+
+    def _pcblib_svg_layer_cache(self) -> tuple[dict[int, str], tuple[int, ...]]:
+        profile = (
+            getattr(self._authoring_builder, "profile", None)
+            if self._authoring_builder is not None
+            else None
+        )
+        library_data = getattr(profile, "library_data", None)
+        if library_data is not None:
+            return _pcblib_svg_layer_cache_from_layer_table(library_data.layer_table)
+        return (
+            dict(self._pcblib_svg_layer_names_by_v7_id),
+            self._pcblib_svg_enabled_mechanical_v7_ids,
+        )
+
     def _require_authoring_builder(self) -> Any:
         if self._authoring_builder is None:
             raise RuntimeError(
@@ -400,12 +533,12 @@ class AltiumPcbFootprint:
         position_mils: PcbPointMils,
         width_mils: float,
         height_mils: float,
-        layer: int | PcbLayer = PcbLayer.TOP,
+        layer: PcbLayerLike = PcbLayer.TOP,
         shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mils: float = 0.0,
         plated: bool | None = None,
-        corner_radius_percent: int | None = None,
+        corner_radius_percent: int | float | None = None,
         top_shape: int | str | PadShape | None = None,
         top_width_mils: float | None = None,
         top_height_mils: float | None = None,
@@ -440,12 +573,16 @@ class AltiumPcbFootprint:
             position_mils: Pad center as `(x_mils, y_mils)`.
             width_mils: Pad width in mils.
             height_mils: Pad height in mils.
-            layer: Target PCB layer.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id. Raw integers remain legacy-only.
             shape: Pad shape.
             rotation_degrees: Pad rotation in degrees.
             hole_size_mils: Drill hole size in mils. Use 0 for SMT pads.
             plated: Optional plated-through flag.
-            corner_radius_percent: Optional rounded-rectangle corner radius percentage.
+            corner_radius_percent: Optional rounded-rectangle corner radius
+                percentage. Fractional values (for example `18.181818`) are
+                preserved exactly via the CornerRadiusChamfer lane for
+                top/bottom pads.
             top_shape: Optional top-layer body shape for local-stack pads.
             top_width_mils: Optional top-layer body width in mils.
             top_height_mils: Optional top-layer body height in mils.
@@ -628,7 +765,7 @@ class AltiumPcbFootprint:
         end_mils: PcbPointMils,
         *,
         width_mils: float,
-        layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
+        layer: PcbLayerLike = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
         solder_mask_expansion_mils: float | None = None,
         paste_mask_expansion_mils: float | None = None,
@@ -640,8 +777,8 @@ class AltiumPcbFootprint:
             start_mils: Track start as `(x_mils, y_mils)`.
             end_mils: Track end as `(x_mils, y_mils)`.
             width_mils: Track width in mils.
-            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
-                saved layer IDs are not accepted here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id. Raw integers remain legacy-only.
             v7_layer_id: Optional explicit serialized V7 saved layer id for
                 compatibility with source libraries that store it separately.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
@@ -673,7 +810,7 @@ class AltiumPcbFootprint:
         start_angle_degrees: float,
         end_angle_degrees: float,
         width_mils: float,
-        layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
+        layer: PcbLayerLike = PcbLayer.TOP_OVERLAY,
         v7_layer_id: int | None = None,
         solder_mask_expansion_mils: float | None = None,
         paste_mask_expansion_mils: float | None = None,
@@ -687,8 +824,8 @@ class AltiumPcbFootprint:
             start_angle_degrees: Start angle in degrees.
             end_angle_degrees: End angle in degrees.
             width_mils: Arc stroke width in mils.
-            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
-                saved layer IDs are not accepted here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id. Raw integers remain legacy-only.
             v7_layer_id: Optional explicit serialized V7 saved layer id.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
             paste_mask_expansion_mils: Optional manual paste-mask expansion.
@@ -716,7 +853,7 @@ class AltiumPcbFootprint:
         corner1_mils: PcbPointMils,
         corner2_mils: PcbPointMils,
         *,
-        layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
+        layer: PcbLayerLike = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         v7_layer_id: int | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -728,8 +865,8 @@ class AltiumPcbFootprint:
         Args:
             corner1_mils: First fill corner as `(x_mils, y_mils)`.
             corner2_mils: Opposite fill corner as `(x_mils, y_mils)`.
-            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
-                saved layer IDs are not accepted here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id. Raw integers remain legacy-only.
             rotation_degrees: Fill rotation in degrees.
             v7_layer_id: Optional explicit serialized V7 saved layer id.
             solder_mask_expansion_mils: Optional manual solder-mask expansion.
@@ -759,8 +896,8 @@ class AltiumPcbFootprint:
         position_mils: PcbPointMils,
         diameter_mils: float,
         hole_size_mils: float,
-        layer_start: int | PcbLayer = PcbLayer.TOP,
-        layer_end: int | PcbLayer = PcbLayer.BOTTOM,
+        layer_start: PcbLayerLike = PcbLayer.TOP,
+        layer_end: PcbLayerLike = PcbLayer.BOTTOM,
         ipc4761_via_type: int | PcbIpc4761ViaType = PcbIpc4761ViaType.NONE,
         ipc4761_features: Sequence[AltiumPcbViaStructureFeature] | None = None,
         propagation_delay_ps: float | None = None,
@@ -782,10 +919,12 @@ class AltiumPcbFootprint:
             position_mils: Via center as `(x_mils, y_mils)`.
             diameter_mils: Via pad diameter in mils.
             hole_size_mils: Via drill diameter in mils.
-            layer_start: Start layer as `PcbLayer` or legacy/TV6 layer integer
-                id. Serialized V7 saved layer IDs are not accepted here.
-            layer_end: End layer as `PcbLayer` or legacy/TV6 layer integer id.
-                Serialized V7 saved layer IDs are not accepted here.
+            layer_start: Start signal layer as `PcbLayerRef`, semantic token,
+                `PcbLayer`, or legacy/TV6 integer id. Raw integers remain
+                legacy-only.
+            layer_end: End signal layer as `PcbLayerRef`, semantic token,
+                `PcbLayer`, or legacy/TV6 integer id. Raw integers remain
+                legacy-only.
             ipc4761_via_type: Optional IPC-4761 via-protection type.
             ipc4761_features: Optional explicit IPC-4761 feature rows. Omit to
                 use Altium's default rows for `ipc4761_via_type`.
@@ -836,7 +975,7 @@ class AltiumPcbFootprint:
         self,
         *,
         outline_points_mils: list[tuple[float, float]],
-        layer: int | PcbLayer = PcbLayer.TOP,
+        layer: PcbLayerLike = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
         kind: int | PcbRegionKind = PcbRegionKind.COPPER,
         is_board_cutout: bool = False,
@@ -852,8 +991,8 @@ class AltiumPcbFootprint:
 
         Args:
             outline_points_mils: Outer polygon vertices in mils.
-            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
-                saved layer IDs are not accepted here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id. Raw integers remain legacy-only.
             hole_points_mils: Optional list of hole polygons in mils.
             kind: Native region kind. Prefer `PcbRegionKind` values when
                 authoring new public examples.
@@ -864,8 +1003,9 @@ class AltiumPcbFootprint:
             subpoly_index: Native sub-polygon index.
             cavity_height_mils: Cavity definition height in mils for
                 `PcbRegionKind.CAVITY_DEFINITION` regions.
-            v7_layer: Optional native `V7_LAYER` property override for
-                stack/advanced-layer metadata.
+            v7_layer: Optional native `V7_LAYER` property override for legacy
+                `PcbLayer`/integer layer inputs. Semantic layer refs and tokens
+                should be supplied through `layer`.
 
         Returns:
             The authored `AltiumPcbRegion` record.
@@ -891,7 +1031,7 @@ class AltiumPcbFootprint:
         text: str,
         position_mils: PcbPointMils,
         height_mils: float,
-        layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
+        layer: PcbLayerLike = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         stroke_width_mils: float = 10.0,
         font_kind: str | PcbTextKind = PcbTextKind.STROKE,
@@ -934,8 +1074,8 @@ class AltiumPcbFootprint:
             text: Text content.
             position_mils: Text anchor position as `(x_mils, y_mils)`.
             height_mils: Text height in mils.
-            layer: `PcbLayer` or legacy/TV6 layer integer id. Serialized V7
-                saved layer IDs are not accepted here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id. Raw integers remain legacy-only.
             rotation_degrees: Text rotation in degrees.
             stroke_width_mils: Stroke font line width in mils.
             font_kind: Text rendering mode, `"stroke"`, `"truetype"`, or
@@ -1010,7 +1150,7 @@ class AltiumPcbFootprint:
         self,
         *,
         outline_points_mils: list[tuple[float, float]],
-        layer: int | PcbLayer = PcbLayer.MECHANICAL_1,
+        layer: PcbLayerLike = PcbLayer.MECHANICAL_1,
         overall_height_mils: float,
         standoff_height_mils: float = 0.5,
         cavity_height_mils: float = 0.0,
@@ -1040,9 +1180,9 @@ class AltiumPcbFootprint:
         Args:
             outline_points_mils: Footprint-local 2D projection polygon vertices
                 in mils.
-            layer: `PcbLayer` or legacy/TV6 layer integer id that owns the
-                projection. Serialized V7 saved layer IDs are not accepted
-                here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id that owns the projection. Raw integers remain
+                legacy-only.
             overall_height_mils: Top Z height of the body in mils.
             standoff_height_mils: Bottom Z height of the body in mils.
             cavity_height_mils: Native cavity height field in mils.
@@ -1151,7 +1291,7 @@ class AltiumPcbFootprint:
         self,
         *,
         outline_points_mils: list[tuple[float, float]],
-        layer: int | PcbLayer = PcbLayer.MECHANICAL_1,
+        layer: PcbLayerLike = PcbLayer.MECHANICAL_1,
         overall_height_mils: float,
         standoff_height_mils: float = 0.0,
         side: PcbBodyProjection = PcbBodyProjection.TOP,
@@ -1166,9 +1306,9 @@ class AltiumPcbFootprint:
         Args:
             outline_points_mils: Footprint-local polygon vertices for the 2D
                 projection in mils.
-            layer: Mechanical `PcbLayer` or legacy/TV6 layer integer id that
-                owns the 3D body projection. Serialized V7 saved layer IDs are
-                not accepted here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id that owns the 3D body projection. Raw integers
+                remain legacy-only.
             overall_height_mils: Top Z of the extruded body in mils.
             standoff_height_mils: Bottom Z of the extruded body in mils.
             side: `PcbBodyProjection` board side/projection for the body.
@@ -1202,9 +1342,19 @@ class AltiumPcbFootprint:
         """
         Adapt this footprint into the board-shaped object expected by the PCB SVG renderer.
         """
+        from .altium_board import AltiumBoard
         from .altium_pcbdoc import AltiumPcbDoc
 
         pcbdoc = AltiumPcbDoc()
+        names_by_v7_id, enabled_mechanical_v7_ids = self._pcblib_svg_layer_cache()
+        if names_by_v7_id:
+            pcbdoc.board = AltiumBoard(
+                v9_layer_cache=dict(names_by_v7_id),
+                raw_record=_pcblib_svg_board_record(
+                    names_by_v7_id,
+                    enabled_mechanical_v7_ids,
+                ),
+            )
         pcbdoc.pads = self.pads
         pcbdoc.vias = self.vias
         pcbdoc.tracks = self.tracks
@@ -1290,7 +1440,7 @@ class AltiumPcbFootprint:
         overall_height_mils: float | None = None,
         bounds_mils: PcbBoundsMils | None = None,
         projection_outline_mils: Sequence[PcbPointMils] | None = None,
-        layer: int | PcbLayer = PcbLayer.MECHANICAL_1,
+        layer: PcbLayerLike = PcbLayer.MECHANICAL_1,
         side: PcbBodyProjection = PcbBodyProjection.TOP,
         location_mils: PcbPointMils = (0.0, 0.0),
         rotation_x_degrees: float | None = None,
@@ -1343,9 +1493,9 @@ class AltiumPcbFootprint:
                 bottom_mils, right_mils, top_mils)`.
             projection_outline_mils: Optional non-rectangular projection polygon
                 vertices in mils.
-            layer: `PcbLayer` or legacy/TV6 layer integer id that owns the
-                projection. Serialized V7 saved layer IDs are not accepted
-                here.
+            layer: `PcbLayerRef`, semantic token, `PcbLayer`, or legacy/TV6
+                layer integer id that owns the projection. Raw integers remain
+                legacy-only.
             side: `PcbBodyProjection` side/projection mode.
             location_mils: Model XY placement point in mils.
             rotation_x_degrees: Optional X-axis rotation override in degrees.
@@ -2162,6 +2312,25 @@ class AltiumPcbLib:
         self.combine_provenance: dict[str, object] | None = None
         self._authoring_builder: Any | None = None
 
+    def _sync_footprint_svg_layer_cache(self) -> None:
+        names_by_v7_id: dict[int, str] = {}
+        enabled_mechanical_v7_ids: tuple[int, ...] = ()
+        try:
+            from .altium_pcblib_builder import PcbLibLibraryData
+
+            library_data = PcbLibLibraryData.from_bytes(self._get_library_data_header())
+            names_by_v7_id, enabled_mechanical_v7_ids = (
+                _pcblib_svg_layer_cache_from_layer_table(library_data.layer_table)
+            )
+        except Exception as exc:
+            log.debug("Failed to sync PcbLib SVG layer metadata: %s", exc)
+
+        for footprint in self.footprints:
+            footprint._bind_pcblib_svg_layer_cache(
+                names_by_v7_id,
+                enabled_mechanical_v7_ids,
+            )
+
     def _profile_for_authoring_builder(self) -> "PcbLibBuildProfile":
         from .altium_pcblib_builder import PcbLibBuildProfile
 
@@ -2224,6 +2393,7 @@ class AltiumPcbLib:
         self.raw_file_version_info_header = authored.raw_file_version_info_header
         self.raw_file_version_info = authored.raw_file_version_info
         self.raw_section_keys = authored.raw_section_keys
+        self._sync_footprint_svg_layer_cache()
 
     def add_footprint(
         self,
@@ -2300,7 +2470,8 @@ class AltiumPcbLib:
 
         Args:
             layer: Mechanical layer token or number. Supported tokens include
-                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                `"MECHANICAL17"` and `"MECHANICAL53"`;
+                `PcbLayer.MECHANICAL_*` enum values cover
                 Mechanical 1 through 16.
             name: Optional display name. If omitted, the existing layer-table
                 label is preserved, falling back to `Mechanical N`.
@@ -2475,7 +2646,9 @@ class AltiumPcbLib:
             return ()
 
         references: list[EmbeddedAssetReference] = []
-        for footprint_index, footprint in enumerate(self._current_footprints_for_inventory()):
+        for footprint_index, footprint in enumerate(
+            self._current_footprints_for_inventory()
+        ):
             for body_index, body in enumerate(footprint.component_bodies):
                 body_model_id = str(getattr(body, "model_id", "") or "").upper()
                 if body_model_id != normalized_asset_id:
@@ -2602,7 +2775,9 @@ class AltiumPcbLib:
                         pattern=name,
                         occurrence=index + 1,
                         pad_count=len(getattr(footprint, "pads", []) or []),
-                        primitive_count=len(getattr(footprint, "_record_order", []) or []),
+                        primitive_count=len(
+                            getattr(footprint, "_record_order", []) or []
+                        ),
                     ),
                 )
             )
@@ -3024,6 +3199,20 @@ class AltiumPcbLib:
                 parse_extended_primitive_information_stream(raw_extended)
             )
 
+        raw_corner_radius = cls._load_optional_stream(
+            ole,
+            footprint,
+            "raw_corner_radius_chamfer",
+            [ole_name, "CornerRadiusChamfer"],
+        )
+        if raw_corner_radius is not None:
+            footprint.corner_radius_chamfer = (
+                parse_corner_radius_chamfer_footprint_stream(raw_corner_radius)
+            )
+            attach_corner_radius_chamfer_to_pads(
+                footprint.corner_radius_chamfer, footprint._record_order
+            )
+
         cls._load_optional_stream(
             ole,
             footprint,
@@ -3185,6 +3374,7 @@ class AltiumPcbLib:
             footprint_names = cls._load_library_data_and_footprint_names(ole, pcblib)
             cls._parse_footprints(ole, pcblib, footprint_names, section_key_map, debug)
             cls._load_3d_models(ole, pcblib)
+            pcblib._sync_footprint_svg_layer_cache()
 
         log.info(f"Parsed successfully: {len(pcblib.footprints)} footprint(s)")
         return pcblib
@@ -3214,6 +3404,7 @@ class AltiumPcbLib:
             footprint_names = cls._load_library_data_and_footprint_names(ole, pcblib)
             cls._parse_footprints(ole, pcblib, footprint_names, section_key_map, debug)
             cls._load_3d_models(ole, pcblib)
+            pcblib._sync_footprint_svg_layer_cache()
 
         log.info(f"Parsed byte-backed PcbLib: {len(pcblib.footprints)} footprint(s)")
         return pcblib
@@ -3432,6 +3623,16 @@ class AltiumPcbLib:
                 else None
             ),
         )
+        corner_records = corner_radius_chamfer_records_for_pads(
+            footprint.corner_radius_chamfer, footprint._record_order
+        )
+        footprint.corner_radius_chamfer = corner_records
+        if corner_records:
+            writer.add_stream(
+                f"{storage_name}/CornerRadiusChamfer",
+                serialize_corner_radius_chamfer_footprint_stream(corner_records),
+            )
+
         self._add_optional_stream(
             writer,
             f"{storage_name}/ViaStructureManager",

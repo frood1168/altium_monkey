@@ -111,8 +111,10 @@ Human-facing PCB layer labels are separate from stable layer tokens.
 uses the resolved board layer stack when one is available and otherwise falls
 back to the default layer display label.
 
-PcbLib footprints do not own a board layer stack, so footprint SVG output can
-only use default display labels.
+PcbLib footprints do not own a board signal stack, but PcbLib mechanical layer
+registry metadata can provide custom mechanical display labels. When no
+library registry label is available, footprint SVG output falls back to the
+default display label.
 
 When PCB metadata is enabled, the PCB SVG root carries render-context
 attributes:
@@ -131,12 +133,20 @@ PCB layer groups use ids such as `layer-TOP`, `layer-BOTTOM`, and
 primitives carry:
 
 - `data-layer-id`: legacy source layer id for native layers; renderer-assigned
-  id for derived layers
-- `data-layer-key`: stable short key such as `L1`, `L32`, or `DRILLS`
+  id for derived layers. V7-only native layers omit this attribute rather than
+  inventing a fake legacy id.
+- `data-layer-key`: stable short key such as `L1`, `L32`, `DRILLS`, or
+  `V7_16908321`
 - `data-layer-name`: stable token such as `TOP`, `BOTTOM`, or `DRILLS`
 - `data-layer-display-name`: human-facing label
+- `data-layer-token`: V7-aware stable token when a layer reference is resolved,
+  such as `MECHANICAL33` or `MID126`
+- `data-layer-family`: normalized layer family such as `signal` or
+  `mechanical`
 - `data-layer-role`: normalized role such as `copper`, `silkscreen`,
   `soldermask`, `paste`, `mechanical`, `drill`, or `other`
+- `data-layer-v7-saved-id`: serialized V7 saved-layer id when the source layer
+  is represented by that identity family
 
 Layer groups are classified by origin:
 
@@ -150,21 +160,25 @@ Layer groups are classified by origin:
   They are not native board layers and should not be interpreted as fabrication
   data.
 
-The current public SVG layer contract is legacy-layer-token oriented. Native
-groups use `PcbLayer` token names such as `TOP`, `BOTTOM`, and `TOPOVERLAY`,
-plus documented renderer-derived groups such as `DRILLS`. `PcbLayer` is the
-legacy/TV6 enum and contains Top, Mid1 through Mid30, Bottom, and Mechanical 1
-through Mechanical 16 only. Serialized V7 saved layer ids such as `0x01020011`
-for Mechanical 17 or `0x01000020` for Mid31 are not `PcbLayer` values and are
-not accepted by `visible_layers` or `layer_render_order` unless a future
-V7-aware layer-reference API explicitly changes that contract.
+The current public SVG layer contract is V7-layer-token oriented while keeping
+legacy `PcbLayer` selectors working. Native groups use stable tokens such as
+`TOP`, `BOTTOM`, `TOPOVERLAY`, `MECHANICAL33`, and `MID126`, plus documented
+renderer-derived groups such as `DRILLS`. `PcbLayer` is still the legacy/TV6
+enum and contains Top, Mid1 through Mid30, Bottom, and Mechanical 1 through
+Mechanical 16 only.
 
-Current SVG output is not a fidelity contract for parsed extended V7 layers.
-Primitives whose real layer is recoverable only from V7 side fields, for
-example Mechanical 33 records with legacy `layer=72` and
-`v7_layer_id=16908321`, or AD 26.8.1 extended signal-layer primitives on
-Mid31+, may be omitted, rejected, or grouped through the legacy fallback until
-V7-aware layer references are implemented.
+Use `PcbLayerRef` values or semantic tokens for layers outside the legacy enum.
+Serialized V7 saved layer ids such as `0x01020011` for Mechanical 17 or
+`0x01000020` for Mid31 are source diagnostics, not public selectors for
+`visible_layers` or `layer_render_order`.
+
+For migrated primitive families, SVG output preserves V7 side-field identity.
+Tracks, arcs, fills, texts, regions, and component-body projections whose real
+layer is recoverable only from V7 side fields render under their resolved token
+when that layer is supported by the board or library registry. V7-only signal
+rendering depends on stack-backed registry evidence, normally from a
+`.stackupx`-backed PcbDoc. Pads, vias, and unsupported native primitive
+families remain on their documented conservative paths.
 
 When `PcbSvgRenderOptions(include_render_layer_metadata=True)` is set, the
 embedded enrichment JSON also includes `layers.render_layers`. This is the
@@ -180,6 +194,24 @@ can emit without scanning SVG group ids. Each entry has this shape:
   "role": "copper",
   "kind": "native",
   "source": "altium"
+}
+```
+
+V7-only native layers omit `id` and use a V7 layer key plus saved-layer
+diagnostics:
+
+```json
+{
+  "key": "V7_16908321",
+  "name": "MECHANICAL33",
+  "token": "MECHANICAL33",
+  "display_name": "Sample Mechanical 33",
+  "custom_name": "Sample Mechanical 33",
+  "family": "mechanical",
+  "role": "mechanical",
+  "kind": "native",
+  "source": "altium",
+  "v7_saved_layer_id": 16908321
 }
 ```
 
@@ -200,10 +232,10 @@ Derived layers use the same base fields and add derivation metadata:
 
 The stable consumer rules are:
 
-- `name` is the stable token used in SVG group ids, filenames, and
+- `name` and `token` are stable tokens used in SVG group ids, filenames, and
   `to_layer_svgs(...)` dictionary keys.
 - `display_name` is a human-facing label and may come from the board layer
-  stack for parsed PcbDoc files.
+  stack or mechanical-layer registry.
 - `role` is a normalized broad category for filtering and UI grouping.
 - `kind="native"` means the entry is backed by source Altium layer data.
 - `kind="derived"` means the entry is synthesized by the renderer from source
@@ -219,17 +251,17 @@ returns one SVG per selected native/derived layer; top-level overlay groups may
 be promoted by review tooling for visibility but remain identifiable by their
 overlay metadata.
 
-`visible_layers` and `layer_render_order` accept native legacy `PcbLayer`
-values.
+`visible_layers` and `layer_render_order` accept legacy `PcbLayer` values,
+`PcbLayerRef` values, registry entries, and semantic layer tokens or unique
+display names that resolve through the current registry.
 Derived layers such as `DRILLS` are controlled by renderer options rather than
 by inventing public `PcbLayer` enum values. With the default
 `drill_holes_as_layer_group=True`, drill holes are emitted in the derived
 `DRILLS` layer group instead of being interleaved inside copper layer groups.
 
-Mechanical 17+ and Mid31+ SVG/export behavior is future V7-aware
-layer-reference work. Current docs must not imply that those layers can be
-selected by adding enum values after `PcbLayer.MECHANICAL_16` or
-`PcbLayer.MID30`.
+Mechanical 17 through Mechanical53 and StackUpX-backed Mid31 through Mid126
+selection use `PcbLayerRef` or semantic tokens. They are not selected by adding
+enum values after `PcbLayer.MECHANICAL_16` or `PcbLayer.MID30`.
 
 PCB primitive metadata uses `data-primitive` values such as `track`, `arc`,
 `pad`, `via`, `region`, `text`, `pad-hole`, and `via-hole`. Relationship
@@ -428,10 +460,11 @@ artifact actually contains:
   layer groups and board-outline geometry
 - `included_layer_ids`: sorted renderer layer ids for `id="layer-*"` groups
   actually emitted in this SVG. These are legacy source ids for native legacy
-  layers and renderer-assigned ids for derived layers such as `DRILLS`, not
-  serialized V7 saved layer ids. Requested layers filtered out as empty are
-  not listed unless `show_empty_layers=True` causes an empty group to be
-  emitted.
+  layers and renderer-assigned ids for derived layers such as `DRILLS`. V7-only
+  native layers do not appear in this legacy-id list; use `render_layers` and
+  element `data-layer-token`/`data-layer-v7-saved-id` attributes for those
+  identities. Requested layers filtered out as empty are not listed unless
+  `show_empty_layers=True` causes an empty group to be emitted.
 - `includes_board_outline`: true only when board-outline geometry is actually
   emitted
 
@@ -449,8 +482,10 @@ context:
 Human-facing layer names, normalized roles, native/derived classification, and
 derivation details are available through the optional `render_layers` registry,
 not through the legacy layer-id maps.
-Use `layers.all_layer_ids` and `layers.render_layers` for discovery. Use
-`view.included_layer_ids` for the layer groups present in the current SVG.
+Use `layers.render_layers` for V7-aware discovery. Use `layers.all_layer_ids`
+only for legacy-id and derived-id compatibility, and use
+`view.included_layer_ids` for the legacy or derived layer groups present in the
+current SVG.
 
 The schema contract pages contain the machine-readable payload shape. The SVG
 contract here documents how that payload relates to the rendered SVG elements.

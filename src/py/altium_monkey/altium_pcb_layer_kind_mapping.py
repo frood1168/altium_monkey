@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+import uuid
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
@@ -92,6 +93,37 @@ def mechanical_layer_set_token(mechanical_number: int) -> str:
     """Return the layer-set token for a mechanical layer number."""
 
     return f"Mechanical{int(mechanical_number)}"
+
+
+# Deterministic namespace for authored mechanical layer-cache row ids shared by
+# the PcbDoc and PcbLib builders.
+_MECHANICAL_LAYER_ROW_ID_NAMESPACE = uuid.UUID("c5a4fe4c-4c13-5f4b-83b5-9b6f72ec6d04")
+
+
+def mechanical_layer_v9_cache_index(mechanical_number: int) -> int:
+    """Return the V9 layer-cache group index for a mechanical layer number."""
+
+    if mechanical_number <= 16:
+        return 68 + mechanical_number
+    return 69 + mechanical_number
+
+
+def mechanical_layer_v8_index(mechanical_number: int) -> int:
+    """Return the V8 layer-cache group index for a mechanical layer number."""
+
+    if mechanical_number <= 16:
+        return 10 + mechanical_number
+    return 23 + mechanical_number
+
+
+def authored_mechanical_layer_row_id(mechanical_number: int) -> str:
+    """Return the braced deterministic row GUID for an authored mechanical layer."""
+
+    row_id = uuid.uuid5(
+        _MECHANICAL_LAYER_ROW_ID_NAMESPACE,
+        f"mechanical-layer:{int(mechanical_number)}",
+    )
+    return "{" + str(row_id).upper() + "}"
 
 
 def kind_mapping_id_to_mechanical_layer_number(layer_id: int) -> int | None:

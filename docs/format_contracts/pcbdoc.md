@@ -34,6 +34,9 @@
   `set_mechanical_layer_kind(...)`. The mapping is stored in
   `LayerKindMapping/Data` and synchronized into the Board6 `MECHKIND`
   layer-table/cache fields used by Altium.
+- Author mechanical layer display names, enabled flags, and component mirror
+  pairs through `set_mechanical_layer(...)` and
+  `set_mechanical_layer_pair(...)`.
 - Render PCB SVG and PCB layer SVGs.
 
 ## Object Model
@@ -81,6 +84,31 @@ This differs from PcbLib, where footprint custom pads use
 PcbDoc and PcbLib APIs intentionally expose the same semantic
 `add_custom_pad(...)` shape while preserving the container-specific native
 storage contracts.
+
+## Pad Corner Radius
+
+Rounded-rectangle pad corner radius uses Altium's native dual-lane storage.
+The pad record (SubRecord 6) carries a rounded integer percent per layer.
+Exact fractional percents are stored separately in the board-level
+`CornerRadiusChamfer` section as text blocks of the form
+`|SCR0.LAYER=<layer>|SCR0.CRPCTEX=<percent>|PRIMITIVEINDEX=<n>`, where
+`PRIMITIVEINDEX` is the zero-based pad position in board pad-list order.
+
+Read accessors on `AltiumPcbPad`:
+
+- `corner_radius_percentage` is the legacy rounded integer lane.
+- `corner_radius_percent_exact` is the exact fractional percent when present.
+- `exact_corner_radius_percent_by_layer` and
+  `exact_corner_radius_percent_on_layer(layer)` expose per-layer exact values.
+- `corner_radius_mils_on_layer(layer)` resolves the effective radius, preferring
+  the exact lane; the radius is `percent / 200 * min(width, height)`, capped at
+  half the smaller pad dimension.
+
+Authoring uses `add_pad(..., corner_radius_percent=...)`. Whole-number
+percents write only the legacy integer lane, so existing whole-number output
+stays byte-identical. Fractional percents write both lanes and are supported
+for simple top- or bottom-layer pads; they are not combined with per-layer pad
+body overrides. Round-tripped documents preserve both lanes.
 
 ## Dimensions
 
@@ -144,11 +172,12 @@ consumer also needs selectable footprints or schematic symbols.
 
 ## Layer Names
 
-Current primitive authoring APIs are legacy-layer-first. `PcbLayer` is the
-legacy/TV6 enum and contains Top, Mid1 through Mid30, Bottom, and Mechanical 1
-through Mechanical 16 only. Serialized V7 saved layer ids, V8 Layer Stack
-Manager rows, V9 Board6 cache rows, and LayerKindMapping ids are separate
-identity systems; see the public PCB layers guide.
+Primitive authoring APIs keep `PcbLayer` as the legacy/TV6 enum and use
+`PcbLayerRef` for V7-aware layer identity. `PcbLayer` contains Top, Mid1
+through Mid30, Bottom, and Mechanical 1 through Mechanical 16 only. Serialized
+V7 saved layer ids, V8 Layer Stack Manager rows, V9 Board6 cache rows, and
+LayerKindMapping ids are separate identity systems; see the public PCB layers
+guide.
 
 Stable layer keys use token names such as `TOP`, `BOTTOM`, and `TOPOVERLAY`.
 Mechanical layer display names, enabled flags, and mirror pairs are board
@@ -159,10 +188,16 @@ Default display labels are fallback labels, not stable identifiers.
 `ResolvedLayerStack` is a derived read-only consumer view; new PcbDoc authoring
 uses `AltiumLayerStackDocument`.
 
-Mechanical 17+ and AD 26.8.1 extended signal-layer primitive
-SVG/export/authoring support is deferred to future V7-aware layer-reference
-work. Do not model these by adding `PcbLayer` enum values after Mechanical 16
-or after Mid30.
+Use `PcbLayerRef` or documented semantic tokens for layers outside the legacy
+enum. Track, arc, fill, text, region, and component-body helpers can author
+ordinary numbered mechanical layers through Mechanical53. Track, arc, fill,
+text, and region helpers can author V7-only signal refs such as Mid31 through
+Mid126 when `set_layer_stack_document(...)` supplies matching enabled
+physical-stack evidence, normally from `.stackupx`.
+
+Pads and vias remain conservative. Legacy signal-layer pads and vias are
+supported. V7-only signal pads/vias and non-signal via span endpoints reject
+until the native storage and stack/span semantics are fixture-proven.
 
 ## Layer Stack And Interchange
 

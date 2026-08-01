@@ -38,6 +38,7 @@ from .altium_board import (
 )
 from .altium_pcb_enums import (
     MechanicalLayerKind,
+    PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX,
     PcbGuidType,
     PcbIpc4761ViaType,
     PcbLibIdentifierKind,
@@ -47,12 +48,29 @@ from .altium_pcb_enums import (
 )
 from .altium_pcb_layer_kind_mapping import (
     PcbLayerKindMapping,
+    authored_mechanical_layer_row_id,
     coerce_layer_kind_mapping_layer_id,
     coerce_mechanical_layer_kind,
     mechanical_layer_kind_to_data_token,
     mechanical_layer_number_to_legacy_layer_id,
     mechanical_layer_set_token,
+    mechanical_layer_v8_index,
+    mechanical_layer_v9_cache_index,
     split_layer_set_nonmechanical_parts,
+)
+from .altium_pcb_layer_ref import (
+    PcbLayerFamily,
+    PcbLayerLike,
+    PcbLayerRegistry,
+    PcbLayerRegistryEntry,
+    PcbLayerRef,
+    PcbLayerResolutionError,
+)
+from .altium_pcb_corner_radius_chamfer import (
+    AltiumPcbCornerRadiusChamfer,
+    build_corner_radius_chamfer_record,
+    parse_corner_radius_chamfer_records,
+    serialize_corner_radius_chamfer_records,
 )
 from .altium_pcb_extended_primitive_information import (
     AltiumPcbExtendedPrimitiveInformation,
@@ -980,6 +998,339 @@ def _outline_points_for_board_region(
     return tuple(points)
 
 
+@dataclass(frozen=True)
+class _LayerRegistryStackContext:
+    stack_index: int | None = None
+    signal_stack_position: int | None = None
+    signal_layer_count: int | None = None
+
+
+@dataclass(frozen=True)
+class _SignalStackRowContext:
+    registry_ref: str
+    stack_index: int | None
+    authoring_enabled: bool
+
+
+def _layer_ref_registry_from_stack_document(
+    document: "AltiumLayerStackDocument",
+) -> PcbLayerRegistry:
+    stack_contexts = _layer_ref_stack_contexts_by_registry_ref(document)
+    entries = tuple(
+        entry
+        for entry in (
+            _layer_ref_registry_entry_from_stack_entry(source_entry, stack_contexts)
+            for source_entry in _stack_document_registry_entries(document)
+        )
+        if entry is not None
+    )
+    return PcbLayerRegistry(entries=entries)
+
+
+def _layer_ref_registry_from_build_profile(
+    profile: object,
+) -> PcbLayerRegistry | None:
+    try:
+        from .altium_layer_stack_document import AltiumLayerStackDocument
+
+        document = AltiumLayerStackDocument.from_pcbdoc_builder_profile(profile)
+        return _layer_ref_registry_from_stack_document(document)
+    except (
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        PcbLayerResolutionError,
+    ):
+        return None
+
+
+def _layer_ref_stack_contexts_by_registry_ref(
+    document: "AltiumLayerStackDocument",
+) -> dict[str, _LayerRegistryStackContext]:
+    source_entries = _source_registry_entries_by_model_id(document)
+    contexts, _signal_refs = _first_signal_stack_contexts(document, source_entries)
+    return contexts
+
+
+def _layer_ref_registry_entry_from_stack_entry(
+    source_entry: object,
+    stack_contexts: Mapping[str, _LayerRegistryStackContext],
+) -> PcbLayerRegistryEntry | None:
+    ref = _layer_ref_from_stack_registry_entry(source_entry)
+    if ref is None:
+        return None
+    display_name = str(getattr(source_entry, "display_name", "") or ref.token)
+    context = stack_contexts.get(str(getattr(source_entry, "model_id", "") or ""))
+    return PcbLayerRegistryEntry(
+        ref=ref,
+        display_name=display_name,
+        custom_name=_custom_layer_name(display_name, ref),
+        default_name=str(getattr(source_entry, "standard_token", "") or ref.token),
+        enabled=getattr(source_entry, "enabled", None),
+        used_by_primitives=getattr(source_entry, "used_by_primitives", None),
+        stack_index=context.stack_index if context is not None else None,
+        signal_stack_position=(
+            context.signal_stack_position if context is not None else None
+        ),
+        signal_layer_count=context.signal_layer_count if context is not None else None,
+        side=getattr(source_entry, "side", None),
+        source_aliases=tuple(getattr(source_entry, "source_aliases", ()) or ()),
+        source_keys=_source_entry_keys(source_entry),
+    )
+
+
+def _stack_document_registry_entries(
+    document: "AltiumLayerStackDocument",
+) -> tuple[object, ...]:
+    source_registry = getattr(document, "layer_registry", None)
+    return tuple(getattr(source_registry, "entries", ()) or ())
+
+
+def _source_registry_entries_by_model_id(
+    document: "AltiumLayerStackDocument",
+) -> dict[str, object]:
+    return {
+        str(getattr(entry, "model_id", "") or ""): entry
+        for entry in _stack_document_registry_entries(document)
+    }
+
+
+def _first_signal_stack_contexts(
+    document: "AltiumLayerStackDocument",
+    source_entries: Mapping[str, object],
+) -> tuple[dict[str, _LayerRegistryStackContext], tuple[str, ...]]:
+    contexts: dict[str, _LayerRegistryStackContext] = {}
+    for stack in tuple(getattr(document, "physical_stacks", ()) or ()):
+        signal_refs = _collect_stack_signal_contexts(
+            stack,
+            source_entries,
+            contexts,
+            enabled_layer_refs=_enabled_layer_refs_for_stack_context(
+                document,
+                stack,
+            ),
+        )
+        if signal_refs:
+            return contexts, tuple(signal_refs)
+    return contexts, ()
+
+
+def _collect_stack_signal_contexts(
+    stack: object,
+    source_entries: Mapping[str, object],
+    contexts: dict[str, _LayerRegistryStackContext],
+    *,
+    enabled_layer_refs: frozenset[str] | None = None,
+) -> list[str]:
+    signal_rows = _signal_stack_rows_for_context(
+        stack,
+        source_entries,
+        contexts,
+        enabled_layer_refs=enabled_layer_refs,
+    )
+    signal_count = len(signal_rows)
+    enabled_signal_refs: list[str] = []
+    for position, row in enumerate(signal_rows, start=1):
+        if not row.authoring_enabled:
+            continue
+        contexts[row.registry_ref] = _LayerRegistryStackContext(
+            stack_index=row.stack_index,
+            signal_stack_position=position,
+            signal_layer_count=signal_count,
+        )
+        enabled_signal_refs.append(row.registry_ref)
+    return enabled_signal_refs
+
+
+def _signal_stack_rows_for_context(
+    stack: object,
+    source_entries: Mapping[str, object],
+    contexts: Mapping[str, _LayerRegistryStackContext],
+    *,
+    enabled_layer_refs: frozenset[str] | None,
+) -> tuple[_SignalStackRowContext, ...]:
+    rows: list[_SignalStackRowContext] = []
+    for layer in tuple(getattr(stack, "layers", ()) or ()):
+        row = _signal_stack_row_for_context(
+            layer,
+            source_entries,
+            contexts,
+            enabled_layer_refs=enabled_layer_refs,
+        )
+        if row is not None:
+            rows.append(row)
+    return tuple(rows)
+
+
+def _signal_stack_row_for_context(
+    layer: object,
+    source_entries: Mapping[str, object],
+    contexts: Mapping[str, _LayerRegistryStackContext],
+    *,
+    enabled_layer_refs: frozenset[str] | None,
+) -> _SignalStackRowContext | None:
+    registry_ref = str(getattr(layer, "registry_ref", "") or "")
+    if not registry_ref or registry_ref in contexts:
+        return None
+    source_entry = source_entries.get(registry_ref)
+    ref = _layer_ref_from_stack_layer(layer)
+    if ref is None:
+        ref = _layer_ref_from_stack_registry_entry(source_entry)
+    if ref is None or ref.family != PcbLayerFamily.SIGNAL:
+        return None
+    return _SignalStackRowContext(
+        registry_ref=registry_ref,
+        stack_index=_optional_int(getattr(layer, "stack_index", None)),
+        authoring_enabled=(
+            _registry_ref_enabled_for_signal_context(
+                registry_ref,
+                enabled_layer_refs=enabled_layer_refs,
+            )
+            and _source_entry_allows_primitive_context(source_entry)
+        ),
+    )
+
+
+def _registry_ref_enabled_for_signal_context(
+    registry_ref: str,
+    *,
+    enabled_layer_refs: frozenset[str] | None,
+) -> bool:
+    if enabled_layer_refs is None:
+        return True
+    return _normalized_stack_context_ref(registry_ref) in enabled_layer_refs
+
+
+def _enabled_layer_refs_for_stack_context(
+    document: "AltiumLayerStackDocument",
+    stack: object,
+) -> frozenset[str] | None:
+    substack = _substack_for_stack_context(document, stack)
+    if substack is None:
+        return None
+    refs = _substack_enabled_layer_refs(substack)
+    if _substack_enabled_refs_are_authoritative(substack, stack, refs):
+        return frozenset(refs)
+    return None
+
+
+def _substack_enabled_layer_refs(substack: object) -> tuple[str, ...]:
+    return tuple(
+        _normalized_stack_context_ref(ref)
+        for ref in tuple(getattr(substack, "enabled_layer_refs", ()) or ())
+        if _normalized_stack_context_ref(ref)
+    )
+
+
+def _substack_enabled_refs_are_authoritative(
+    substack: object,
+    stack: object,
+    refs: Sequence[str],
+) -> bool:
+    if refs:
+        return True
+    field_family = str(getattr(substack, "field_family", "") or "").strip().lower()
+    stack_source = str(getattr(stack, "source_family", "") or "").strip().lower()
+    return field_family == "stackupx" or stack_source == "stackupx"
+
+
+def _substack_for_stack_context(
+    document: "AltiumLayerStackDocument",
+    stack: object,
+) -> object | None:
+    stack_ref = _normalized_stack_context_ref(getattr(stack, "stack_ref", None))
+    if not stack_ref:
+        return None
+    for substack in tuple(getattr(document, "substacks", ()) or ()):
+        substack_ref = _normalized_stack_context_ref(
+            getattr(substack, "source_stackup_ref", None)
+        )
+        if substack_ref == stack_ref:
+            return substack
+    return None
+
+
+def _source_entry_allows_primitive_context(source_entry: object | None) -> bool:
+    if source_entry is None:
+        return True
+    if getattr(source_entry, "enabled", None) is False:
+        return False
+    return getattr(source_entry, "used_by_primitives", None) is not False
+
+
+def _normalized_stack_context_ref(value: object) -> str:
+    return str(value or "").strip().lower()
+
+
+def _source_entry_keys(source_entry: object) -> tuple[str, ...]:
+    source_record_id = str(getattr(source_entry, "source_record_id", "") or "")
+    if not source_record_id:
+        return ()
+    return (source_record_id,)
+
+
+def _layer_ref_from_stack_registry_entry(source_entry: object) -> PcbLayerRef | None:
+    for attr_name in ("v7_layer_id", "source_layer_id"):
+        ref = _layer_ref_from_v7_saved_id(getattr(source_entry, attr_name, None))
+        if ref is not None:
+            return ref
+    token = str(getattr(source_entry, "standard_token", "") or "").strip()
+    if token:
+        try:
+            return PcbLayerRef.parse(token)
+        except PcbLayerResolutionError:
+            pass
+    return _layer_ref_from_legacy_id(getattr(source_entry, "legacy_layer_id", None))
+
+
+def _layer_ref_from_stack_layer(layer: object) -> PcbLayerRef | None:
+    ref = _layer_ref_from_v7_saved_id(getattr(layer, "layer_id", None))
+    if ref is not None:
+        return ref
+    return _layer_ref_from_legacy_id(getattr(layer, "legacy_layer_id", None))
+
+
+def _layer_ref_from_v7_saved_id(value: object) -> PcbLayerRef | None:
+    native_value = _optional_int(value)
+    if native_value is None or native_value <= 0:
+        return None
+    try:
+        return PcbLayerRef.from_v7_saved_layer_id(native_value)
+    except PcbLayerResolutionError:
+        return None
+
+
+def _layer_ref_from_legacy_id(value: object) -> PcbLayerRef | None:
+    legacy_value = _optional_int(value)
+    if legacy_value is None:
+        return None
+    try:
+        return PcbLayerRef.from_legacy(legacy_value)
+    except PcbLayerResolutionError:
+        return None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _custom_layer_name(display_name: str, ref: PcbLayerRef) -> str | None:
+    normalized_display = str(display_name or "").strip()
+    if not normalized_display or normalized_display.upper() == ref.token:
+        return None
+    return normalized_display
+
+
 def _sample_board_outline_arc(
     current: BoardOutlineVertex,
     nxt: BoardOutlineVertex,
@@ -1301,41 +1652,42 @@ class _PcbDocEntryLookupMixin:
 
 
 def _coerce_mechanical_layer_number(layer: int | str | PcbLayer) -> int:
+    max_layer = PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX
     if isinstance(layer, PcbLayer):
         layer_id = int(layer)
         if PcbLayer.MECHANICAL_1.value <= layer_id <= PcbLayer.MECHANICAL_16.value:
             return layer_id - PcbLayer.MECHANICAL_1.value + 1
-        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+        raise ValueError(f"Layer is not Mechanical 1..{max_layer}: {layer!r}")
     elif isinstance(layer, int):
         value = int(layer)
         if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
             return value - PcbLayer.MECHANICAL_1.value + 1
-        if 1 <= value <= 32:
+        if 1 <= value <= max_layer:
             return value
-        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+        raise ValueError(f"Layer is not Mechanical 1..{max_layer}: {layer!r}")
     else:
         token = "".join(ch for ch in str(layer or "").upper() if ch.isalnum())
         if token.isdigit():
             value = int(token)
             if PcbLayer.MECHANICAL_1.value <= value <= PcbLayer.MECHANICAL_16.value:
                 return value - PcbLayer.MECHANICAL_1.value + 1
-            if 1 <= value <= 32:
+            if 1 <= value <= max_layer:
                 return value
-            raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+            raise ValueError(f"Layer is not Mechanical 1..{max_layer}: {layer!r}")
         if token.startswith("MECHANICAL"):
             suffix = token.removeprefix("MECHANICAL")
             if suffix.isdigit():
                 value = int(suffix)
-                if 1 <= value <= 32:
+                if 1 <= value <= max_layer:
                     return value
-            raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+            raise ValueError(f"Layer is not Mechanical 1..{max_layer}: {layer!r}")
         try:
             parsed = int(PcbLayer.from_json_name(token))
         except ValueError as exc:
             raise ValueError(f"Unsupported mechanical layer: {layer!r}") from exc
         if PcbLayer.MECHANICAL_1.value <= parsed <= PcbLayer.MECHANICAL_16.value:
             return parsed - PcbLayer.MECHANICAL_1.value + 1
-        raise ValueError(f"Layer is not Mechanical 1..32: {layer!r}")
+        raise ValueError(f"Layer is not Mechanical 1..{max_layer}: {layer!r}")
 
 
 def _coerce_mechanical_layer_id(layer: int | str | PcbLayer) -> int:
@@ -1684,6 +2036,13 @@ class PcbDocBoardData:
     @property
     def top_level_board(self) -> AltiumBoard:
         return AltiumBoard.from_record(self.top_level_segment.to_mapping())
+
+    @property
+    def board(self) -> AltiumBoard:
+        merged: dict[str, str] = {}
+        for segment in self.segments:
+            merged.update(segment.to_mapping())
+        return AltiumBoard.from_record(merged)
 
     def with_segment(
         self, index: int, segment: PcbDocBoardDataSegment
@@ -2252,6 +2611,124 @@ class PcbDocBoardData:
             ),
         )
 
+    @staticmethod
+    def _indexed_layer_fields_for_update(
+        field_values: Mapping[str, str],
+        positions: Mapping[str, int],
+    ) -> tuple[tuple[str, str], ...]:
+        selected: list[tuple[str, str]] = []
+        for field_name, value in field_values.items():
+            normalized_field = field_name.upper()
+            if normalized_field in {"NAME", "MECHENABLED"}:
+                selected.append((normalized_field, value))
+            elif normalized_field not in positions:
+                selected.append((normalized_field, value))
+        return tuple(selected)
+
+    @staticmethod
+    def _indexed_layer_insert_position(
+        *,
+        key_re: re.Pattern[str],
+        group_index: int,
+        entries: Sequence[PcbDocBoardDataEntry],
+    ) -> int:
+        group_positions = [
+            (int(match.group(1)), entry_index)
+            for entry_index, entry in enumerate(entries)
+            if (match := key_re.match(entry.key or "")) is not None
+        ]
+        lower_positions = [
+            entry_index
+            for existing_index, entry_index in group_positions
+            if existing_index < group_index
+        ]
+        if lower_positions:
+            return max(lower_positions) + 1
+
+        higher_positions = [
+            entry_index
+            for existing_index, entry_index in group_positions
+            if existing_index > group_index
+        ]
+        if higher_positions:
+            return min(higher_positions)
+        return len(entries)
+
+    def _with_existing_indexed_layer_row(
+        self,
+        *,
+        key_re: re.Pattern[str],
+        layer_id: int,
+        positions: Mapping[str, int],
+        field_values: Mapping[str, str],
+        key_prefix: str,
+        separator: str,
+    ) -> "PcbDocBoardData":
+        updated = self
+        for field_name, value in self._indexed_layer_fields_for_update(
+            field_values,
+            positions,
+        ):
+            updated = updated._with_indexed_layer_field(
+                key_re=key_re,
+                layer_id=layer_id,
+                field_name=field_name,
+                value=value,
+                key_prefix=key_prefix,
+                separator=separator,
+            )
+        return updated
+
+    def _with_indexed_layer_row(
+        self,
+        *,
+        key_re: re.Pattern[str],
+        group_index: int,
+        layer_id: int,
+        field_values: Mapping[str, str],
+        key_prefix: str,
+        separator: str,
+    ) -> "PcbDocBoardData":
+        existing_group = self._indexed_layer_group(key_re, layer_id)
+        if existing_group is not None:
+            _segment_index, _group_index, positions = existing_group
+            return self._with_existing_indexed_layer_row(
+                key_re=key_re,
+                layer_id=layer_id,
+                positions=positions,
+                field_values=field_values,
+                key_prefix=key_prefix,
+                separator=separator,
+            )
+
+        segment_index = self._segment_index_for_entry_predicate(
+            lambda entry: bool(entry.key and key_re.match(entry.key))
+        )
+        if segment_index is None:
+            raise KeyError(f"Board6/Data indexed layer family not found: {layer_id}")
+
+        segment = self.segments[segment_index]
+        entries = list(segment.entries)
+        group_key = f"{key_prefix}{int(group_index)}{separator}"
+        row_entries = tuple(
+            PcbDocBoardDataEntry(raw=f"{group_key}{field_name.upper()}={value}")
+            for field_name, value in field_values.items()
+        )
+
+        insert_at = self._indexed_layer_insert_position(
+            key_re=key_re,
+            group_index=int(group_index),
+            entries=entries,
+        )
+        entries[insert_at:insert_at] = row_entries
+        return self.with_segment(
+            segment_index,
+            PcbDocBoardDataSegment(
+                entries=tuple(entries),
+                leading_pipe=segment.leading_pipe,
+            ),
+        )
+
     def _v7_layer_index_for_layer_id(self, layer_id: int) -> int | None:
         for segment in self.segments:
             for entry in segment.entries:
@@ -2371,7 +2848,7 @@ class PcbDocBoardData:
             except ValueError:
                 continue
             number = layer_id - first_v7_id + 1
-            if not 1 <= number <= 32:
+            if not 1 <= number <= PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX:
                 continue
             if _parse_bool_text(values.get("MECHENABLED")) is True:
                 enabled_numbers.add(number)
@@ -2432,85 +2909,34 @@ class PcbDocBoardData:
     def _with_v9_cache_mechanical_layer(
         self,
         *,
+        mechanical_number: int,
         v7_layer_id: int,
         layer_name: str,
         enabled: bool,
     ) -> "PcbDocBoardData":
-        cache_segment_index = self._segment_index_for_entry_predicate(
-            lambda entry: bool(entry.key and LAYER_STACK_CACHE_RE.match(entry.key))
-        )
-        if cache_segment_index is None:
-            raise KeyError("Board6/Data V9 cache segment not found")
-
-        cache_segment = self.segments[cache_segment_index]
-        entries = list(cache_segment.entries)
-        groups: dict[int, dict[str, int]] = {}
-        max_index = -1
-        for index, entry in enumerate(entries):
-            key = entry.key or ""
-            match = LAYER_STACK_CACHE_RE.match(key)
-            if not match:
-                continue
-            cache_index = int(match.group(1))
-            suffix = match.group(2).upper()
-            max_index = max(max_index, cache_index)
-            groups.setdefault(cache_index, {})[suffix] = index
-
         enabled_text = _format_bool_text(enabled)
-        found_group_index: int | None = None
-        for cache_index, positions in groups.items():
-            layerid_pos = positions.get("LAYERID")
-            if layerid_pos is None:
-                continue
-            if entries[layerid_pos].value != str(int(v7_layer_id)):
-                continue
-            found_group_index = cache_index
-            name_pos = positions.get("NAME")
-            if name_pos is not None:
-                entries[name_pos] = PcbDocBoardDataEntry(
-                    raw=f"V9_CACHE_LAYER{cache_index}_NAME={layer_name}"
-                )
-            else:
-                entries.append(
-                    PcbDocBoardDataEntry(
-                        raw=f"V9_CACHE_LAYER{cache_index}_NAME={layer_name}"
-                    )
-                )
-            enabled_pos = positions.get("MECHENABLED")
-            if enabled_pos is not None:
-                entries[enabled_pos] = PcbDocBoardDataEntry(
-                    raw=f"V9_CACHE_LAYER{cache_index}_MECHENABLED={enabled_text}"
-                )
-            else:
-                entries.append(
-                    PcbDocBoardDataEntry(
-                        raw=f"V9_CACHE_LAYER{cache_index}_MECHENABLED={enabled_text}"
-                    )
-                )
-            break
-
-        if found_group_index is None:
-            max_index += 1
-            entries.extend(
-                (
-                    PcbDocBoardDataEntry(
-                        raw=f"V9_CACHE_LAYER{max_index}_LAYERID={int(v7_layer_id)}"
-                    ),
-                    PcbDocBoardDataEntry(
-                        raw=f"V9_CACHE_LAYER{max_index}_NAME={layer_name}"
-                    ),
-                    PcbDocBoardDataEntry(
-                        raw=f"V9_CACHE_LAYER{max_index}_MECHENABLED={enabled_text}"
-                    ),
-                )
-            )
-
-        return self.with_segment(
-            cache_segment_index,
-            PcbDocBoardDataSegment(
-                entries=tuple(entries),
-                leading_pipe=cache_segment.leading_pipe,
-            ),
+        field_values = {
+            "ID": authored_mechanical_layer_row_id(mechanical_number),
+            "NAME": layer_name,
+            "LAYERID": str(int(v7_layer_id)),
+            "USEDBYPRIMS": "FALSE",
+            "MECHENABLED": enabled_text,
+        }
+        updated = self._with_indexed_layer_row(
+            key_re=LAYER_STACK_CACHE_RE,
+            group_index=mechanical_layer_v9_cache_index(mechanical_number),
+            layer_id=v7_layer_id,
+            field_values=field_values,
+            key_prefix="V9_CACHE_LAYER",
+            separator="_",
+        )
+        return updated._with_indexed_layer_row(
+            key_re=_LAYER_V8_KEY_RE,
+            group_index=mechanical_layer_v8_index(mechanical_number),
+            layer_id=v7_layer_id,
+            field_values=field_values,
+            key_prefix="LAYER_V8_",
+            separator="",
         )
 
     def with_mechanical_layer(
@@ -2571,6 +2997,7 @@ class PcbDocBoardData:
                 preferred_segment_key="LAYER1NAME",
             )
         updated = updated._with_v9_cache_mechanical_layer(
+            mechanical_number=mechanical_number,
             v7_layer_id=v7_layer_id,
             layer_name=layer_name,
             enabled=enabled,
@@ -4136,6 +4563,9 @@ class PcbDocBuilder:
         self._embedded_fonts_dirty = False
         self._authored_primitive_guids: list[tuple[PcbGuidType, uuid.UUID]] = []
         self._authored_pad_unique_ids: list[str] = []
+        self._layer_ref_registry: PcbLayerRegistry | None = (
+            _layer_ref_registry_from_build_profile(self.profile)
+        )
 
     @classmethod
     def from_bytes(
@@ -4472,6 +4902,7 @@ class PcbDocBuilder:
         self.board_regions_data = document.to_board_regions_data_for_new_pcbdoc(
             base_board_regions_data=self.board_regions_data,
         )
+        self._layer_ref_registry = _layer_ref_registry_from_stack_document(document)
         return self
 
     def set_mechanical_layer(
@@ -4486,7 +4917,8 @@ class PcbDocBuilder:
 
         Args:
             layer: Mechanical layer token or number. Supported tokens include
-                `"MECHANICAL17"`; `PcbLayer.MECHANICAL_*` enum values cover
+                `"MECHANICAL17"` and `"MECHANICAL53"`;
+                `PcbLayer.MECHANICAL_*` enum values cover
                 Mechanical 1 through 16.
             name: Optional display name. If omitted, Altium's default
                 `Mechanical N` label is used.
@@ -4498,6 +4930,20 @@ class PcbDocBuilder:
             enabled=enabled,
         )
         return self
+
+    def _register_extended_mechanical_primitive_layer(
+        self,
+        layer_ref: PcbLayerRef,
+    ) -> None:
+        if (
+            layer_ref.family == PcbLayerFamily.MECHANICAL
+            and layer_ref.number is not None
+            # Reserved system rows (e.g. board region/split-line layers
+            # MECHANICAL64530..64535) are not user mechanical layers and must
+            # not be added to the Board6 mechanical registry.
+            and 16 < layer_ref.number <= PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX
+        ):
+            self.set_mechanical_layer(layer_ref.token)
 
     def set_mechanical_layer_pair(
         self,
@@ -4547,7 +4993,7 @@ class PcbDocBuilder:
         Set the semantic kind assigned to a mechanical layer.
 
         The layer may be a `PcbLayer`, a LayerKindMapping/Data layer id, a
-        `"MECHANICAL17"` token, or a mechanical layer number `1..32`.
+        `"MECHANICAL17"` token, or an ordinary mechanical layer number.
         Serialized V7 saved layer IDs are not accepted here.
         """
         kind_value = coerce_mechanical_layer_kind(kind)
@@ -4805,7 +5251,7 @@ class PcbDocBuilder:
         end_mils: tuple[float, float],
         *,
         width_mils: float,
-        layer: int | str = "Top Layer",
+        layer: PcbLayerLike = "Top Layer",
         net: str | None = None,
         component_index: int | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -4816,10 +5262,12 @@ class PcbDocBuilder:
             end_mils=end_mils,
             width_mils=width_mils,
             layer=layer,
+            registry=self._layer_ref_registry,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
         )
         track.component_index = self._normalize_component_index(component_index)
+        self._register_extended_mechanical_primitive_layer(track.layer_state().ref)
         if net:
             self.add_net(net, preferred_width_mils=width_mils)
             track.net_index = self._find_net_index(net)
@@ -4845,7 +5293,7 @@ class PcbDocBuilder:
         start_angle: float,
         end_angle: float,
         width_mils: float,
-        layer: int | str = "Top Layer",
+        layer: PcbLayerLike = "Top Layer",
         net: str | None = None,
         component_index: int | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -4858,10 +5306,12 @@ class PcbDocBuilder:
             end_angle=end_angle,
             width_mils=width_mils,
             layer=layer,
+            registry=self._layer_ref_registry,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
         )
         arc.component_index = self._normalize_component_index(component_index)
+        self._register_extended_mechanical_primitive_layer(arc.layer_state().ref)
         if net:
             self.add_net(net, preferred_width_mils=width_mils)
             arc.net_index = self._find_net_index(net)
@@ -4885,7 +5335,7 @@ class PcbDocBuilder:
         pos2_mils: tuple[float, float],
         *,
         rotation_degrees: float = 0.0,
-        layer: int | str = "Top Layer",
+        layer: PcbLayerLike = "Top Layer",
         net: str | None = None,
         component_index: int | None = None,
         solder_mask_expansion_mils: float | None = None,
@@ -4896,10 +5346,12 @@ class PcbDocBuilder:
             pos2_mils=pos2_mils,
             rotation_degrees=rotation_degrees,
             layer=layer,
+            registry=self._layer_ref_registry,
             solder_mask_expansion_mils=solder_mask_expansion_mils,
             paste_mask_expansion_mils=paste_mask_expansion_mils,
         )
         fill.component_index = self._normalize_component_index(component_index)
+        self._register_extended_mechanical_primitive_layer(fill.layer_state().ref)
         if net:
             self.add_net(net)
             fill.net_index = self._find_net_index(net)
@@ -4924,7 +5376,7 @@ class PcbDocBuilder:
         text: str,
         position_mils: tuple[float, float],
         height_mils: float,
-        layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
+        layer: PcbLayerLike = PcbLayer.TOP_OVERLAY,
         rotation_degrees: float = 0.0,
         stroke_width_mils: float = 10.0,
         font_kind: str = "stroke",
@@ -4986,8 +5438,12 @@ class PcbDocBuilder:
             barcode_min_width_mils=barcode_min_width_mils,
             barcode_show_text=barcode_show_text,
             barcode_inverted=barcode_inverted,
+            registry=self._layer_ref_registry,
         )
         text_record.component_index = self._normalize_component_index(component_index)
+        self._register_extended_mechanical_primitive_layer(
+            text_record.layer_state().ref
+        )
         self.texts.append(text_record)
         self.texts6_data = PcbDocTexts6Data.from_texts(self.texts)
         self._texts_dirty = True
@@ -5011,13 +5467,13 @@ class PcbDocBuilder:
         position_mils: tuple[float, float],
         width_mils: float,
         height_mils: float,
-        layer: int | PcbLayer = PcbLayer.TOP,
+        layer: PcbLayerLike = PcbLayer.TOP,
         shape: int | str | PadShape = PadShape.RECTANGLE,
         rotation_degrees: float = 0.0,
         hole_size_mils: float = 0.0,
         plated: bool | None = None,
         net: str | None = None,
-        corner_radius_percent: int | None = None,
+        corner_radius_percent: int | float | None = None,
         top_shape: int | str | PadShape | None = None,
         top_width_mils: float | None = None,
         top_height_mils: float | None = None,
@@ -5302,8 +5758,8 @@ class PcbDocBuilder:
         position_mils: tuple[float, float],
         diameter_mils: float,
         hole_size_mils: float,
-        layer_start: int | PcbLayer = PcbLayer.TOP,
-        layer_end: int | PcbLayer = PcbLayer.BOTTOM,
+        layer_start: PcbLayerLike = PcbLayer.TOP,
+        layer_end: PcbLayerLike = PcbLayer.BOTTOM,
         net: str | None = None,
         ipc4761_via_type: int | PcbIpc4761ViaType = PcbIpc4761ViaType.NONE,
         ipc4761_features: Sequence[AltiumPcbViaStructureFeature] | None = None,
@@ -5370,7 +5826,7 @@ class PcbDocBuilder:
         self,
         *,
         outline_points_mils: list[tuple[float, float]],
-        layer: int | PcbLayer = PcbLayer.TOP,
+        layer: PcbLayerLike = PcbLayer.TOP,
         hole_points_mils: list[list[tuple[float, float]]] | None = None,
         outline_vertices: Sequence[PcbExtendedVertex] | None = None,
         is_keepout: bool = False,
@@ -5411,12 +5867,17 @@ class PcbDocBuilder:
             keepout_restrictions=keepout_restrictions,
             cavity_height_mils=cavity_height_mils,
             v7_layer=v7_layer,
+            registry=self._layer_ref_registry,
         )
         normalized_component_index = self._normalize_component_index(component_index)
         region.component_index = normalized_component_index
         shapebased_region.component_index = (
             0xFFFF if normalized_component_index is None else normalized_component_index
         )
+        try:
+            self._register_extended_mechanical_primitive_layer(region.layer_ref())
+        except PcbLayerResolutionError:
+            pass
         self.regions.append(region)
         self.shapebased_regions.append(shapebased_region)
         self._regions_dirty = True
@@ -5621,6 +6082,10 @@ class PcbDocBuilder:
         component_index: int | None = None,
     ) -> "PcbDocBuilder":
         body.component_index = self._normalize_component_index(component_index)
+        try:
+            self._register_extended_mechanical_primitive_layer(body.layer_ref())
+        except PcbLayerResolutionError:
+            pass
         self.component_bodies.append(body)
         self.shapebased_component_bodies.append(clone_body_for_shapebased_stream(body))
         self._component_bodies_dirty = True
@@ -5670,6 +6135,36 @@ class PcbDocBuilder:
         return struct.pack(
             "<I", existing_count + len(self._authored_pad_unique_ids)
         ), bytes(records)
+
+    def _build_corner_radius_chamfer_stream(self) -> tuple[bytes, bytes] | None:
+        """
+        Combine template CornerRadiusChamfer records with authored-pad records.
+
+        Authored pads are appended after the template Pads6 records, so their
+        PRIMITIVEINDEX values start at the existing pad count, mirroring
+        `_build_uniqueid_primitive_information_stream`.
+        """
+        existing_records = parse_corner_radius_chamfer_records(
+            self._streams.get("CornerRadiusChamfer/Data", b"")
+        )
+        authored: list[AltiumPcbCornerRadiusChamfer] = []
+        existing_pad_count = len(parse_pad_stream(self._streams.get("Pads6/Data", b"")))
+        for offset, pad in enumerate(self.pads):
+            exact = pad.exact_corner_radius_percent_by_layer
+            if not exact:
+                continue
+            authored.append(
+                build_corner_radius_chamfer_record(
+                    primitive_index=existing_pad_count + offset,
+                    entries=list(exact.items()),
+                )
+            )
+        records = existing_records + authored
+        if not records:
+            return None
+        return struct.pack("<I", len(records)), serialize_corner_radius_chamfer_records(
+            records
+        )
 
     def _build_primitive_guids_data(self) -> PcbDocPrimitiveGuidsData:
         records = list(self.primitive_guids_data.records)
@@ -5864,6 +6359,23 @@ class PcbDocBuilder:
         )
         streams["UniqueIDPrimitiveInformation/Header"] = uniqueid_header
         streams["UniqueIDPrimitiveInformation/Data"] = uniqueid_data
+        corner_streams = self._build_corner_radius_chamfer_stream()
+        if corner_streams is not None:
+            corner_header, corner_data = corner_streams
+            streams["CornerRadiusChamfer/Header"] = corner_header
+            streams["CornerRadiusChamfer/Data"] = corner_data
+        elif (
+            "CornerRadiusChamfer/Header" in self._streams
+            or "CornerRadiusChamfer/Data" in self._streams
+        ):
+            streams["CornerRadiusChamfer/Header"] = self._streams.get(
+                "CornerRadiusChamfer/Header",
+                _ZERO_HEADER,
+            )
+            streams["CornerRadiusChamfer/Data"] = self._streams.get(
+                "CornerRadiusChamfer/Data",
+                b"",
+            )
         if (
             self._extended_primitive_information_dirty
             or self.extended_primitive_information

@@ -4,10 +4,12 @@ Parse PCB component body records from the component-body streams.
 
 import logging
 import struct
+from typing import TYPE_CHECKING
 
 from .altium_pcb_enums import PcbBodyProjection
 from .altium_pcb_enums import PcbRegionKind
 from .altium_pcb_enums import pcb_region_kind_to_native_kind
+from .altium_pcb_layer_ref import PcbLayerRef, resolve_pcb_primitive_layer_state
 from .altium_record_types import PcbGraphicalObject, PcbRecordType
 
 # Reuse vertex classes from shapebased_region
@@ -17,6 +19,9 @@ from .altium_record_pcb__shapebased_region import (
 )
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .altium_pcb_layer_ref import PcbLayerRegistry, PcbPrimitiveLayerState
 
 
 class AltiumPcbComponentBody(PcbGraphicalObject):
@@ -154,6 +159,27 @@ class AltiumPcbComponentBody(PcbGraphicalObject):
         self._props_has_null_terminator: bool = False
         # Geometry format that was successfully parsed: (use_extended, include_closing_vertex)
         self._geometry_variant: tuple[bool, bool] | None = None
+
+    def layer_state(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbPrimitiveLayerState":
+        """Return the V7-aware layer identity plus stored layer diagnostics."""
+
+        return resolve_pcb_primitive_layer_state(
+            self,
+            registry=registry,
+            v7_saved_layer_id_field=None,
+            v7_layer_token_field="v7_layer",
+        )
+
+    def layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> PcbLayerRef:
+        """Return the V7-aware layer identity for this component body."""
+
+        return self.layer_state(registry=registry).ref
 
     def parse_from_binary(self, data: bytes, offset: int = 0) -> int:
         """

@@ -22,9 +22,15 @@ from .altium_pcb_hole_tolerance import (
     hole_tolerance_internal_from_mils,
     hole_tolerance_mils_from_internal,
 )
+from .altium_pcb_layer_ref import (
+    PcbLayerFamily,
+    PcbLayerRef,
+    PcbLayerResolutionError,
+)
 from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 
 if TYPE_CHECKING:
+    from .altium_pcb_layer_ref import PcbLayerRegistry
     from .altium_pcb_svg_renderer import PcbSvgRenderContext
     from .altium_pcb_via_structure import (
         AltiumPcbViaStructure,
@@ -47,6 +53,20 @@ _AD25_PROPAGATION_DELAY_TAIL_DEFAULTS = {
 }
 
 log = logging.getLogger(__name__)
+
+
+def _resolve_via_span_endpoint_ref(
+    layer_id: int,
+    *,
+    registry: "PcbLayerRegistry | None",
+    field_name: str,
+) -> PcbLayerRef:
+    ref = registry.ref_for_legacy_layer(layer_id) if registry is not None else None
+    if ref is None:
+        ref = PcbLayerRef.from_legacy(layer_id)
+    if ref.family != PcbLayerFamily.SIGNAL:
+        raise PcbLayerResolutionError(f"Via {field_name} must be a signal layer")
+    return ref
 
 
 def _write_u8(
@@ -408,6 +428,41 @@ class AltiumPcbVia(PcbGraphicalObject):
     ) -> "AltiumPcbViaStructureFeature":
         """Update the material column for one IPC-4761 feature-table row."""
         return self.set_ipc4761_feature(feature_type, material=material)
+
+    def start_layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> PcbLayerRef:
+        """Return the V7-aware signal-layer ref for the via span start."""
+
+        return _resolve_via_span_endpoint_ref(
+            self.layer_start,
+            registry=registry,
+            field_name="layer_start",
+        )
+
+    def end_layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> PcbLayerRef:
+        """Return the V7-aware signal-layer ref for the via span end."""
+
+        return _resolve_via_span_endpoint_ref(
+            self.layer_end,
+            registry=registry,
+            field_name="layer_end",
+        )
+
+    def layer_span_refs(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> tuple[PcbLayerRef, PcbLayerRef]:
+        """Return `(start_ref, end_ref)` for the via signal-layer span."""
+
+        return (
+            self.start_layer_ref(registry=registry),
+            self.end_layer_ref(registry=registry),
+        )
 
     # -- Reserved-field properties for audit and analysis scripts --
 

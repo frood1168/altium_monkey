@@ -1,9 +1,8 @@
 # PCB Layers
 
-PCB layer APIs use several Altium layer identity systems. The current public
-authoring API is intentionally conservative: `layer=` arguments are
-legacy-layer-first, while broader V7-aware layer-reference work remains a
-future API.
+PCB layer APIs use several Altium layer identity systems. The public authoring
+API keeps `PcbLayer` as the legacy-layer enum and uses `PcbLayerRef` for
+V7-aware layer identity.
 
 ## `PcbLayer`
 
@@ -60,10 +59,12 @@ Some parsed records expose V7 side fields such as `v7_layer_id`,
 `layer_v7_save_id`, `barcode_layer_v7`, or `V7_LAYER` property text. Those
 fields are source metadata. They are not generally accepted as values for
 public `layer=` arguments unless a method explicitly documents a V7 override.
+Use `PcbLayerRef` or semantic layer tokens instead of passing these serialized
+integers as layer selectors.
 
-## Current Authoring Rule
+## Authoring Rule
 
-For new public PCB/PcbLib authoring, pass documented legacy layer values:
+Legacy layer values remain supported for ordinary PCB/PcbLib authoring:
 
 ```python
 pcbdoc.add_track((0, 0), (100, 0), width_mils=8, layer=PcbLayer.TOP)
@@ -73,9 +74,34 @@ footprint.add_pad(designator="1", position_mils=(0, 0), width_mils=40,
                   height_mils=30, layer=PcbLayer.TOP)
 ```
 
-Some builder paths also accept stable legacy layer-name tokens such as
-`"Top Layer"` and `"Bottom Layer"`. These still resolve to legacy/TV6 layer
-ids.
+When a layer may be outside the legacy enum, use `PcbLayerRef` or a documented
+semantic token:
+
+```python
+from altium_monkey import PcbLayerRef
+
+footprint.add_track((0, 0), (100, 0), width_mils=5,
+                    layer=PcbLayerRef.mechanical(33))
+
+builder.set_layer_stack_document(stack_from_stackupx)
+builder.add_track((0, 0), (100, 0), width_mils=8,
+                  layer=PcbLayerRef.mid_layer(126))
+```
+
+`PcbDocBuilder` and `AltiumPcbDoc` track, arc, fill, text, and region helpers
+accept V7-aware refs for ordinary numbered mechanical layers through
+Mechanical53. They also accept V7-only signal refs such as
+Mid31 through Mid126 when `set_layer_stack_document(...)` supplies matching
+enabled physical-stack evidence, normally from `.stackupx`.
+
+`PcbLib` footprint track, arc, fill, text, region, and component-body helpers
+accept those ordinary numbered mechanical refs. V7-only signal authoring
+in PcbLib remains gated until an Altium-authored PcbLib fixture proves the
+stack context needed for those layers.
+
+Pads and vias remain more conservative. Legacy signal-layer pads and vias are
+supported. V7-only signal pads/vias and non-signal via span endpoints reject
+until the native file shape and stack/span semantics are fixture-proven.
 
 Do not pass serialized V7 saved layer IDs such as `16908305` as `layer=`.
 Current helpers usually store `layer` into a legacy primitive field and may
@@ -101,22 +127,20 @@ saved layer ID.
 
 ## SVG And Export Boundary
 
-SVG layer keys and filenames currently use `PcbLayer` token names plus
-documented derived renderer layers such as `DRILLS`. Parsed PcbDoc output can
-use board-specific display names when the resolved layer stack is available,
-but the stable token set remains legacy-layer-oriented.
+SVG layer selectors use the same `PcbLayerRef`/token boundary as primitive
+authoring. `visible_layers` and `layer_render_order` accept supported
+`PcbLayerRef` values and semantic tokens such as `MECHANICAL33` or `MID126`.
 
-Extended V7 layer rendering/export, including Mechanical 17+ and AD 26.8.1
-Mid31+ / 128-signal-layer SVG and IPC-2581 behavior, is future V7-aware
-layer-reference work. The intended direction is a deliberate layer-reference
-API rather than expanding `PcbLayer`.
+V7-only SVG elements emit `data-layer-token`, `data-layer-family`,
+`data-layer-role`, and `data-layer-v7-saved-id`. They do not invent a legacy
+`data-layer-id`. Consumers should key extended mechanical and
+128-signal-layer data from those V7-aware attributes.
 
-Current SVG output should not be treated as a Mechanical 17+ or Mid31+
-fidelity contract. Parsed primitives whose real layer is recoverable only from
-V7 side fields may be omitted, rejected, or grouped through the legacy fallback
-until the V7-aware layer-reference API exists. `visible_layers` and
-`layer_render_order` do not accept serialized V7 saved IDs or tokens such as
-`MID31` under the current public contract.
+The IPC-2581 writer follows the same layer-reference model for supported
+feature routing and custom mechanical/document layer names. Other exporters
+should use the same boundary as they are promoted. Do not map extended
+mechanical or Mid31+ signal layers by truncating V7 saved-layer ids down to
+legacy integers.
 
 ## V8, V9, And Stack Data
 
@@ -126,5 +150,5 @@ V8 rows are Layer Stack Manager rows such as `LAYER_V8_*` and
 
 These rows describe stack topology, layer registries, names, and richer
 physical-stack metadata. They are not alternative values to pass to `layer=`.
-Use layer-stack APIs for stack inspection/authoring, and use current primitive
-helpers only within their documented legacy layer boundary.
+Use layer-stack APIs for stack inspection/authoring, and use primitive helpers
+only within their documented layer-reference boundary.

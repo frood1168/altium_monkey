@@ -18,9 +18,13 @@ from .altium_pcb_enums import (
     PcbTextJustification,
     PcbTextKind,
 )
+from .altium_pcb_layer_ref import (
+    PcbLayerRegistry,
+    PcbLayerLike,
+    _coerce_pcb_authoring_layer_storage,
+)
 from .altium_record_pcb__text import AltiumPcbText
 from .altium_record_types import PcbLayer
-from .altium_resolved_layer_stack import legacy_layer_to_v7_save_id
 from .altium_utilities import parse_widestrings6
 
 if TYPE_CHECKING:
@@ -253,7 +257,7 @@ def build_authored_text(
     text: str,
     position_mils: tuple[float, float],
     height_mils: float,
-    layer: int | PcbLayer = PcbLayer.TOP_OVERLAY,
+    layer: PcbLayerLike = PcbLayer.TOP_OVERLAY,
     rotation_degrees: float = 0.0,
     stroke_width_mils: float = 10.0,
     font_kind: PcbTextKindInput = PcbTextKind.STROKE,
@@ -282,6 +286,7 @@ def build_authored_text(
     barcode_min_width_mils: float = PCB_TEXT_BARCODE_MIN_WIDTH_MILS,
     barcode_show_text: bool = True,
     barcode_inverted: bool = True,
+    registry: PcbLayerRegistry | None = None,
 ) -> AltiumPcbText:
     """
     Create a modern authored TEXT record from first principles.
@@ -293,7 +298,8 @@ def build_authored_text(
     """
     text_kind = _normalize_text_kind(font_kind)
     resolved_stroke_font_type = normalize_stroke_font_type(stroke_font_type)
-    layer_id = int(layer)
+    layer_storage = _coerce_pcb_authoring_layer_storage(layer, registry=registry)
+    layer_id = layer_storage.legacy_layer_id
     text_record = AltiumPcbText()
     text_record.layer = layer_id
     text_record.net_index = None
@@ -351,7 +357,7 @@ def build_authored_text(
     text_record.advance_snapping = False
     text_record.snap_point_x = text_record.x
     text_record.snap_point_y = text_record.y
-    text_record.barcode_layer_v7 = legacy_layer_to_v7_save_id(layer_id)
+    text_record.barcode_layer_v7 = layer_storage.v7_saved_layer_id
     text_record._original_sr1_len = 252
     text_record.is_inverted = bool(is_inverted)
     text_record.margin_border_width = text_record._to_internal_units(

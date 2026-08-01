@@ -13,9 +13,21 @@ from .altium_pcb_enums import (
     pcb_region_kind_from_native_kind,
     pcb_region_kind_to_native_kind,
 )
-from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
+from .altium_pcb_layer_ref import PcbLayerRef, resolve_pcb_primitive_layer_state
+from .altium_record_pcb__svg_support import (
+    svg_fill_color,
+    svg_layer_ref,
+    svg_matches_requested_layer,
+)
+from .altium_record_types import (
+    PcbGraphicalObject,
+    PcbLayer,
+    PcbRecordType,
+    PcbV7LayerTokenMixin,
+)
 
 if TYPE_CHECKING:
+    from .altium_pcb_layer_ref import PcbLayerRegistry, PcbPrimitiveLayerState
     from .altium_pcb_svg_renderer import PcbSvgRenderContext
 
 log = logging.getLogger(__name__)
@@ -42,7 +54,7 @@ class RegionVertex:
         return self.y_raw / 10000.0
 
 
-class AltiumPcbRegion(PcbGraphicalObject):
+class AltiumPcbRegion(PcbV7LayerTokenMixin, PcbGraphicalObject):
     """
     PCB region primitive record.
 
@@ -72,7 +84,7 @@ class AltiumPcbRegion(PcbGraphicalObject):
         self.outline_vertex_count: int = 0
         self.outline_vertices: list[RegionVertex] = []
         self.hole_vertices: list[list[RegionVertex]] = []
-        self.properties: dict = {}
+        self.properties: dict[str, str] = {}
         self.kind: int = 0
         self.union_index: int = 0
         self.is_board_cutout: bool = False
@@ -105,6 +117,27 @@ class AltiumPcbRegion(PcbGraphicalObject):
         Return the PCB region record discriminator.
         """
         return PcbRecordType.REGION
+
+    def layer_state(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbPrimitiveLayerState":
+        """Return the V7-aware layer identity plus stored layer diagnostics."""
+
+        return resolve_pcb_primitive_layer_state(
+            self,
+            registry=registry,
+            v7_saved_layer_id_field=None,
+            v7_layer_token_field="v7_layer",
+        )
+
+    def layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbLayerRef":
+        """Return the V7-aware layer identity for this region."""
+
+        return self.layer_state(registry=registry).ref
 
     def parse_from_binary(self, data: bytes, offset: int = 0) -> int:
         """
@@ -594,24 +627,20 @@ class AltiumPcbRegion(PcbGraphicalObject):
         *,
         stroke: str | None = None,
         include_metadata: bool = True,
-        for_layer: PcbLayer | None = None,
+        for_layer: PcbLayer | PcbLayerRef | None = None,
     ) -> list[str]:
         """
         Render region as filled contour with optional hole cutouts.
         """
         if ctx is None:
             return []
-        if for_layer is not None and int(self.layer) != for_layer.value:
+        layer_ref = svg_layer_ref(self)
+        if not svg_matches_requested_layer(self, for_layer, layer_ref):
             return []
         if not self.outline_vertices or len(self.outline_vertices) < 3:
             return []
 
-        color = stroke
-        if color is None:
-            try:
-                color = ctx.layer_color(PcbLayer(int(self.layer)))
-            except ValueError:
-                color = "#808080"
+        color = stroke if stroke is not None else svg_fill_color(self, ctx, layer_ref)
 
         subpaths: list[str] = []
         main_path = self._path_from_vertices(ctx, self.outline_vertices)
@@ -632,25 +661,39 @@ class AltiumPcbRegion(PcbGraphicalObject):
         ]
 
         if include_metadata:
-            attrs.append('data-primitive="region"')
-            attrs.extend(ctx.layer_metadata_attrs(int(self.layer)))
-            attrs.append(f'data-kind="{self.kind}"')
-            attrs.extend(
-                ctx.relationship_metadata_attrs(
-                    net_index=self.net_index,
-                    component_index=self.component_index,
-                )
-            )
-            element_id_attr = ctx.primitive_id_attr(
-                "region",
-                self,
-                layer_id=int(self.layer),
-                role="main",
-            )
-            if element_id_attr:
-                attrs.append(element_id_attr)
+            attrs.extend(self._svg_metadata_attrs(ctx, layer_ref))
 
         return [f"<path {' '.join(attrs)}/>"]
+
+    def _svg_metadata_attrs(
+        self,
+        ctx: "PcbSvgRenderContext",
+        layer_ref: PcbLayerRef | None,
+    ) -> list[str]:
+        attrs = ['data-primitive="region"']
+        layer_identifier: int | None
+        if layer_ref is not None:
+            attrs.extend(ctx.layer_metadata_attrs_for_ref(layer_ref))
+            layer_identifier = ctx.layer_identifier_for_ref(layer_ref)
+        else:
+            attrs.extend(ctx.layer_metadata_attrs(int(self.layer)))
+            layer_identifier = int(self.layer)
+        attrs.append(f'data-kind="{self.kind}"')
+        attrs.extend(
+            ctx.relationship_metadata_attrs(
+                net_index=self.net_index,
+                component_index=self.component_index,
+            )
+        )
+        element_id_attr = ctx.primitive_id_attr(
+            "region",
+            self,
+            layer_id=layer_identifier,
+            role="main",
+        )
+        if element_id_attr:
+            attrs.append(element_id_attr)
+        return attrs
 
     def __repr__(self) -> str:
         return (

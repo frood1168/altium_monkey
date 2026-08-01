@@ -1,3 +1,150 @@
+# altium-monkey 2026.08.01 Release Notes
+
+Package version: `2026.8.1`
+
+`2026.08.01` is represented in Python package metadata as the PEP 440
+canonical form `2026.8.1`.
+
+This release introduces the V7-aware PCB layer-reference API covering extended
+signal and mechanical layers, exact fractional pad corner-radius fidelity,
+StackUpX authoring hardening, asset-inventory APIs, SVG review overlays, and a
+published Altium stroke webfont bundle.
+
+## V7-Aware PCB Layer API
+
+Added the initial V7-aware PCB layer-reference API. `PcbLayer` remains the
+legacy/TV6 enum, while `PcbLayerRef` and semantic tokens cover ordinary
+numbered Mechanical17 through Mechanical53 authoring and StackUpX-backed
+PcbDoc Mid31 through Mid126 signal authoring for track, arc, fill, text, and
+region primitives. SVG layer selection and metadata now use V7-aware tokens
+and saved-layer ids without inventing fake legacy `data-layer-id` values.
+
+`write_ipc2581` keeps V7 layer identity in exports: extended mechanical layers
+export under their custom display names, and StackUpX-backed extended signal
+layers export as their own signal layers instead of collapsing onto legacy
+layer slots. Pads, vias, PcbLib V7-only signal authoring, and reserved
+mechanical-family layers remain gated pending dedicated native authoring
+contracts.
+
+Two new public samples exercise the surface:
+
+- `pcbdoc_v7_128_signal_track_row` generates a local AD 26.8 style 128-signal
+  `.stackupx` with deterministic GUID ids and native-style solder mask and
+  silkscreen (overlay) layers, re-imports it, writes one vertical track on
+  every signal layer through `PcbLayerRef` plus a rotated layer-number label
+  on the same copper layer as each track, and records exact readback tokens
+  and V7 saved-layer ids for downstream validation.
+- `pcb_v7_mechanical_layer_track_rows` writes one track on each ordinary
+  numbered Mechanical1 through Mechanical53 layer through
+  `PcbLayerRef.mechanical(...)` and preserves custom display names through
+  PcbDoc, PcbLib, and SVG output.
+
+## StackUpX Authoring
+
+StackUpX authoring now generates GUID ids by default and enforces the GUID id
+contract. `AltiumStackupXDocument`, `StackupXStack`, `StackupXLayer`,
+`StackupXSpan`, and related id-bearing types auto-generate GUID ids when the
+id argument is omitted, and the PcbDoc-writing bridge
+(`AltiumLayerStackDocument.from_stackupx` / `to_layer_stack_document`) rejects
+non-GUID stack, layer, and span ids with a clear error instead of writing
+board data that crashes Altium's Layer Stack Manager (`Invalid GUID string`).
+`native_pcbdoc_write_support()` also reports non-GUID ids on StackUpX-sourced
+stacks. Parsing existing `.stackupx` files keeps their ids verbatim.
+
+Added `StackupXLayerType` and `StackupXFeatureId` enums to the public API.
+These name the well-known Altium Layer Stack Manager layer `TypeId` GUIDs
+(copper signal, prepreg, core, solder mask, overlay, and the rest) and feature
+GUIDs (standard stackup, impedance calculator, rigid/flex, back drills), so
+StackUpX authoring code never needs to hardcode raw GUID strings.
+
+## Exact Fractional Pad Corner Radius
+
+Fixed exact fractional pad corner-radius handling (issue #22).
+`add_pad(..., corner_radius_percent=...)` now accepts float percents on all
+PcbDoc, PcbDocBuilder, PcbLib, and footprint authoring surfaces instead of
+silently truncating to an integer: authored files carry both the rounded
+legacy percent and the exact value in Altium's native `CornerRadiusChamfer`
+stream, so the exact percent (for example `18.181818` for a 0.05 mm radius on
+a 21.6 mil pad) survives reopening in Altium.
+
+Parsing and re-saving native files now preserves the `CornerRadiusChamfer`
+data byte-faithfully instead of dropping it, parsed pads expose the exact
+value through `exact_corner_radius_percent_by_layer`,
+`corner_radius_percent_exact`, `exact_corner_radius_percent_on_layer(...)`,
+and `corner_radius_mils_on_layer(...)`, and SVG, IPC-2581, and pad-state JSON
+exports derive the corner radius from the exact percent when present.
+Whole-number percents keep producing byte-identical output to previous
+releases.
+
+## Asset Inventory APIs
+
+Added extractable-asset inventory APIs as an initial beta public surface.
+`AltiumPcbDoc`, `AltiumPcbLib`, `AltiumSchDoc`, and `AltiumSchLib` can now
+list selectable assets with typed per-kind details and `AltiumAssetRef`
+handles, then extract one selected embedded payload, PCB footprint, or
+schematic symbol without forcing callers through a bulk extraction workflow.
+`AltiumAssetInventory.to_dict()` emits the documented
+`altium_monkey.extractable_assets.a0` JSON contract for preview and
+import-dry-run consumers.
+
+Added focused embedded PCB asset inventory APIs as an initial beta public
+surface. `AltiumPcbDoc` and `AltiumPcbLib` can list embedded models, embedded
+PcbDoc fonts, and opaque PcbLib embedded-font streams without writing files.
+The `EmbeddedAssetInventory.to_dict()` shape is documented as
+`altium_monkey.pcb.embedded_assets.a0` for lower-level preview, dedupe, and
+import dry-run consumers.
+
+Optimized SchDoc symbol extraction for large placed symbols. Extraction now
+builds SchLib records without broad child-object graph copies, adds
+`AltiumSchDoc.extract_schlib(...)` for in-memory workflows, and preserves the
+existing `extract_symbols(...)` split/combined output behavior.
+
+## SVG Review Overlays
+
+Added optional PCB/PcbLib SVG review overlays. `PcbSvgRenderOptions` can now
+emit fill-only pad-designator labels and a document/footprint origin datum
+marker without changing default rendered geometry. The SVG format contract now
+documents native layers, derived layers such as `DRILLS`, overlay metadata,
+layer ordering, consumer styling guidance, and the A0 metadata distinction
+between layer discovery and layer groups actually emitted in the current SVG.
+
+## Docs Assets And Stroke Webfont
+
+Added the Altium stroke webfont bundle to the published docs assets. The
+repository now ships `assets/fonts/` with Regular and Bold TTF/OTF/WOFF/WOFF2
+builds generated from Altium's stroke-font tables, a shared `@font-face`
+stylesheet, and an interactive `demo.html` specimen page. The fonts cover
+Latin-1 plus engineering symbols (µ Ω ° ± ² ³ × ÷ Δ π ∇ and superscript
+digits) so docs and web pages can render schematic-style stroke text. Docs
+styling assets (`altium-monkey-docs.css` and theme files) moved to the same
+top-level `assets/` folder.
+
+## Fixes
+
+Fixed region authoring to accept the two native replay layer shapes that
+Altium writes for rigid-flex boards: board-cutout regions stored with the
+legacy Keep-Out layer byte plus `V7_LAYER=MULTILAYER`, and board
+region/split-line rows stored with legacy layer byte 0 plus reserved system
+mechanical tokens (`MECHANICAL64530` and above). `add_region(...)` previously
+rejected these combinations, which broke recreating rigid-flex boards from
+captured layer-stack specs. Reserved system rows are never auto-registered as
+user mechanical layers.
+
+Fixed the `pcbdoc_svg` example for boards with content on V7-only promoted
+mechanical layers (Mechanical17 and above): per-layer output and the manifest
+now report these layers under their V7 tokens with `legacy_id: null` instead
+of failing on `PcbLayer.from_json_name`.
+
+## Validation
+
+This release was checked with V7 layer-reference, StackUpX round-trip,
+IPC-2581 export, corner-radius dual-lane round-trip, asset-inventory, and SVG
+overlay test lanes, plus corpus-backed PcbDoc/PcbLib regression strata.
+Release validation also covers package formatting/lint, release-note hygiene,
+public export, wheel build, clean install, and public test execution.
+
+---
+
 # altium-monkey 2026.07.29 Release Notes
 
 Package version: `2026.7.29`

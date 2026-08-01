@@ -9,6 +9,7 @@ import struct
 from typing import TYPE_CHECKING, TypedDict
 
 from .altium_pcb_enums import PadShape
+from .altium_pcb_layer_ref import PcbLayerRef, resolve_pcb_primitive_layer_state
 from .altium_pcb_pad_state import AltiumPadTShape
 from .altium_pcb_mask_paste_rules import (
     get_pad_mask_expansion_iu,
@@ -25,6 +26,7 @@ from .altium_pcb_hole_tolerance import (
 from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 
 if TYPE_CHECKING:
+    from .altium_pcb_layer_ref import PcbLayerRegistry, PcbPrimitiveLayerState
     from .altium_pcb_svg_renderer import PcbSvgRenderContext
 
 
@@ -210,6 +212,11 @@ class AltiumPcbPad(PcbGraphicalObject):
         # Tuple format:
         # (layer_code, mode_flags, shape_value, size_x_iu, size_y_iu, corner_pct)
         self.full_stack_layer_entries: list[tuple[int, int, int, int, int, int]] = []
+        # Exact fractional corner-radius percentages keyed by layer token such
+        # as "TOP". Sourced from the document/footprint CornerRadiusChamfer
+        # stream (SCR*.CRPCTEX) or fractional authoring; the per-layer
+        # `corner_radius` bytes keep the rounded integer lane.
+        self.exact_corner_radius_percent_by_layer: dict[str, float] = {}
         # Semantic custom-pad model attached by higher-level document/library parsers.
         self.custom_shape = None
 
@@ -252,6 +259,26 @@ class AltiumPcbPad(PcbGraphicalObject):
         Return the PCB pad record discriminator.
         """
         return PcbRecordType.PAD
+
+    def layer_state(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbPrimitiveLayerState":
+        """Return the V7-aware layer identity plus stored layer diagnostics."""
+
+        return resolve_pcb_primitive_layer_state(
+            self,
+            registry=registry,
+            v7_saved_layer_id_field="layer_v7_save_id",
+        )
+
+    def layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbLayerRef":
+        """Return the V7-aware layer identity for this pad."""
+
+        return self.layer_state(registry=registry).ref
 
     @property
     def hole_positive_tolerance(self) -> int:
@@ -1293,6 +1320,54 @@ class AltiumPcbPad(PcbGraphicalObject):
         return 0
 
     @property
+    def corner_radius_percent_exact(self) -> float | None:
+        """
+        Exact fractional corner percent for the top layer, or None.
+
+        Sourced from the CornerRadiusChamfer stream (or fractional authoring).
+        Falls back to the pad's own layer entry so single-layer bottom pads
+        report their exact value too. Returns None when only the rounded
+        integer lane exists; use `corner_radius_percentage` for that lane.
+        """
+        exact = self.exact_corner_radius_percent_by_layer
+        if not exact:
+            return None
+        value = exact.get("TOP")
+        if value is not None:
+            return value
+        try:
+            layer_token = PcbLayer(self.layer).name
+        except ValueError:
+            return None
+        return exact.get(layer_token)
+
+    def exact_corner_radius_percent_on_layer(self, layer: PcbLayer) -> float | None:
+        """
+        Exact fractional corner percent for one layer, or None.
+        """
+        return self.exact_corner_radius_percent_by_layer.get(layer.name)
+
+    def corner_radius_mils_on_layer(self, layer: PcbLayer) -> float:
+        """
+        Corner radius in mils on one layer for rounded-rectangle pads.
+
+        Prefers the exact fractional percent lane when present, otherwise
+        uses the rounded per-layer integer lane. Returns 0.0 for pads with
+        no rounded corners on the layer.
+        """
+        if layer == PcbLayer.BOTTOM:
+            width_iu, height_iu = self.bot_width, self.bot_height
+        elif 1 < int(layer.value) < 32:
+            width_iu, height_iu = self.mid_width, self.mid_height
+        else:
+            width_iu, height_iu = self.top_width, self.top_height
+        return self._layer_corner_radius_mils(
+            layer,
+            self._from_internal_units(width_iu),
+            self._from_internal_units(height_iu),
+        )
+
+    @property
     def effective_top_shape(self) -> int:
         """
         Get effective top layer shape, applying SubRecord 6 alt_shape overrides.
@@ -1754,6 +1829,11 @@ class AltiumPcbPad(PcbGraphicalObject):
         """
         Get corner radius in mils for rounded-rectangle pads.
         """
+        exact_pct = self.exact_corner_radius_percent_on_layer(layer)
+        if exact_pct is not None and exact_pct > 0:
+            minor_mils = min(width_mils, height_mils)
+            return min((exact_pct / 200.0) * minor_mils, minor_mils / 2.0)
+
         pct = 0
         explicit_pct = False
         source_pct = False

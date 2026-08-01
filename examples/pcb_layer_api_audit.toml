@@ -1,0 +1,115 @@
+audit_version = 1
+candidate_rule = "Every examples/manifest.toml entry whose areas include pcbdoc or pcblib is classified exactly once."
+accepted_layer_model = "PcbLayer remains the legacy TV6 enum. PcbLayerRef and semantic tokens are the V7-aware authoring, readback, SVG, and export boundary."
+
+[[groups]]
+classification = "v7_issue_sample"
+layer_surfaces = ["authoring", "readback", "svg", "stackup"]
+example_ids = [
+  "pcbdoc_v7_128_signal_track_row",
+  "pcb_v7_mechanical_layer_track_rows",
+]
+notes = "Issue-targeted samples for StackUpX-backed 128-signal authoring and public issue #23 Mechanical17 through Mechanical53 PcbDoc/PcbLib authoring plus SVG rendering."
+
+[[groups]]
+classification = "stack_model_example"
+layer_surfaces = ["stackup", "readback"]
+example_ids = [
+  "pcbdoc_inspect_layer_stack",
+  "pcbdoc_create_layer_stack",
+  "pcbdoc_create_from_stackup_files",
+  "pcbdoc_create_custom_rigid_stack",
+  "pcbdoc_create_jlcpcb_rigid_stack",
+  "pcbdoc_create_impedance_rigid_stack",
+  "pcbdoc_flex_topology_report",
+  "pcbdoc_create_flex_stiffener",
+  "pcbdoc_create_rigid_flex_split_lines",
+  "pcbdoc_create_flex_in_cutout",
+  "pcbdoc_create_rigid_flex_branch",
+  "pcbdoc_create_rigid_flex_branch_intrusion",
+  "pcbdoc_create_rigid_flex_two_branch",
+  "pcbdoc_create_rigid_flex_impedance_backdrill",
+  "pcbdoc_create_cavity_placements",
+  "pcbdoc_create_rigid_flex_multibranch",
+]
+notes = "Layer-stack examples use AltiumLayerStackDocument and physical stack rows, not PcbLayerLike as a stack topology input."
+
+[[groups]]
+classification = "legacy_layer_example"
+layer_surfaces = ["authoring", "readback"]
+example_ids = [
+  "hello_pcbdoc",
+  "pcbdoc_add_text",
+  "pcbdoc_add_track",
+  "pcbdoc_user_union",
+  "pcbdoc_add_arc",
+  "pcbdoc_add_pad",
+  "pcbdoc_add_hole_tolerances",
+  "pcbdoc_add_via_ipc4761_matrix",
+  "pcbdoc_add_differential_pairs",
+  "pcbdoc_mutate_via_ipc4761",
+  "pcbdoc_add_filled_region",
+  "pcbdoc_add_custom_pad_region_outline",
+  "pcbdoc_insert_nets_route",
+  "pcbdoc_add_free_3d_extruded",
+  "pcbdoc_add_free_3d_step",
+  "hello_pcblib",
+  "pcblib_add_via_ipc4761_matrix",
+  "pcblib_recreate_via_feature_libraries",
+  "pcblib_add_free_3d_extruded",
+  "pcblib_create_cavity_region",
+  "pcblib_synthesize_power_resistor_lib",
+  "prjpcb_make_project",
+  "hello_draftsman",
+]
+notes = "Examples intentionally stay on legacy-compatible PcbLayer/default layer inputs; V7-specific behavior is shown by dedicated samples."
+
+[[groups]]
+classification = "mechanical_kind_registry_example"
+layer_surfaces = ["registry", "readback"]
+example_ids = [
+  "pcbdoc_create_mechanical_layer_kinds",
+  "pcblib_create_mechanical_layer_kinds",
+]
+notes = "Examples demonstrate semantic MechanicalLayerKind registry metadata; they are separate from V7 primitive layer identity."
+
+[[groups]]
+classification = "legacy_svg_report_example"
+layer_surfaces = ["svg", "readback"]
+example_ids = [
+  "pcbdoc_svg",
+  "pcbdoc_netclass_svg",
+  "pcblib_footprint_svg",
+  "draftsman_netclass_autodoc",
+]
+notes = "Examples render or report fixture-specific legacy layer selections; V7 selector and metadata behavior is covered by the V7 issue samples."
+
+[[groups]]
+classification = "readback_report_example"
+layer_surfaces = ["readback"]
+example_ids = [
+  "pcbdoc_stats",
+  "pcbdoc_bom",
+  "pcbdoc_diff_pair_report",
+  "pcbdoc_pick_n_place",
+]
+notes = "Examples read existing project or board data and do not define a new layer authoring contract."
+
+[[groups]]
+classification = "asset_or_project_no_layer_contract"
+layer_surfaces = ["none"]
+example_ids = [
+  "pcbdoc_extract_pcblib",
+  "pcbdoc_extract_embedded_fonts",
+  "pcbdoc_extract_embedded_3d_models",
+  "pcbdoc_insert_footprint_from_pcblib",
+  "pcblib_extract_3d_models",
+  "pcblib_split",
+  "pcblib_find_footprint",
+  "draftsman_multipage_notes",
+  "draftsman_create_blank_project",
+  "intlib_extract_sources",
+  "embedded_asset_inventory",
+  "extractable_asset_inventory",
+]
+notes = "Examples load, extract, inventory, or stage PCB/PcbLib artifacts without adding layer selector or stack semantics."

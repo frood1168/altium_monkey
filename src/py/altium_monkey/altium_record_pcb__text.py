@@ -7,9 +7,15 @@ import logging
 import struct
 from typing import TYPE_CHECKING
 
+from .altium_pcb_layer_ref import PcbLayerRef, resolve_pcb_primitive_layer_state
+from .altium_record_pcb__svg_support import (
+    svg_layer_ref,
+    svg_matches_requested_layer,
+)
 from .altium_record_types import PcbGraphicalObject, PcbLayer, PcbRecordType
 
 if TYPE_CHECKING:
+    from .altium_pcb_layer_ref import PcbLayerRegistry, PcbPrimitiveLayerState
     from .altium_pcb_svg_renderer import PcbSvgRenderContext
     from .altium_text_to_polygon import (
         BarcodeRenderer,
@@ -174,6 +180,26 @@ class AltiumPcbText(PcbGraphicalObject):
         Return the PCB text record discriminator.
         """
         return PcbRecordType.TEXT
+
+    def layer_state(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbPrimitiveLayerState":
+        """Return the V7-aware layer identity plus stored layer diagnostics."""
+
+        return resolve_pcb_primitive_layer_state(
+            self,
+            registry=registry,
+            v7_saved_layer_id_field="barcode_layer_v7",
+        )
+
+    def layer_ref(
+        self,
+        registry: "PcbLayerRegistry | None" = None,
+    ) -> "PcbLayerRef":
+        """Return the V7-aware layer identity for this text primitive."""
+
+        return self.layer_state(registry=registry).ref
 
     @staticmethod
     def _read_subrecord_payload(data: bytes, cursor: int) -> tuple[bytes, int, int]:
@@ -790,7 +816,11 @@ class AltiumPcbText(PcbGraphicalObject):
             'data-primitive="text"',
             f'data-font-type="{self.font_type}"',
         ]
-        meta_attrs.extend(ctx.layer_metadata_attrs(int(self.layer)))
+        layer_ref = svg_layer_ref(self)
+        if layer_ref is not None:
+            meta_attrs.extend(ctx.layer_metadata_attrs_for_ref(layer_ref))
+        else:
+            meta_attrs.extend(ctx.layer_metadata_attrs(int(self.layer)))
         meta_attrs.extend(
             ctx.relationship_metadata_attrs(
                 component_index=self.component_index,
@@ -941,7 +971,7 @@ class AltiumPcbText(PcbGraphicalObject):
         *,
         stroke: str | None = None,
         include_metadata: bool = True,
-        for_layer: PcbLayer | None = None,
+        for_layer: PcbLayer | PcbLayerRef | None = None,
         text_as_polygons: bool = True,
         truetype_renderer: "TrueTypeTextRenderer | None" = None,
         stroke_renderer: "StrokeTextRenderer | None" = None,
@@ -953,7 +983,8 @@ class AltiumPcbText(PcbGraphicalObject):
         """
         if ctx is None:
             return []
-        if for_layer is not None and int(self.layer) != for_layer.value:
+        layer_ref = svg_layer_ref(self)
+        if not svg_matches_requested_layer(self, for_layer, layer_ref):
             return []
         raw_text = self.text_content or ""
         resolved_text = (

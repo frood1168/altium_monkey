@@ -116,6 +116,12 @@ def _build_pad_state(
         "corner_radius": [
             _as_int(value) for value in (getattr(pad, "corner_radius", []) or [])
         ],
+        "exact_corner_radius_percent_by_layer": {
+            str(token): float(value)
+            for token, value in (
+                getattr(pad, "exact_corner_radius_percent_by_layer", {}) or {}
+            ).items()
+        },
         "full_stack_layer_entries": [
             _build_full_stack_layer_entry(entry)
             for entry in (getattr(pad, "full_stack_layer_entries", []) or [])

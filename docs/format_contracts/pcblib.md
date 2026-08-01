@@ -56,6 +56,27 @@ footprint `parameters` dictionary.
 High-level footprint helper methods use explicit mil-unit parameter names.
 Low-level record fields may expose source integer storage units.
 
+## Pad Corner Radius
+
+Rounded-rectangle pad corner radius uses Altium's native dual-lane storage.
+The pad record carries a rounded integer percent per layer. Exact fractional
+percents are stored in a per-footprint `CornerRadiusChamfer` stream of text
+blocks `|SCR0.LAYER=<layer>|SCR0.CRPCTEX=<percent>|PRIMITIVEINDEX=<n>`, where
+`PRIMITIVEINDEX` is the zero-based primitive position in footprint record
+order.
+
+`AltiumPcbPad` read accessors are shared with PcbDoc:
+`corner_radius_percentage` (legacy rounded lane),
+`corner_radius_percent_exact`, `exact_corner_radius_percent_by_layer`,
+`exact_corner_radius_percent_on_layer(layer)`, and
+`corner_radius_mils_on_layer(layer)`.
+
+Authoring uses `add_pad(..., corner_radius_percent=...)`. Whole-number
+percents write only the legacy integer lane, so existing whole-number output
+stays byte-identical. Fractional percents write both lanes and are supported
+for simple top- or bottom-layer pads. Round-tripped libraries preserve both
+lanes.
+
 ## Embedded 3D Models
 
 If STEP bounds cannot be computed on the current host, footprint authoring may
@@ -86,11 +107,11 @@ consumer also needs selectable footprints or schematic symbols.
 
 ## Layer Names
 
-Current footprint primitive authoring APIs are legacy-layer-first. `PcbLayer`
-is the legacy/TV6 enum and contains Top, Mid1 through Mid30, Bottom, and
-Mechanical 1 through Mechanical 16 only. Serialized V7 saved layer ids and
-LayerKindMapping ids are separate identity systems; see the public PCB layers
-guide.
+Footprint primitive authoring APIs keep `PcbLayer` as the legacy/TV6 enum and
+use `PcbLayerRef` for V7-aware layer identity where supported. `PcbLayer`
+contains Top, Mid1 through Mid30, Bottom, and Mechanical 1 through Mechanical
+16 only. Serialized V7 saved layer ids and LayerKindMapping ids are separate
+identity systems; see the public PCB layers guide.
 
 PcbLib footprints do not have a board layer stack. Stable layer keys use token
 names, and default display labels are used only for human-facing labels.
@@ -98,10 +119,12 @@ Mechanical layer display names, enabled flags, and mirror pairs are library
 registry metadata. Mechanical layer kind assignments are semantic metadata and
 do not by themselves rename or enable mechanical layers.
 
-Mechanical 17+ and AD 26.8.1 extended signal-layer primitive
-SVG/export/authoring support is deferred to future V7-aware layer-reference
-work. Do not model these by adding `PcbLayer` enum values after Mechanical 16
-or after Mid30.
+Track, arc, fill, text, region, and component-body helpers can author ordinary
+numbered mechanical layers through Mechanical53 with `PcbLayerRef` or semantic
+tokens. PcbLib footprints do not have a board signal stack, so V7-only signal
+authoring remains gated until an Altium-authored PcbLib fixture proves the
+required context. Pads and vias remain conservative and use documented
+legacy-compatible layers.
 
 ## SVG
 

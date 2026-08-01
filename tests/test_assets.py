@@ -11,18 +11,24 @@ import struct
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
 import zlib
 from collections.abc import Iterator
 from copy import deepcopy
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from jsonschema import Draft202012Validator
+
+if TYPE_CHECKING:
+    from altium_monkey import PcbLayerRef
 
 
 PUBLIC_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_ROOT = PUBLIC_ROOT / "examples"
 MANIFEST_PATH = EXAMPLES_ROOT / "manifest.toml"
+PCB_LAYER_API_AUDIT_PATH = EXAMPLES_ROOT / "pcb_layer_api_audit.toml"
 CONTRACTS_ROOT = PUBLIC_ROOT / "docs" / "schemas" / "altium_monkey"
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\((?P<target>[^)]+)\)")
 
@@ -33,6 +39,12 @@ def _load_examples() -> list[dict[str, object]]:
     if not isinstance(examples, list):
         raise TypeError("examples/manifest.toml must contain an examples list")
     return examples
+
+
+def _as_str_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def _extractable_asset_schema_validator() -> Draft202012Validator:
@@ -47,9 +59,7 @@ def _extractable_asset_schema_validator() -> Draft202012Validator:
 
 def _embedded_asset_schema_validator() -> Draft202012Validator:
     schema = json.loads(
-        (CONTRACTS_ROOT / "embedded_assets_a0.schema.json").read_text(
-            encoding="utf-8"
-        )
+        (CONTRACTS_ROOT / "embedded_assets_a0.schema.json").read_text(encoding="utf-8")
     )
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)
@@ -193,6 +203,51 @@ def test_manifest_inputs_and_assets_do_not_use_ignored_output_dirs() -> None:
                     offenders.append(f"{example['id']} {key[:-1]}: {declared_path}")
 
     assert not offenders, "\n".join(offenders)
+
+
+def test_public_pcb_layer_examples_have_audit_classification() -> None:
+    allowed_classifications = {
+        "asset_or_project_no_layer_contract",
+        "legacy_layer_example",
+        "legacy_svg_report_example",
+        "mechanical_kind_registry_example",
+        "readback_report_example",
+        "stack_model_example",
+        "v7_issue_sample",
+    }
+    examples = _load_examples()
+    manifest_ids = {str(example["id"]) for example in examples}
+    candidate_ids = {
+        str(example["id"])
+        for example in examples
+        if {"pcbdoc", "pcblib"} & set(_as_str_list(example.get("areas")))
+    }
+
+    audit = tomllib.loads(PCB_LAYER_API_AUDIT_PATH.read_text(encoding="utf-8"))
+    assert audit["audit_version"] == 1
+    assert "PcbLayerRef" in audit["accepted_layer_model"]
+    groups = audit.get("groups", [])
+    assert isinstance(groups, list)
+
+    seen: dict[str, str] = {}
+    for group in groups:
+        classification = str(group.get("classification", ""))
+        assert classification in allowed_classifications
+        assert _as_str_list(group.get("layer_surfaces"))
+        assert str(group.get("notes", "")).strip()
+        group_ids = _as_str_list(group.get("example_ids"))
+        assert group_ids
+        for example_id in group_ids:
+            assert example_id in manifest_ids
+            assert example_id not in seen, f"duplicate audit entry: {example_id}"
+            seen[example_id] = classification
+
+    assert set(seen) == candidate_ids
+    assert seen["pcbdoc_v7_128_signal_track_row"] == "v7_issue_sample"
+    assert seen["pcb_v7_mechanical_layer_track_rows"] == "v7_issue_sample"
+    assert seen["pcbdoc_create_layer_stack"] == "stack_model_example"
+    assert seen["pcbdoc_add_pad"] == "legacy_layer_example"
+    assert seen["pcblib_footprint_svg"] == "legacy_svg_report_example"
 
 
 def test_public_lockfile_matches_release_dependency_shape() -> None:
@@ -344,6 +399,55 @@ def test_format_contract_docs_are_published() -> None:
     assert "with or without braces" in pcbdoc_contract
 
 
+def test_public_v7_layer_docs_match_current_contract() -> None:
+    docs = {
+        "pcb layers guide": PUBLIC_ROOT / "docs" / "api_patterns" / "pcb_layers.md",
+        "pcbdoc guide": PUBLIC_ROOT / "docs" / "pcbdoc.md",
+        "pcblib guide": PUBLIC_ROOT / "docs" / "pcblib.md",
+        "pcbdoc contract": PUBLIC_ROOT / "docs" / "format_contracts" / "pcbdoc.md",
+        "pcblib contract": PUBLIC_ROOT / "docs" / "format_contracts" / "pcblib.md",
+        "svg contract": PUBLIC_ROOT / "docs" / "format_contracts" / "svg.md",
+    }
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in docs.values())
+    pcbdoc_contract = docs["pcbdoc contract"].read_text(encoding="utf-8")
+
+    for required in (
+        "PcbLayerRef",
+        "Mechanical53",
+        "MID126",
+        "data-layer-token",
+        "data-layer-family",
+        "data-layer-v7-saved-id",
+        "0x01020021",
+        "0x0100FFFF",
+    ):
+        assert required in combined
+
+    stale_phrases = (
+        "future V7-aware layer-reference work",
+        "deferred to future V7-aware layer-reference work",
+        "Current SVG output is not a fidelity contract for parsed extended V7 layers",
+        "current public SVG layer contract is legacy-layer-token oriented",
+        "only use default display labels",
+        "documented legacy layer boundary",
+    )
+    for label, path in docs.items():
+        text = path.read_text(encoding="utf-8")
+        for phrase in stale_phrases:
+            assert phrase not in text, f"{label}: stale V7 wording: {phrase}"
+
+    assert (
+        "Track, arc, fill, text, region, and component-body helpers can author\n"
+        "ordinary numbered mechanical layers through Mechanical53."
+    ) in pcbdoc_contract
+    assert (
+        "Track, arc, fill,\ntext, and region helpers can author V7-only signal refs"
+    ) in pcbdoc_contract
+    assert (
+        "component-body helpers can author V7-only signal refs" not in pcbdoc_contract
+    )
+
+
 def test_generated_docs_are_current() -> None:
     result = subprocess.run(
         [sys.executable, str(PUBLIC_ROOT / "tools" / "generate_docs.py"), "--check"],
@@ -393,29 +497,17 @@ def test_public_markdown_links_resolve() -> None:
 
 
 def test_public_docs_style_foundation_is_present() -> None:
-    stylesheet = PUBLIC_ROOT / "docs" / "assets" / "altium-monkey-docs.css"
-    theme_css = PUBLIC_ROOT / "docs" / "assets" / "altium-monkey-theme.css"
-    theme_json = PUBLIC_ROOT / "docs" / "assets" / "altium-monkey-theme.json"
-    font_ttf = PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.ttf"
-    font_otf = PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.otf"
-    font_woff = PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.woff"
-    font_woff2 = (
-        PUBLIC_ROOT / "docs" / "assets" / "fonts" / "altium-stroke.woff2"
-    )
-    font_css = (
-        PUBLIC_ROOT
-        / "docs"
-        / "assets"
-        / "fonts"
-        / "altium-monkey-stroke-fonts.css"
-    )
-    monkey_html = (
-        PUBLIC_ROOT / "docs" / "assets" / "monkey" / "altium-monkey.html"
-    )
-    monkey_txt = PUBLIC_ROOT / "docs" / "assets" / "monkey" / "altium-monkey.txt"
-    monkey_preview = (
-        PUBLIC_ROOT / "docs" / "assets" / "monkey" / "altium-monkey-preview.png"
-    )
+    assets_root = PUBLIC_ROOT / "assets"
+    stylesheet = assets_root / "altium-monkey-docs.css"
+    theme_css = assets_root / "altium-monkey-theme.css"
+    theme_json = assets_root / "altium-monkey-theme.json"
+    font_ttf = assets_root / "fonts" / "altium-stroke.ttf"
+    font_otf = assets_root / "fonts" / "altium-stroke.otf"
+    font_woff = assets_root / "fonts" / "altium-stroke.woff"
+    font_woff2 = assets_root / "fonts" / "altium-stroke.woff2"
+    font_bold_ttf = assets_root / "fonts" / "altium-stroke-bold.ttf"
+    font_css = assets_root / "fonts" / "altium-monkey-stroke-fonts.css"
+    demo_page = assets_root / "fonts" / "demo.html"
     style_doc = PUBLIC_ROOT / "docs" / "style.md"
     docs_index = (PUBLIC_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
     public_readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
@@ -431,14 +523,13 @@ def test_public_docs_style_foundation_is_present() -> None:
     assert font_otf.exists()
     assert font_woff.exists()
     assert font_woff2.exists()
+    assert font_bold_ttf.exists()
     assert font_css.exists()
-    assert monkey_html.exists()
-    assert monkey_txt.exists()
-    assert monkey_preview.exists()
+    assert demo_page.exists()
     assert style_doc.exists()
     assert "style.md" in docs_index
     assert "docs/style.md" in public_readme
-    assert "--mk-accent: #ffb000" in css
+    assert "--mk-accent: #f0a400" in css
     assert "--mk-bg: #050403" in css
     assert "--am-font-stroke" in css
     assert "font-family: 'Altium Stroke'" in css
@@ -449,12 +540,12 @@ def test_public_docs_style_foundation_is_present() -> None:
     assert "altium-stroke.woff2" in font_css_text
     assert "altium-stroke.otf" in font_css_text
     assert theme["id"] == "amber"
-    assert theme["tokens"]["--mk-accent"] == "#ffb000"
-    assert "assets/altium-monkey-docs.css" in style_text
-    assert "assets/fonts/altium-stroke.woff2" in style_text
-    assert "assets/fonts/altium-stroke.woff" in style_text
-    assert "assets/fonts/altium-stroke.otf" in style_text
-    assert "assets/monkey/altium-monkey.html" in style_text
+    assert theme["tokens"]["--mk-accent"] == "#f0a400"
+    assert "../assets/altium-monkey-docs.css" in style_text
+    assert "../assets/fonts/altium-stroke.woff2" in style_text
+    assert "../assets/fonts/altium-stroke.woff" in style_text
+    assert "../assets/fonts/altium-stroke.otf" in style_text
+    assert "../assets/fonts/demo.html" in style_text
 
 
 @pytest.fixture(scope="session")
@@ -609,6 +700,42 @@ def _indexed_raw_layer_field(
         if values.get("LAYERID") == str(int(layer_id)):
             return values.get(field_name.upper())
     return None
+
+
+def _assert_mechanical_mirror_layer_names(
+    raw_record: dict[str, object],
+    *,
+    expected_display_names: dict[str, str],
+) -> None:
+    layer_v8_re = re.compile(r"^LAYER_V8_(\d+)(.+)$", re.IGNORECASE)
+    v9_cache_re = re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE)
+    for token in ("MECHANICAL1", "MECHANICAL17", "MECHANICAL33", "MECHANICAL53"):
+        layer_id = 0x01020000 + _mechanical_layer_number(token)
+        expected_name = expected_display_names[token]
+        assert _indexed_raw_layer_field(raw_record, layer_v8_re, layer_id, "NAME") == (
+            expected_name
+        )
+        assert _indexed_raw_layer_field(raw_record, v9_cache_re, layer_id, "NAME") == (
+            expected_name
+        )
+        assert (
+            _indexed_raw_layer_field(
+                raw_record,
+                layer_v8_re,
+                layer_id,
+                "MECHENABLED",
+            )
+            == "TRUE"
+        )
+        assert (
+            _indexed_raw_layer_field(
+                raw_record,
+                v9_cache_re,
+                layer_id,
+                "MECHENABLED",
+            )
+            == "TRUE"
+        )
 
 
 def _v7_raw_layer_index(
@@ -840,6 +967,457 @@ def test_pcblib_create_mechanical_layer_kinds_is_metadata_only_and_visible(
     assert len(footprint.pads) == 0
     assert len(footprint.tracks) == 0
     assert len(footprint.vias) == 0
+
+
+def _expected_128_signal_refs() -> list["PcbLayerRef"]:
+    from altium_monkey import PcbLayerRef
+
+    return [
+        PcbLayerRef.top(),
+        *(PcbLayerRef.mid_layer(number) for number in range(1, 127)),
+        PcbLayerRef.bottom(),
+    ]
+
+
+def _expected_128_signal_saved_ids() -> dict[str, int]:
+    expected: dict[str, int] = {}
+    for ref in _expected_128_signal_refs():
+        saved_id = ref.v7_saved_layer_id
+        if saved_id is None:
+            raise AssertionError(f"{ref.token} is missing a saved-layer id")
+        expected[ref.token] = int(saved_id)
+    return expected
+
+
+def _expected_128_signal_display_names() -> dict[str, str]:
+    names: dict[str, str] = {}
+    for ref in _expected_128_signal_refs():
+        if ref.token == "TOP":
+            names[ref.token] = "Top Layer"
+        elif ref.token == "BOTTOM":
+            names[ref.token] = "Bottom Layer"
+        else:
+            names[ref.token] = f"SIG{int(ref.number or 0) + 1:02d}"
+    return names
+
+
+def _assert_svg_v7_token_without_legacy_id(
+    svg_text: str,
+    *,
+    token: str,
+    saved_id: int,
+) -> None:
+    root = ET.fromstring(svg_text)
+    elements = [
+        elem
+        for elem in root.iter()
+        if (elem.get("data-layer-token") or "").strip().upper() == token
+    ]
+    assert elements, f"Expected SVG elements for {token}"
+    for elem in elements:
+        assert not (elem.get("data-layer-id") or "").strip()
+        assert elem.get("data-layer-family") == "signal"
+        assert elem.get("data-layer-role") == "copper"
+        assert elem.get("data-layer-v7-saved-id") == str(saved_id)
+
+
+def _expected_mechanical_track_row_refs() -> list["PcbLayerRef"]:
+    from altium_monkey import PcbLayerRef
+    from altium_monkey.altium_pcb_enums import PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX
+
+    return [
+        PcbLayerRef.mechanical(number)
+        for number in range(1, PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX + 1)
+    ]
+
+
+def _expected_mechanical_track_row_saved_ids() -> dict[str, int]:
+    expected: dict[str, int] = {}
+    for ref in _expected_mechanical_track_row_refs():
+        saved_id = ref.v7_saved_layer_id
+        if saved_id is None:
+            raise AssertionError(f"{ref.token} is missing a saved-layer id")
+        expected[ref.token] = int(saved_id)
+    return expected
+
+
+def _expected_mechanical_track_row_display_names() -> dict[str, str]:
+    return {
+        ref.token: f"Sample Mechanical {int(ref.number or 0):02d}"
+        for ref in _expected_mechanical_track_row_refs()
+    }
+
+
+def _assert_svg_mechanical_v7_token_without_legacy_id(
+    svg_text: str,
+    *,
+    token: str,
+    saved_id: int,
+    display_name: str,
+) -> None:
+    root = ET.fromstring(svg_text)
+    elements = [
+        elem
+        for elem in root.iter()
+        if (elem.get("data-layer-token") or "").strip().upper() == token
+    ]
+    assert elements, f"Expected SVG elements for {token}"
+    for elem in elements:
+        assert not (elem.get("data-layer-id") or "").strip()
+        assert elem.get("data-layer-family") == "mechanical"
+        assert elem.get("data-layer-role") == "mechanical"
+        assert elem.get("data-layer-v7-saved-id") == str(saved_id)
+        assert elem.get("data-layer-display-name") == display_name
+
+
+def _assert_128_signal_sample_stdout(stdout: str) -> None:
+    assert "Signal layers: 128" in stdout
+    assert "Tracks: 128" in stdout
+    assert "All tracks match expected layers: True" in stdout
+
+
+def _assert_128_signal_sample_manifest(
+    manifest: dict[str, object],
+    *,
+    expected_saved_ids: dict[str, int],
+) -> None:
+    assert manifest["schema"] == (
+        "altium_monkey.examples.pcbdoc_v7_128_signal_track_row.a0"
+    )
+    assert manifest["signal_layer_count"] == 128
+    assert manifest["track_count"] == 128
+    assert manifest["stackupx_generated"] is True
+    assert manifest["stackupx_reimported"] is True
+    assert manifest["all_track_tokens_match"] is True
+    assert manifest["all_track_saved_ids_match"] is True
+    assert manifest["all_tracks_match_expected"] is True
+    assert manifest["sentinel_saved_ids"] == {
+        key: expected_saved_ids[key] for key in ("TOP", "MID31", "MID126", "BOTTOM")
+    }
+
+
+def _assert_128_signal_sample_stack_manifest(manifest: dict[str, object]) -> None:
+    stack = manifest["stack"]
+    assert stack["physical_copper_layer_count"] == 128
+    assert stack["inner_signal_layer_count"] == 126
+    assert stack["inner_signal_layers"][30] == "SIG32"
+    assert stack["inner_signal_layers"][-1] == "SIG127"
+
+
+def _assert_128_signal_sample_layer_manifest(
+    manifest: dict[str, object],
+    *,
+    expected_tokens: list[str],
+    expected_saved_ids: dict[str, int],
+    expected_display_names: dict[str, str],
+) -> None:
+    signal_layers = manifest["signal_layers"]
+    assert len(signal_layers) == 128
+    assert [row["token"] for row in signal_layers] == expected_tokens
+    assert [row["display_name"] for row in signal_layers] == [
+        expected_display_names[token] for token in expected_tokens
+    ]
+    assert [row["v7_saved_layer_id"] for row in signal_layers] == [
+        expected_saved_ids[token] for token in expected_tokens
+    ]
+    assert [row["expected_v7_saved_layer_id"] for row in signal_layers] == [
+        expected_saved_ids[token] for token in expected_tokens
+    ]
+
+
+def _assert_128_signal_sample_track_manifest(
+    manifest: dict[str, object],
+    *,
+    expected_tokens: list[str],
+    expected_saved_ids: dict[str, int],
+    expected_display_names: dict[str, str],
+) -> None:
+    tracks = manifest["tracks"]
+    assert [row["token"] for row in tracks] == expected_tokens
+    assert [row["expected_token"] for row in tracks] == expected_tokens
+    assert [row["stack_display_name"] for row in tracks] == [
+        expected_display_names[token] for token in expected_tokens
+    ]
+    assert [row["expected_stack_display_name"] for row in tracks] == [
+        expected_display_names[token] for token in expected_tokens
+    ]
+    assert [row["v7_saved_layer_id"] for row in tracks] == [
+        expected_saved_ids[token] for token in expected_tokens
+    ]
+    assert [row["expected_v7_saved_layer_id"] for row in tracks] == [
+        expected_saved_ids[token] for token in expected_tokens
+    ]
+
+
+def _assert_128_signal_sample_pcbdoc(
+    output_root: Path,
+    *,
+    expected_tokens: list[str],
+    expected_saved_ids: dict[str, int],
+    expected_display_names: dict[str, str],
+) -> None:
+    from altium_monkey import AltiumLayerStackDocument, AltiumPcbDoc
+
+    pcbdoc_path = output_root / "pcbdoc_v7_128_signal_track_row.PcbDoc"
+    pcbdoc = AltiumPcbDoc.from_file(pcbdoc_path)
+    assert len(pcbdoc.tracks) == 128
+    assert [track.layer_ref().token for track in pcbdoc.tracks] == expected_tokens
+
+    stack = AltiumLayerStackDocument.from_pcbdoc(pcbdoc)
+    copper_layers = [
+        layer for layer in stack.physical_stacks[0].layers if layer.family == "copper"
+    ]
+    assert len(copper_layers) == 128
+    assert [layer.display_name for layer in copper_layers] == [
+        expected_display_names[token] for token in expected_tokens
+    ]
+    assert copper_layers[126].display_name == "SIG127"
+    assert copper_layers[126].layer_id == expected_saved_ids["MID126"]
+
+
+def test_pcbdoc_v7_128_signal_track_row_sample_preserves_layer_identity(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcbdoc_v7_128_signal_track_row"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+    _assert_128_signal_sample_stdout(result.stdout)
+
+    output_root = check_examples_root / "pcbdoc_v7_128_signal_track_row" / "output"
+    manifest = json.loads(
+        (output_root / "pcbdoc_v7_128_signal_track_row.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    expected_refs = _expected_128_signal_refs()
+    expected_tokens = [ref.token for ref in expected_refs]
+    expected_saved_ids = _expected_128_signal_saved_ids()
+    expected_display_names = _expected_128_signal_display_names()
+    _assert_128_signal_sample_manifest(
+        manifest,
+        expected_saved_ids=expected_saved_ids,
+    )
+    _assert_128_signal_sample_stack_manifest(manifest)
+    _assert_128_signal_sample_layer_manifest(
+        manifest,
+        expected_tokens=expected_tokens,
+        expected_saved_ids=expected_saved_ids,
+        expected_display_names=expected_display_names,
+    )
+    _assert_128_signal_sample_track_manifest(
+        manifest,
+        expected_tokens=expected_tokens,
+        expected_saved_ids=expected_saved_ids,
+        expected_display_names=expected_display_names,
+    )
+    _assert_128_signal_sample_pcbdoc(
+        output_root,
+        expected_tokens=expected_tokens,
+        expected_saved_ids=expected_saved_ids,
+        expected_display_names=expected_display_names,
+    )
+
+    svg_text = (output_root / "pcbdoc_v7_128_signal_track_row.svg").read_text(
+        encoding="utf-8"
+    )
+    _assert_svg_v7_token_without_legacy_id(
+        svg_text,
+        token="MID126",
+        saved_id=expected_saved_ids["MID126"],
+    )
+
+
+def _assert_mechanical_track_row_stdout(stdout: str) -> None:
+    assert f"Mechanical layers: {len(_expected_mechanical_track_row_refs())}" in stdout
+    assert "PcbDoc tracks match expected layers: True" in stdout
+    assert "PcbLib tracks match expected layers: True" in stdout
+
+
+def _expected_mechanical_track_row_storage_ids() -> list[int]:
+    from altium_monkey import PcbLayer
+
+    return [
+        ref.legacy_layer_id
+        if ref.legacy_layer_id is not None
+        else int(PcbLayer.MECHANICAL_16)
+        for ref in _expected_mechanical_track_row_refs()
+    ]
+
+
+def _assert_mechanical_track_row_tokens(
+    rows: list[dict[str, object]],
+    *,
+    expected_tokens: list[str],
+) -> None:
+    assert [row["token"] for row in rows] == expected_tokens
+    assert [row["expected_token"] for row in rows] == expected_tokens
+
+
+def _assert_mechanical_track_row_display_names(
+    rows: list[dict[str, object]],
+    *,
+    expected_tokens: list[str],
+    expected_display_names: dict[str, str],
+) -> None:
+    assert [row["display_name"] for row in rows] == [
+        expected_display_names[token] for token in expected_tokens
+    ]
+    assert [row["expected_display_name"] for row in rows] == [
+        expected_display_names[token] for token in expected_tokens
+    ]
+
+
+def _assert_mechanical_track_row_saved_ids(
+    rows: list[dict[str, object]],
+    *,
+    expected_tokens: list[str],
+    expected_saved_ids: dict[str, int],
+) -> None:
+    assert [row["v7_saved_layer_id"] for row in rows] == [
+        expected_saved_ids[token] for token in expected_tokens
+    ]
+    assert [row["expected_v7_saved_layer_id"] for row in rows] == [
+        expected_saved_ids[token] for token in expected_tokens
+    ]
+
+
+def _assert_mechanical_track_row_storage(rows: list[dict[str, object]]) -> None:
+    assert [row["stored_legacy_layer_id"] for row in rows] == (
+        _expected_mechanical_track_row_storage_ids()
+    )
+    assert [row["v7_only"] for row in rows] == [
+        (ref.legacy_layer_id is None) for ref in _expected_mechanical_track_row_refs()
+    ]
+
+
+def _assert_mechanical_track_rows(
+    rows: list[dict[str, object]],
+    *,
+    expected_tokens: list[str],
+    expected_saved_ids: dict[str, int],
+    expected_display_names: dict[str, str],
+) -> None:
+    assert len(rows) == len(expected_tokens)
+    _assert_mechanical_track_row_tokens(rows, expected_tokens=expected_tokens)
+    _assert_mechanical_track_row_display_names(
+        rows,
+        expected_tokens=expected_tokens,
+        expected_display_names=expected_display_names,
+    )
+    _assert_mechanical_track_row_saved_ids(
+        rows,
+        expected_tokens=expected_tokens,
+        expected_saved_ids=expected_saved_ids,
+    )
+    _assert_mechanical_track_row_storage(rows)
+    assert all(row["matches_expected"] for row in rows)
+
+
+def _assert_mechanical_track_row_manifest(manifest: dict[str, object]) -> None:
+    expected_refs = _expected_mechanical_track_row_refs()
+    expected_tokens = [ref.token for ref in expected_refs]
+    expected_saved_ids = _expected_mechanical_track_row_saved_ids()
+    expected_display_names = _expected_mechanical_track_row_display_names()
+
+    assert manifest["schema"] == (
+        "altium_monkey.examples.pcb_v7_mechanical_layer_track_rows.a0"
+    )
+    assert manifest["supported_mechanical_layer_count"] == len(expected_refs)
+
+    for section in ("pcbdoc", "pcblib"):
+        data = manifest[section]
+        assert data["track_count"] == len(expected_refs)
+        assert data["all_tracks_match_expected"] is True
+        _assert_mechanical_track_rows(
+            data["tracks"],
+            expected_tokens=expected_tokens,
+            expected_saved_ids=expected_saved_ids,
+            expected_display_names=expected_display_names,
+        )
+
+
+def _assert_mechanical_track_row_outputs(output_root: Path) -> None:
+    from altium_monkey import AltiumPcbDoc, AltiumPcbLib
+
+    expected_tokens = [ref.token for ref in _expected_mechanical_track_row_refs()]
+    expected_saved_ids = _expected_mechanical_track_row_saved_ids()
+    expected_display_names = _expected_mechanical_track_row_display_names()
+
+    pcbdoc = AltiumPcbDoc.from_file(
+        output_root / "pcb_v7_mechanical_layer_track_rows.PcbDoc"
+    )
+    assert len(pcbdoc.tracks) == len(expected_tokens)
+    assert [track.layer_ref().token for track in pcbdoc.tracks] == expected_tokens
+    assert pcbdoc.board is not None
+    assert pcbdoc.board.v9_layer_cache[expected_saved_ids["MECHANICAL53"]] == (
+        "Sample Mechanical 53"
+    )
+    _assert_mechanical_mirror_layer_names(
+        pcbdoc.board.raw_record or {},
+        expected_display_names=expected_display_names,
+    )
+
+    pcblib = AltiumPcbLib.from_file(
+        output_root / "pcb_v7_mechanical_layer_track_rows.PcbLib"
+    )
+    assert len(pcblib.footprints) == 1
+    assert pcblib.footprints[0].name == "V7_MECHANICAL_LAYER_TRACK_ROWS"
+    assert [track.layer_ref().token for track in pcblib.footprints[0].tracks] == (
+        expected_tokens
+    )
+    from altium_monkey.altium_pcblib_builder import PcbLibBuildProfile
+
+    pcblib_profile = PcbLibBuildProfile.from_pcblib(
+        output_root / "pcb_v7_mechanical_layer_track_rows.PcbLib"
+    )
+    library_raw_record = {
+        str(segment.key): str(segment.value)
+        for segment in pcblib_profile.library_data.segments
+        if segment.key is not None and segment.value is not None
+    }
+    _assert_mechanical_mirror_layer_names(
+        library_raw_record,
+        expected_display_names=expected_display_names,
+    )
+
+    for svg_name in (
+        "pcbdoc_mechanical_layer_track_rows.svg",
+        "pcblib_mechanical_layer_track_rows.svg",
+    ):
+        svg_text = (output_root / svg_name).read_text(encoding="utf-8")
+        for token in ("MECHANICAL17", "MECHANICAL53"):
+            _assert_svg_mechanical_v7_token_without_legacy_id(
+                svg_text,
+                token=token,
+                saved_id=expected_saved_ids[token],
+                display_name=expected_display_names[token],
+            )
+
+
+def test_pcb_v7_mechanical_layer_track_rows_sample_preserves_layer_identity(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "pcb_v7_mechanical_layer_track_rows"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+    _assert_mechanical_track_row_stdout(result.stdout)
+
+    output_root = check_examples_root / "pcb_v7_mechanical_layer_track_rows" / "output"
+    manifest = json.loads(
+        (output_root / "pcb_v7_mechanical_layer_track_rows.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    _assert_mechanical_track_row_manifest(manifest)
+    _assert_mechanical_track_row_outputs(output_root)
 
 
 def test_draftsman_blank_project_example_writes_parseable_drawing(
@@ -2920,34 +3498,34 @@ def _assert_inspect_layer_stack_interchange_input(
 
 def _public_stackupx_fixture() -> str:
     return """\
-<StackupDocument SerializerVersion="1.1.0.0" Version="2.1.0.0" Id="{PUBLIC-STACKUPX}" RevisionId="{PUBLIC-REVISION}" RevisionDate="2026-06-02T00:00:00Z" xmlns="http://altium.com/ns/LayerStackManager">
+<StackupDocument SerializerVersion="1.1.0.0" Version="2.1.0.0" Id="5e23cf90-7f1e-56c4-9d7f-f9848caa1f57" RevisionId="655af9a0-2a77-594c-8702-23a8344da31f" RevisionDate="2026-06-02T00:00:00Z" xmlns="http://altium.com/ns/LayerStackManager">
   <FeatureSet>
-    <Feature Id="{PUBLIC-FEATURE}">Standard Stackup</Feature>
+    <Feature Id="c8939e8a-fd0e-4d52-8860-b7a98f452016">Standard Stackup</Feature>
   </FeatureSet>
   <Stackup Type="Standard">
     <Stacks>
-      <Stack Id="{PUBLIC-SUBSTACK}" Name="Board Layer Stack" IsFlex="False">
+      <Stack Id="158443b6-0e30-5d76-ba89-f5afd97568c2" Name="Board Layer Stack" IsFlex="False">
         <Layers>
-          <Layer Id="{PUBLIC-TOP}" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Top Layer" IsShared="True">
+          <Layer Id="7f143fce-4b68-5bb8-8618-c0a15c02f350" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Top Layer" IsShared="True">
             <Properties>
               <Property Name="Thickness" Type="LengthValue">1.4mil</Property>
             </Properties>
           </Layer>
-          <Layer Id="{PUBLIC-DIELECTRIC}" TypeId="92b02d5e-8d69-48a8-880e-ac4b77db099d" Name="Dielectric 1" IsShared="True">
+          <Layer Id="ade33e16-15de-5c22-aaab-44a390808b71" TypeId="92b02d5e-8d69-48a8-880e-ac4b77db099d" Name="Dielectric 1" IsShared="True">
             <Properties>
               <Property Name="Thickness" Type="LengthValue">10mil</Property>
               <Property Name="Material" Type="String">FR-4</Property>
               <Property Name="DielectricConstant" Type="DimensionlessValue">4.2</Property>
             </Properties>
           </Layer>
-          <Layer Id="{PUBLIC-BOTTOM}" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Bottom Layer" IsShared="True">
+          <Layer Id="6432c9ac-9979-5781-bfde-55c5cf20a0db" TypeId="f4eccd87-2cfb-4f37-be50-4f3a272b4d01" Name="Bottom Layer" IsShared="True">
             <Properties>
               <Property Name="Thickness" Type="LengthValue">1.4mil</Property>
             </Properties>
           </Layer>
         </Layers>
         <ViaSpans>
-          <ViaSpan Id="{PUBLIC-SPAN}" AutoName="Thru 1:2" Type="ThruVia" StartLayerId="{PUBLIC-TOP}" StopLayerId="{PUBLIC-BOTTOM}" />
+          <ViaSpan Id="e46178bd-d5da-5888-9d19-57943d0b9b5f" AutoName="Thru 1:2" Type="ThruVia" StartLayerId="7f143fce-4b68-5bb8-8618-c0a15c02f350" StopLayerId="6432c9ac-9979-5781-bfde-55c5cf20a0db" />
         </ViaSpans>
       </Stack>
     </Stacks>
@@ -2959,36 +3537,36 @@ def _public_stackupx_fixture() -> str:
 def _public_stackup_text_fixture() -> str:
     rows = [
         "STACKUPVERSION=1",
-        "STACKUPDOCUMENTID={PUBLIC-STACKUP}",
-        "STACKUPDOCUMENTREVISIONID={PUBLIC-REVISION}",
+        "STACKUPDOCUMENTID={9A4F0AD9-5BCF-5836-94C9-FAA039353EC6}",
+        "STACKUPDOCUMENTREVISIONID={655AF9A0-2A77-594C-8702-23A8344DA31F}",
         "STACKUPDOCUMENTREVISIONDATE=06/02/2026 00:00:00",
-        "FEATURE_0ID={PUBLIC-FEATURE}",
+        "FEATURE_0ID={C8939E8A-FD0E-4D52-8860-B7A98F452016}",
         "FEATURE_0NAME=Standard Stackup",
-        "LAYERMASTERSTACK_V8ID={PUBLIC-STACKUP}",
+        "LAYERMASTERSTACK_V8ID={9A4F0AD9-5BCF-5836-94C9-FAA039353EC6}",
         "LAYERMASTERSTACK_V8NAME=Master layer stack",
-        "LAYERSUBSTACK_V8_0ID={PUBLIC-SUBSTACK}",
+        "LAYERSUBSTACK_V8_0ID={158443B6-0E30-5D76-BA89-F5AFD97568C2}",
         "LAYERSUBSTACK_V8_0NAME=Board Layer Stack",
         "LAYERSUBSTACK_V8_0ISFLEX=False",
         "LAYERSUBSTACK_V8_0USEDBYPRIMS=False",
         "LAYER_V8_0LAYERID=16777217",
-        "LAYER_V8_0ID={PUBLIC-TOP}",
+        "LAYER_V8_0ID={7F143FCE-4B68-5BB8-8618-C0A15C02F350}",
         "LAYER_V8_0NAME=Top Layer",
         "LAYER_V8_0COPTHICK=1.4mil",
         "LAYER_V8_1LAYERID=17039361",
-        "LAYER_V8_1ID={PUBLIC-DIELECTRIC}",
+        "LAYER_V8_1ID={ADE33E16-15DE-5C22-AAAB-44A390808B71}",
         "LAYER_V8_1NAME=Dielectric 1",
         "LAYER_V8_1DIELHEIGHT=10mil",
         "LAYER_V8_1DIELCONST=4.2",
         "LAYER_V8_1DIELMATERIAL=FR-4",
         "LAYER_V8_2LAYERID=16842751",
-        "LAYER_V8_2ID={PUBLIC-BOTTOM}",
+        "LAYER_V8_2ID={6432C9AC-9979-5781-BFDE-55C5CF20A0DB}",
         "LAYER_V8_2NAME=Bottom Layer",
         "LAYER_V8_2COPTHICK=1.4mil",
-        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0ID={PUBLIC-SPAN}",
-        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0NAME=Thru 1:2",
-        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0TYPE=0",
-        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0FIRSTLAYERID={PUBLIC-TOP}",
-        "VIASPAN_V8_{PUBLIC-SUBSTACK}_0LASTLAYERID={PUBLIC-BOTTOM}",
+        "VIASPAN_V8_{158443B6-0E30-5D76-BA89-F5AFD97568C2}_0ID={E46178BD-D5DA-5888-9D19-57943D0B9B5F}",
+        "VIASPAN_V8_{158443B6-0E30-5D76-BA89-F5AFD97568C2}_0NAME=Thru 1:2",
+        "VIASPAN_V8_{158443B6-0E30-5D76-BA89-F5AFD97568C2}_0TYPE=0",
+        "VIASPAN_V8_{158443B6-0E30-5D76-BA89-F5AFD97568C2}_0FIRSTLAYERID={7F143FCE-4B68-5BB8-8618-C0A15C02F350}",
+        "VIASPAN_V8_{158443B6-0E30-5D76-BA89-F5AFD97568C2}_0LASTLAYERID={6432C9AC-9979-5781-BFDE-55C5CF20A0DB}",
     ]
     return "|" + "|".join(rows) + "\n"
 
@@ -3899,7 +4477,9 @@ def test_embedded_asset_inventory_to_dict_matches_public_schema() -> None:
     )
 
 
-def test_extractable_asset_inventory_to_dict_handles_unavailable_embedded_payloads() -> None:
+def test_extractable_asset_inventory_to_dict_handles_unavailable_embedded_payloads() -> (
+    None
+):
     from altium_monkey import (
         AltiumPcbDoc,
         AltiumPcbLib,
@@ -3929,7 +4509,8 @@ def test_extractable_asset_inventory_to_dict_handles_unavailable_embedded_payloa
     assert payload["schema"] == extractable_asset_schema_id()
 
     assets_by_kind = {
-        asset["kind"]: asset for asset in payload["assets"]  # type: ignore[index]
+        asset["kind"]: asset
+        for asset in payload["assets"]  # type: ignore[index]
     }
     model = assets_by_kind["embedded_model"]
     assert model["can_extract"] is False
@@ -3997,9 +4578,10 @@ def test_extractable_asset_inventory_to_dict_handles_unavailable_embedded_payloa
         if asset["kind"] == "opaque_embedded"
     )
     assert opaque_asset["payload_available"] is True
-    assert opaque_asset["payload_sha256"] == hashlib.sha256(
-        b"opaque pcblib font stream"
-    ).hexdigest()
+    assert (
+        opaque_asset["payload_sha256"]
+        == hashlib.sha256(b"opaque pcblib font stream").hexdigest()
+    )
 
     bad_opaque_hash = deepcopy(opaque_payload)
     bad_opaque = next(
@@ -4025,11 +4607,9 @@ def test_embedded_asset_inventory_example_writes_consumer_json(
 
     example_root = check_examples_root / "embedded_asset_inventory"
     manifest = json.loads(
-        (
-            example_root
-            / "output"
-            / "embedded_asset_inventory_manifest.json"
-        ).read_text(encoding="utf-8")
+        (example_root / "output" / "embedded_asset_inventory_manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert manifest["schema"] == "altium_monkey.examples.embedded_asset_inventory.a0"
     assert manifest["inventory_schema"] == "altium_monkey.pcb.embedded_assets.a0"
@@ -4108,15 +4688,26 @@ def test_embedded_asset_inventory_example_writes_consumer_json(
         assert path.stat().st_size == selected[key]["byte_count"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == selected[key]["sha256"]
 
-    assert payload_paths["pcbdoc_model"].read_text(
-        encoding="utf-8",
-        errors="ignore",
-    ).startswith("ISO-10303-21;")
-    assert payload_paths["pcblib_model"].read_text(
-        encoding="utf-8",
-        errors="ignore",
-    ).startswith("ISO-10303-21;")
-    assert payload_paths["pcbdoc_font"].read_bytes()[:4] in (b"\x00\x01\x00\x00", b"OTTO")
+    assert (
+        payload_paths["pcbdoc_model"]
+        .read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        .startswith("ISO-10303-21;")
+    )
+    assert (
+        payload_paths["pcblib_model"]
+        .read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+        .startswith("ISO-10303-21;")
+    )
+    assert payload_paths["pcbdoc_font"].read_bytes()[:4] in (
+        b"\x00\x01\x00\x00",
+        b"OTTO",
+    )
 
 
 def test_extractable_asset_inventory_example_writes_selected_assets(
@@ -4134,9 +4725,7 @@ def test_extractable_asset_inventory_example_writes_selected_assets(
     example_root = check_examples_root / "extractable_asset_inventory"
     manifest = json.loads(
         (
-            example_root
-            / "output"
-            / "extractable_asset_inventory_manifest.json"
+            example_root / "output" / "extractable_asset_inventory_manifest.json"
         ).read_text(encoding="utf-8")
     )
     assert manifest["schema"] == "altium_monkey.examples.extractable_asset_inventory.a0"
@@ -4268,8 +4857,9 @@ def test_extractable_asset_inventory_example_writes_selected_assets(
     model_path = example_root / selected["pcbdoc_model"]["path"]
     assert model_path.exists()
     assert model_path.stat().st_size == selected["pcbdoc_model"]["byte_count"]
-    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
-        selected["pcbdoc_model"]["sha256"]
+    assert (
+        hashlib.sha256(model_path.read_bytes()).hexdigest()
+        == (selected["pcbdoc_model"]["sha256"])
     )
 
 

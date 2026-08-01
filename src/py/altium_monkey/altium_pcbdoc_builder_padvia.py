@@ -29,10 +29,14 @@ from .altium_pcb_mask_expansion import (
     apply_pcb_mask_expansion_to_pad,
     resolve_pcb_mask_expansion_with_manual_alias,
 )
+from .altium_pcb_layer_ref import (
+    PcbLayerLike,
+    _coerce_pcb_pad_authoring_layer_storage,
+    _coerce_pcb_via_span_layer_storage,
+)
 from .altium_record_pcb__pad import AltiumPcbPad
 from .altium_record_pcb__via import AltiumPcbVia
 from .altium_record_types import PcbLayer
-from .altium_resolved_layer_stack import legacy_layer_to_v7_save_id
 
 _PAD_SUBRECORD2_DEFAULT = b"\x00"
 _PAD_SUBRECORD3_DEFAULT = b"\x04|&|0"
@@ -91,12 +95,12 @@ def build_authored_pad(
     position_mils: tuple[float, float],
     width_mils: float,
     height_mils: float,
-    layer: int | PcbLayer = PcbLayer.TOP,
+    layer: PcbLayerLike = PcbLayer.TOP,
     shape: int | str | PadShape = PadShape.RECTANGLE,
     rotation_degrees: float = 0.0,
     hole_size_mils: float = 0.0,
     plated: bool | None = None,
-    corner_radius_percent: int | None = None,
+    corner_radius_percent: int | float | None = None,
     top_shape: OptionalPadShapeInput = None,
     top_width_mils: float | None = None,
     top_height_mils: float | None = None,
@@ -123,7 +127,8 @@ def build_authored_pad(
     Create a modern authored PAD record from first principles.
     """
     pad = AltiumPcbPad()
-    layer_id = int(layer)
+    layer_storage = _coerce_pcb_pad_authoring_layer_storage(layer)
+    layer_id = layer_storage.legacy_layer_id
     validate_non_negative(width_mils, "width_mils")
     validate_non_negative(height_mils, "height_mils")
     validate_non_negative(hole_size_mils, "hole_size_mils")
@@ -168,7 +173,7 @@ def build_authored_pad(
         corner_radius_percent=corner_radius_percent,
     )
     pad.rotation = float(rotation_degrees)
-    pad.layer_v7_save_id = legacy_layer_to_v7_save_id(layer_id)
+    pad.layer_v7_save_id = layer_storage.v7_saved_layer_id
     pad.hole_size = hole_iu
     pad.is_plated = bool(hole_iu > 0) if plated is None else bool(plated)
     pad.net_index = None
@@ -302,14 +307,22 @@ def build_authored_via(
     position_mils: tuple[float, float],
     diameter_mils: float,
     hole_size_mils: float,
-    layer_start: int | PcbLayer = PcbLayer.TOP,
-    layer_end: int | PcbLayer = PcbLayer.BOTTOM,
+    layer_start: PcbLayerLike = PcbLayer.TOP,
+    layer_end: PcbLayerLike = PcbLayer.BOTTOM,
     hole_positive_tolerance_mils: float | None = None,
     hole_negative_tolerance_mils: float | None = None,
 ) -> AltiumPcbVia:
     """
     Create a modern authored VIA record from first principles.
     """
+    start_storage = _coerce_pcb_via_span_layer_storage(
+        layer_start,
+        field_name="layer_start",
+    )
+    end_storage = _coerce_pcb_via_span_layer_storage(
+        layer_end,
+        field_name="layer_end",
+    )
     via = AltiumPcbVia()
     via.layer = int(PcbLayer.MULTI_LAYER)
     via.net_index = None
@@ -319,8 +332,8 @@ def build_authored_via(
     via.y = via._to_internal_units(position_mils[1])
     via.diameter = via._to_internal_units(diameter_mils)
     via.hole_size = via._to_internal_units(hole_size_mils)
-    via.layer_start = int(layer_start)
-    via.layer_end = int(layer_end)
+    via.layer_start = start_storage.legacy_layer_id
+    via.layer_end = end_storage.legacy_layer_id
     via.via_mode = 0
     via.union_index = 0
     via.diameter_by_layer = [0] * 32

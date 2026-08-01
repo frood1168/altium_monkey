@@ -37,18 +37,22 @@ call site for now.
 
 ## Layer Arguments
 
-Current PcbLib footprint primitive helpers are legacy-layer-first. Arguments
+PcbLib footprint primitive helpers keep `PcbLayer` for legacy-compatible layers
+and use `PcbLayerRef` for V7-aware layer identity where supported. Arguments
 named `layer`, `layer_start`, and `layer_end` accept documented `PcbLayer`
-values. `PcbLayer` mirrors Altium's compact legacy/TV6 enum and contains Top,
-Mid1 through Mid30, Bottom, and Mechanical 1 through Mechanical 16 only; values
-73, 74, and 75 are Drill Drawing, Multi-Layer, and Connect.
+values and supported layer-name tokens. `PcbLayer` mirrors Altium's compact
+legacy/TV6 enum and contains Top, Mid1 through Mid30, Bottom, and Mechanical 1
+through Mechanical 16 only; values 73, 74, and 75 are Drill Drawing,
+Multi-Layer, and Connect.
 
 Some parsed footprint records expose V7 side metadata such as `v7_layer_id`,
-`layer_v7_save_id`, or `V7_LAYER` property text. Some footprint track/arc/fill
-helpers expose explicit V7 override arguments for compatibility. Do not pass
+`layer_v7_save_id`, or `V7_LAYER` property text. Track, arc, fill, text,
+region, and component-body helpers can author ordinary numbered mechanical
+layers through Mechanical53 with `PcbLayerRef` or semantic tokens. Do not pass
 serialized V7 saved layer ids as ordinary `layer=` values unless a method
 explicitly documents that override. See [PCB layers](api_patterns/pcb_layers.md)
-for the current public boundary.
+for the current public boundary, including the still-gated PcbLib V7-only
+signal-layer cases.
 
 ## Pads, Mask, And Paste
 
@@ -80,6 +84,14 @@ true and `none` when false. New code should prefer the explicit expansion API.
 `add_pad(...)` also accepts `hole_shape="round"`, `"square"`, or `"slot"`
 through `PadHoleShape`. Square holes require a positive drill size. Slotted
 holes require `slot_length_mils`.
+
+`add_pad(...)` accepts fractional `corner_radius_percent` values for
+rounded-rectangle pads on the top or bottom layer, matching Altium's exact
+percent storage. Read the exact value back with
+`pad.corner_radius_percent_exact` or resolve the effective radius with
+`pad.corner_radius_mils_on_layer(layer)`. Whole-number percents keep the
+legacy integer-only storage, so existing output is unchanged. See the
+[PcbLib format contract](format_contracts/pcblib.md) for the storage details.
 
 Custom pads can set the anchor pad independently from the outline:
 `anchor_width_mils`, `anchor_height_mils`, `anchor_rotation_degrees`, and
@@ -229,11 +241,12 @@ default, computed from the footprint primitives in millimeter coordinates.
 Set `PcbSvgRenderOptions(include_view_box=False)` to omit only that root
 attribute.
 
-Layer keys and SVG filenames use stable `PcbLayer.to_json_name()` tokens.
-Use `PcbLayer.to_display_name()` only for default UI labels; PcbLib footprints
-do not have a board layer stack, so there is no board-specific rename source.
-Mechanical 17+ and AD 26.8.1 Mid31+ SVG/export behavior is future V7-aware
-layer-reference work and is not represented by extending `PcbLayer`.
+Layer keys and SVG filenames use stable layer tokens. Legacy layers use
+`PcbLayer.to_json_name()` tokens; V7 mechanical layers use `PcbLayerRef` tokens
+such as `MECHANICAL33`. Use `PcbLayer.to_display_name()` only for default UI
+labels. PcbLib footprints do not have a board signal stack, but library
+mechanical-layer registry names are used for custom mechanical display labels
+when available.
 
 ## Mechanical Layer Kinds
 
@@ -288,6 +301,7 @@ Start with:
 10. [`pcblib_synthesize_power_resistor_lib`](../examples/pcblib_synthesize_power_resistor_lib/README.md)
 11. [`extractable_asset_inventory`](../examples/extractable_asset_inventory/README.md)
 12. [`embedded_asset_inventory`](../examples/embedded_asset_inventory/README.md)
+13. [`pcb_v7_mechanical_layer_track_rows`](../examples/pcb_v7_mechanical_layer_track_rows/README.md)
 
 See [API patterns](api_patterns/index.md) for the differences between schematic
 and PCB object systems.

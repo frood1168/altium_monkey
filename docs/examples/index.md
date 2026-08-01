@@ -4,7 +4,7 @@
 
 Public examples are indexed from `examples/manifest.toml`.
 
-Total examples: `107`
+Total examples: `109`
 
 ## Generate
 
@@ -57,6 +57,7 @@ uv run python tools\generate_docs.py
 | Example | Areas | Summary | Tags |
 | --- | --- | --- | --- |
 | [`hello_pcbdoc`](../../examples/hello_pcbdoc/README.md)<br>Create a PcbDoc hello example | pcbdoc | Generate a PcbDoc programmatically, create a rectangular board outline from explicit polygon vertices, place top silkscreen text, and save the board. | hello-world, generation, board-outline, polygon, silkscreen, pcb |
+| [`pcb_v7_mechanical_layer_track_rows`](../../examples/pcb_v7_mechanical_layer_track_rows/README.md)<br>Create V7 mechanical layer track rows | pcbdoc, pcblib | Generate a PcbDoc and PcbLib footprint with one track on every ordinary numbered Mechanical1 through Mechanical53 layer through PcbLayerRef, custom display names, save/reparse checks, and SVG metadata. | pcbdoc, pcblib, generation, v7-layers, mechanical-layers, svg |
 | [`pcbdoc_add_arc`](../../examples/pcbdoc_add_arc/README.md)<br>Add PCB arcs | pcbdoc, mutation | Load a blank PcbDoc, add full-circle and partial arc primitives on multiple layers, and save the board. | pcbdoc, mutation, arc, full-circle, routing |
 | [`pcbdoc_add_custom_pad_region_outline`](../../examples/pcbdoc_add_custom_pad_region_outline/README.md)<br>Add custom-pad region outlines | pcbdoc, mutation | Load a blank PcbDoc, add an arc-bearing shape-based region plus a custom pad with primary and bottom-layer arc-bearing bodies, save the board, and write a JSON verification manifest. | pcbdoc, mutation, custom-pad, region, outline-vertices, arc |
 | [`pcbdoc_add_differential_pairs`](../../examples/pcbdoc_add_differential_pairs/README.md)<br>Add PCB differential pairs | pcbdoc, mutation | Create a PcbDoc from scratch, add differential-pair objects with routed member nets, and save the generated board plus a JSON summary. | pcbdoc, mutation, differential-pair, nets, routing |
@@ -97,6 +98,7 @@ uv run python tools\generate_docs.py
 | [`pcbdoc_stats`](../../examples/pcbdoc_stats/README.md)<br>Print PcbDoc board statistics | pcbdoc, design | Load the loz-old-man project with AltiumDesign, open its PcbDoc, and print board outline, drill, slot, primitive-width, and resolved layer-stack statistics. | pcbdoc, project, statistics, board-outline, drills, slots |
 | [`pcbdoc_svg`](../../examples/pcbdoc_svg/README.md)<br>Render PcbDoc layers to SVG | pcbdoc, svg, design | Load the RT Super C1 project with AltiumDesign, open its PcbDoc, and write one SVG per visible PCB layer plus a separate board-outline SVG. | pcbdoc, svg, rendering, project, layers, board-outline |
 | [`pcbdoc_user_union`](../../examples/pcbdoc_user_union/README.md)<br>Create a PCB user union | pcbdoc, mutation | Load a blank PcbDoc, place two PcbLib footprints plus board primitives and a STEP body, group them in a named user-defined union, save the board, and write a JSON summary. | pcbdoc, mutation, pcblib, component, 3d, user-union |
+| [`pcbdoc_v7_128_signal_track_row`](../../examples/pcbdoc_v7_128_signal_track_row/README.md)<br>Create a 128-signal-layer PcbDoc track row | pcbdoc | Generate a public-local AD 26.8 style 128-signal StackUpX file, re-import it, author one track on every signal layer through PcbLayerRef, and verify exact V7 saved-layer readback plus SVG metadata. | pcbdoc, layer-stack, generation, stackupx, v7-layers, 128-signal |
 
 ### `pcblib`
 
@@ -203,6 +205,8 @@ uv run python tools\generate_docs.py
 | [`pcbdoc_inspect_layer_stack`](../../examples/pcbdoc_inspect_layer_stack/README.md)<br>Inspect a PcbDoc or stackup layer stack | pcbdoc | Load a PcbDoc, .stackup, or .stackupx file, build the source-aware layer-stack model, and write normalized debug JSON for stack layers, substacks, layer pairs, impedance profiles, and source evidence. | pcbdoc, layer-stack, inspection, json, stackup |
 | [`pcbdoc_create_layer_stack`](../../examples/pcbdoc_create_layer_stack/README.md)<br>Create a PcbDoc layer stack | pcbdoc | Synthesize the canonical empty-board layer stack through AltiumLayerStackDocument, save a PcbDoc, reparse it, and write a semantic comparison manifest. | pcbdoc, layer-stack, generation, stackup, canonical-empty |
 | [`pcbdoc_create_from_stackup_files`](../../examples/pcbdoc_create_from_stackup_files/README.md)<br>Create PcbDocs from stackup files | pcbdoc | Load .stackup and .stackupx layer-stack exports, apply each to a fresh PcbDocBuilder, save native PcbDocs, and verify readback semantics. | pcbdoc, layer-stack, generation, stackup, stackupx |
+| [`pcbdoc_v7_128_signal_track_row`](../../examples/pcbdoc_v7_128_signal_track_row/README.md)<br>Create a 128-signal-layer PcbDoc track row | pcbdoc | Generate a public-local AD 26.8 style 128-signal StackUpX file, re-import it, author one track on every signal layer through PcbLayerRef, and verify exact V7 saved-layer readback plus SVG metadata. | pcbdoc, layer-stack, generation, stackupx, v7-layers, 128-signal |
+| [`pcb_v7_mechanical_layer_track_rows`](../../examples/pcb_v7_mechanical_layer_track_rows/README.md)<br>Create V7 mechanical layer track rows | pcbdoc, pcblib | Generate a PcbDoc and PcbLib footprint with one track on every ordinary numbered Mechanical1 through Mechanical53 layer through PcbLayerRef, custom display names, save/reparse checks, and SVG metadata. | pcbdoc, pcblib, generation, v7-layers, mechanical-layers, svg |
 | [`pcbdoc_create_custom_rigid_stack`](../../examples/pcbdoc_create_custom_rigid_stack/README.md)<br>Create a custom rigid PcbDoc layer stack | pcbdoc | Author a custom four-layer rigid stack through explicit AltiumLayerStackDocument.from_rigid_layer_rows rows, save PcbDoc/.stackup/.stackupx outputs, and write a semantic comparison manifest. | pcbdoc, layer-stack, generation, rigid-stack, custom-stack |
 | [`pcbdoc_create_jlcpcb_rigid_stack`](../../examples/pcbdoc_create_jlcpcb_rigid_stack/README.md)<br>Create a JLCPCB 8-layer rigid PcbDoc stack | pcbdoc | Programmatically author a JLCPCB JLC081211-1080 eight-layer rigid stack through semantic layer-row, material, and stackup setting objects, save PcbDoc/.stackup/.stackupx outputs, and compare all readbacks. | pcbdoc, layer-stack, generation, rigid-stack, jlcpcb, stackupx |
 | [`pcbdoc_create_impedance_rigid_stack`](../../examples/pcbdoc_create_impedance_rigid_stack/README.md)<br>Create an impedance-controlled rigid PcbDoc stack | pcbdoc | Author a synthetic eight-layer rigid stack with controlled-impedance profiles, save a PcbDoc plus .stackup/.stackupx exports, and compare all readbacks. | pcbdoc, layer-stack, generation, rigid-stack, impedance |

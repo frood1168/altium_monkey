@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from pathlib import Path
 import re
 from collections.abc import Iterable
@@ -12,6 +13,7 @@ from xml.etree import ElementTree as ET
 from xml.etree.ElementTree import Element
 
 from .altium_pcb_stream_helpers import format_mil_value as _format_mil_value
+from .altium_pcb_layer_ref import PcbLayerRef, PcbLayerResolutionError
 from .altium_record_types import PcbLayer
 from .altium_text_helpers import normalized_object_text as _value_text
 
@@ -36,6 +38,54 @@ _LENGTH_RE = re.compile(
     r"^\s*(?P<number>[-+]?(?:\d+(?:\.\d*)?|\.\d+))\s*(?P<unit>mil|mm|um|m)?\s*$",
     re.IGNORECASE,
 )
+
+
+class StackupXLayerType(StrEnum):
+    """Well-known Altium Layer Stack Manager layer ``TypeId`` GUIDs.
+
+    Use these as ``StackupXLayer.type_id`` values when authoring stacks so
+    callers never need to know the raw GUIDs. Source-backed from the AD
+    ``Altium.LayerStackManager.LayerSchema`` constants.
+    """
+
+    ABSTRACT = "5ee2359d-ad77-4dad-bd77-5a2334695235"
+    UNKNOWN = "4af561f4-6919-43d8-942a-d3579b371c26"
+    PHYSICAL = "daa9eccc-0064-462d-854e-0b9e829ef563"
+    BASE_DIELECTRIC = "56eb1ca5-014a-4387-a43e-1485f44f081e"
+    OVERLAY = "c7ef040e-8d00-490b-b00c-a7e7823ff174"
+    BIKINI_COVERLAY = "8de65238-89ed-47c5-bbf8-0f6f02d1899c"
+    PASTE_MASK = "e6a36257-b90f-45e5-9f8d-a213ecdb687c"
+    MECHANICAL = "7a47e6b3-b591-41f7-a27b-8c6b0477e458"
+    SOLDER_MASK = "7b384237-13d8-4318-8bcb-accd8d9a51e7"
+    COPPER_FOIL = "31e48829-e750-4c28-95e0-1a8313f0158e"
+    COPPER_SIGNAL = "f4eccd87-2cfb-4f37-be50-4f3a272b4d01"
+    INTERNAL_PLANE = "f59fab94-c5ed-467d-94cd-f60a323c5d5b"
+    SURFACE_FINISH = "b0827674-798c-4cf8-807c-8e6c2a11c145"
+    DIELECTRIC = "92b02d5e-8d69-48a8-880e-ac4b77db099d"
+    PREPREG = "1a79611a-039d-4d40-a204-53c26c50f8b5"
+    CORE = "136c62ef-1fa6-4897-ae71-7e797b632b92"
+    PLATING = "90b89aa0-a48a-45f4-82f5-b3eca4ec8cce"
+    ADHESIVE = "448f9952-79ba-41d8-a8f4-4713ee7a3828"
+    STIFFENER = "9fd889fa-c97a-401c-a066-e5f746678381"
+    MISC = "786b5f28-f093-4084-bba7-46e8f4f24f55"
+    MARKING = "886956f5-b2e9-4114-93f3-f69af872bffb"
+    PRINTED_ELECTRONICS_LAYER = "8053a284-8886-43e8-baa0-5aa1d8de97d1"
+    PRINTED_ELECTRONICS_CONDUCTIVE = "c558fe3f-d914-4761-9d82-a12591ceb133"
+    PRINTED_ELECTRONICS_NONCONDUCTIVE = "18be3c27-bfeb-4bba-8e9a-df4caeee1731"
+    PRINTED_ELECTRONICS_ISOLATION = "8590cc63-42d8-48cb-8307-72991910bcc9"
+    PRINTED_ELECTRONICS_CORE = "e9a93ad8-17ee-438c-a1b6-92a3995dfda8"
+    PRINTED_ELECTRONICS_PREPREG = "743de2f9-2902-4e35-b39c-bacd385f87dd"
+
+
+class StackupXFeatureId(StrEnum):
+    """Known Altium Layer Stack Manager feature GUIDs for ``StackupXFeature.id``."""
+
+    STANDARD_STACKUP = "c8939e8a-fd0e-4d52-8860-b7a98f452016"
+    IMPEDANCE_CALCULATOR = "e3df2b86-5f1b-49ca-b266-d1ae57f0ba6f"
+    RIGID_FLEX = "5277e6a4-9e5f-4f54-951f-dc18cfeb7530"
+    RIGID_FLEX_ADVANCED = "4e697926-85c3-4c60-8b9b-e23ccb226764"
+    BACK_DRILLS = "0a82ba33-e4d8-43f3-9c01-412dc26bdd5e"
+
 
 _LAYER_TYPE_FAMILIES = {
     "5ee2359d-ad77-4dad-bd77-5a2334695235": "abstract",
@@ -83,6 +133,17 @@ _FEATURE_ID_RIGID_FLEX_ADVANCED = "4e697926-85c3-4c60-8b9b-e23ccb226764"
 _FEATURE_ID_IMPEDANCE = "e3df2b86-5f1b-49ca-b266-d1ae57f0ba6f"
 
 
+def _generated_stackupx_id() -> str:
+    """Fresh random GUID id for newly authored StackUpX objects.
+
+    Altium's Layer Stack Manager parses stack, layer, and span ids with
+    ``Guid.TryParse`` and raises ``Invalid GUID string`` on anything else, so
+    authored ids default to generated GUIDs instead of caller-invented text.
+    Parse paths keep ids read from existing files verbatim.
+    """
+    return str(uuid.uuid4())
+
+
 @dataclass(frozen=True)
 class StackupXFeature:
     id: str
@@ -113,7 +174,7 @@ class StackupXProperty:
 
 @dataclass(frozen=True)
 class StackupXLayer:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     type_id: str
     name: str
     is_shared: bool | None
@@ -158,7 +219,7 @@ class StackupXLayer:
 
 @dataclass(frozen=True)
 class StackupXSpan:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     auto_name: str
     span_type: str
     start_layer_id: str
@@ -218,7 +279,7 @@ class StackupXTransmissionLine:
 
 @dataclass(frozen=True)
 class StackupXImpedanceProfile:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     auto_name: str
     profile_type: str
     impedance: str
@@ -247,7 +308,7 @@ class StackupXImpedanceProfile:
 
 @dataclass(frozen=True)
 class StackupXBranchSectionStack:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     layer_stack_id: str
     description: str
     material_usage: str
@@ -287,7 +348,7 @@ class StackupXBranchSectionStack:
 
 @dataclass(frozen=True)
 class StackupXBranchSection:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     name: str
     parent_section_id: str
     stacks: tuple[StackupXBranchSectionStack, ...]
@@ -305,7 +366,7 @@ class StackupXBranchSection:
 
 @dataclass(frozen=True)
 class StackupXBranch:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     name: str
     description: str
     parent_branch_id: str
@@ -325,7 +386,7 @@ class StackupXBranch:
 
 @dataclass(frozen=True)
 class StackupXStack:
-    id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     name: str
     stack_type: str
     is_flex: bool | None
@@ -365,8 +426,8 @@ class StackupXStack:
 class AltiumStackupXDocument:
     serializer_version: str
     version: str
-    id: str
-    revision_id: str
+    id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
+    revision_id: str = field(default_factory=_generated_stackupx_id, kw_only=True)
     revision_date: str
     features: tuple[StackupXFeature, ...]
     stackup_attributes: tuple[tuple[str, str], ...]
@@ -515,7 +576,12 @@ class AltiumStackupXDocument:
         Current `.stackupx` exports omit PcbDoc paste rows and do not contain
         `BoardRegions/Data` bend-line geometry, so this method does not try to
         synthesize those PcbDoc-only records.
+
+        Raises ``ValueError`` when stack, layer, or span ids are not GUID
+        strings; boards written with such ids crash Altium's Layer Stack
+        Manager. Use the generated id defaults or supply GUID strings.
         """
+        _guard_board_writable_ids(self)
         from .altium_layer_stack_document import (
             AltiumImpedanceProfile,
             AltiumLayerRegistry,
@@ -541,21 +607,29 @@ class AltiumStackupXDocument:
             stack_layers: list[AltiumStackLayer] = []
             for layer_index, layer in enumerate(stack.layers):
                 registry_ref = _registry_ref(layer.id)
+                standard_token = stack_layer_tokens_by_id.get(
+                    layer.id,
+                    _standard_token_from_layer_name(layer.name),
+                )
+                legacy_layer_id = _legacy_layer_id_from_stackupx_token(
+                    standard_token or ""
+                )
+                v7_saved_layer_id = _v7_saved_layer_id_from_stackupx_token(
+                    standard_token or ""
+                )
                 if registry_ref not in registry_entries_by_ref:
                     registry_entries_by_ref[registry_ref] = AltiumLayerRegistryEntry(
                         model_id=registry_ref,
                         display_name=layer.name,
                         family=layer.family,
-                        standard_token=stack_layer_tokens_by_id.get(
-                            layer.id,
-                            _standard_token_from_layer_name(layer.name),
-                        ),
-                        legacy_layer_id=_legacy_layer_id_from_stackupx_token(
-                            stack_layer_tokens_by_id.get(layer.id, "")
-                        ),
+                        standard_token=standard_token,
+                        legacy_layer_id=legacy_layer_id,
+                        v7_layer_id=v7_saved_layer_id,
+                        source_layer_id=v7_saved_layer_id,
                         source_record_id=layer.id,
                         side=_side_from_layer_name(layer.name),
-                        enabled=True,
+                        enabled=_stackupx_layer_enabled(layer),
+                        used_by_primitives=_stackupx_layer_used_by_primitives(layer),
                         source_aliases=(f"stackupx:{layer.type_id}",),
                     )
                 stack_layers.append(
@@ -564,7 +638,7 @@ class AltiumStackupXDocument:
                         layer_index,
                         registry_ref,
                         stack_ref=stack.id,
-                        layer_token=stack_layer_tokens_by_id.get(layer.id, ""),
+                        layer_token=standard_token or "",
                     )
                 )
 
@@ -1011,6 +1085,7 @@ def _to_stack_layer(
         family=model_family,
         source_family="stackupx",
         source_record_id=layer.id,
+        layer_id=_v7_saved_layer_id_from_stackupx_token(layer_token),
         legacy_layer_id=_legacy_layer_id_from_stackupx_token(layer_token),
         stackupx_type_id=layer.type_id,
         copper_thickness_mils=thickness_mils if model_family == "copper" else None,
@@ -1034,6 +1109,7 @@ def _to_stack_layer(
         component_placement=_component_placement_value(
             layer.property_value("ComponentPlacement")
         ),
+        used_by_primitives=_stackupx_layer_used_by_primitives(layer),
         coverlay_expansion=layer.property_value("CoverlayExpansion"),
         is_stiffener=is_stiffener,
         is_adhesive=is_adhesive,
@@ -1076,6 +1152,16 @@ def _model_family_from_stackupx_layer(layer: StackupXLayer) -> str:
     if layer.family in {"pe_nonconductive", "pe_isolation", "pe_core", "pe_prepreg"}:
         return "dielectric"
     return layer.family
+
+
+def _stackupx_layer_enabled(layer: StackupXLayer) -> bool:
+    return layer.is_enabled is not False
+
+
+def _stackupx_layer_used_by_primitives(layer: StackupXLayer) -> bool | None:
+    if _model_family_from_stackupx_layer(layer) != "copper":
+        return None
+    return _stackupx_layer_enabled(layer)
 
 
 def _to_layer_pairs(
@@ -1704,11 +1790,7 @@ def _export_stack(
     stack_type = "" if stack_type_value is None else str(stack_type_value)
     if stack_type_value is None and is_flex:
         stack_type = "BoardRegionLayerStack"
-    emitted_is_flex = (
-        stackupx_is_flex
-        if stack_type_value is not None or stackupx_is_flex is not None
-        else is_flex
-    )
+    emitted_is_flex = stackupx_is_flex if stackupx_is_flex is not None else is_flex
     via_spans, drill_spans = _export_spans(
         stack_id,
         layers,
@@ -2720,10 +2802,26 @@ def _legacy_layer_id_from_stackupx_token(token: str) -> int | None:
     if value == "BOTTOM":
         return PcbLayer.BOTTOM.value
     if value.startswith("MID") and value[3:].isdigit():
-        return PcbLayer.TOP.value + int(value[3:])
+        mid_number = int(value[3:])
+        if 1 <= mid_number <= 30:
+            return PcbLayer.TOP.value + mid_number
+        return None
     if value.startswith("PLANE") and value[5:].isdigit():
-        return PcbLayer.INTERNAL_PLANE_1.value + int(value[5:]) - 1
+        plane_number = int(value[5:])
+        if 1 <= plane_number <= 16:
+            return PcbLayer.INTERNAL_PLANE_1.value + plane_number - 1
+        return None
     return None
+
+
+def _v7_saved_layer_id_from_stackupx_token(token: str) -> int | None:
+    value = str(token or "").strip()
+    if not value:
+        return None
+    try:
+        return PcbLayerRef.parse(value).v7_saved_layer_id
+    except PcbLayerResolutionError:
+        return None
 
 
 def _layers_by_pair_token(
@@ -2842,6 +2940,51 @@ def _float_export_value(value: object) -> float | None:
 def _stackupx_guid(*parts: object) -> str:
     seed = "|".join(str(part or "") for part in parts)
     return str(uuid.uuid5(_EXPORT_NAMESPACE, seed))
+
+
+def _is_guid_text(value: object) -> bool:
+    token = str(value or "").strip()
+    if not token:
+        return False
+    try:
+        uuid.UUID(token.strip("{}"))
+    except ValueError:
+        return False
+    return True
+
+
+def _non_guid_board_id_problems(document: "AltiumStackupXDocument") -> tuple[str, ...]:
+    """List ids that Altium's Layer Stack Manager would reject as non-GUID."""
+    problems: list[str] = []
+
+    def _check(kind: str, value: str) -> None:
+        if not _is_guid_text(value):
+            problems.append(f"{kind} id {value!r} is not a GUID")
+
+    _check("document", document.id)
+    _check("document revision", document.revision_id)
+    for stack in document.stacks:
+        _check("stack", stack.id)
+        for layer in stack.layers:
+            _check("layer", layer.id)
+        for span in (*stack.via_spans, *stack.drill_spans):
+            _check("span", span.id)
+    return tuple(problems)
+
+
+def _guard_board_writable_ids(document: "AltiumStackupXDocument") -> None:
+    problems = _non_guid_board_id_problems(document)
+    if not problems:
+        return
+    shown = "; ".join(problems[:8])
+    extra = len(problems) - 8
+    if extra > 0:
+        shown = f"{shown}; and {extra} more"
+    raise ValueError(
+        "StackUpX stack, layer, and span ids must be GUID strings; Altium's "
+        f"Layer Stack Manager rejects anything else: {shown}. Omit the id "
+        "arguments to use generated GUIDs, or supply valid GUID strings."
+    )
 
 
 def _existing_or_stackupx_guid(*parts: object) -> str:

@@ -8,7 +8,7 @@ composition so record-level to_svg() implementations can plug in incrementally.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import html
 import inspect
@@ -29,6 +29,14 @@ from .altium_pcb_special_strings import (
     substitute_pcb_special_strings,
 )
 from .altium_record_types import PcbLayer
+from .altium_pcb_layer_ref import (
+    PcbLayerFamily,
+    PcbLayerLike,
+    PcbLayerRef,
+    PcbLayerResolutionError,
+    PcbSignalLayerKind,
+    coerce_pcb_layer_ref,
+)
 
 if TYPE_CHECKING:
     from .altium_pcbdoc import AltiumPcbDoc
@@ -46,6 +54,83 @@ PCB_SVG_DRILLS_LAYER_ID = 9001
 PCB_SVG_DRILLS_LAYER_KEY = "DRILLS"
 PCB_SVG_DRILLS_LAYER_NAME = "DRILLS"
 PCB_SVG_DRILLS_LAYER_DISPLAY_NAME = "Drill Holes"
+_SIGNAL_KIND_DISPLAY_NAMES = {
+    PcbSignalLayerKind.TOP: "Top Layer",
+    PcbSignalLayerKind.BOTTOM: "Bottom Layer",
+}
+_SIGNAL_KIND_SORT_INDEXES = {
+    PcbSignalLayerKind.TOP: 1,
+    PcbSignalLayerKind.BOTTOM: 129,
+}
+
+
+@dataclass(frozen=True)
+class _PcbSvgLayerMetadata:
+    token: str
+    layer_key: str
+    name: str
+    display_name: str
+    role: str
+    family: str
+    legacy_layer_id: int | None = None
+    v7_saved_layer_id: int | None = None
+    runtime_v7_layer_id: int | None = None
+    kind_id: int | None = None
+    custom_name: str | None = None
+    semantic_key: str | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class _PcbSvgRenderLayer:
+    ref: PcbLayerRef
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _PcbSvgRenderLayer):
+            return self.ref == other.ref
+        if isinstance(other, PcbLayer):
+            return self.legacy_layer == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.ref)
+
+    @property
+    def token(self) -> str:
+        return self.ref.token
+
+    @property
+    def legacy_layer(self) -> PcbLayer | None:
+        return self.ref.legacy_layer
+
+    @property
+    def legacy_layer_id(self) -> int | None:
+        return self.ref.legacy_layer_id
+
+    @property
+    def value(self) -> int:
+        if self.legacy_layer_id is not None:
+            return self.legacy_layer_id
+        if self.ref.v7_saved_layer_id is not None:
+            return self.ref.v7_saved_layer_id
+        if self.ref.runtime_v7_layer_id is not None:
+            return self.ref.runtime_v7_layer_id
+        raise PcbLayerResolutionError(f"Layer {self.token} has no numeric identity")
+
+    def to_json_name(self) -> str:
+        return self.token
+
+    def is_copper(self) -> bool:
+        return self.ref.family in {
+            PcbLayerFamily.SIGNAL,
+            PcbLayerFamily.INTERNAL_PLANE,
+        }
+
+    def is_legacy_copper(self) -> bool:
+        return self.legacy_layer is not None and self.legacy_layer.is_copper()
+
+    @property
+    def cache_key(self) -> str:
+        return self.token
 
 
 @dataclass
@@ -56,13 +141,13 @@ class PcbSvgRenderOptions:
 
     # Select renderable native layers. When this is an ordered sequence and
     # layer_render_order is unset, composed board output preserves that order.
-    visible_layers: Collection[PcbLayer] | None = None
+    visible_layers: Collection[PcbLayerLike] | None = None
     # Optional explicit native-layer render order for composed board output.
     # Items outside the selected/discovered visible layer set are ignored, and
     # unmentioned visible layers append by deterministic layer-id order. Derived
     # groups such as DRILLS render after native layer groups.
-    layer_render_order: Sequence[PcbLayer] | None = None
-    layer_colors: dict[PcbLayer, str] = field(default_factory=dict)
+    layer_render_order: Sequence[PcbLayerLike] | None = None
+    layer_colors: dict[PcbLayerLike, str] = field(default_factory=dict)
     # If set, all PCB layers render in this single color for board + per-layer outputs.
     all_layers_color_override: str | None = None
     # PCB text is emitted as geometry for 3D/viz compatibility.
@@ -175,7 +260,12 @@ class PcbSvgRenderContext:
     layer_key_by_id: dict[int, str] = field(default_factory=dict)
     layer_name_by_id: dict[int, str] = field(default_factory=dict)
     layer_display_name_by_id: dict[int, str] = field(default_factory=dict)
+    layer_token_by_id: dict[int, str] = field(default_factory=dict)
+    layer_metadata_by_token: dict[str, _PcbSvgLayerMetadata] = field(
+        default_factory=dict
+    )
     all_layer_ids: tuple[int, ...] = field(default_factory=tuple)
+    all_layer_tokens: tuple[str, ...] = field(default_factory=tuple)
     board_centroid_mils: tuple[float, float] | None = None
     board_centroid_relative_to_origin_mils: tuple[float, float] | None = None
     primitive_index_by_identity: dict[tuple[str, int], int] = field(
@@ -222,6 +312,30 @@ class PcbSvgRenderContext:
             return self.options.all_layers_color_override
         return self.options.layer_colors.get(layer, layer.default_color)
 
+    def layer_ref_color(self, ref: PcbLayerRef) -> str:
+        if self.options.all_layers_color_override is not None:
+            return self.options.all_layers_color_override
+        direct_color = self._layer_color_override_for_ref(ref)
+        if direct_color is not None:
+            return direct_color
+        if ref.legacy_layer is not None:
+            return ref.legacy_layer.default_color
+        if ref.family == PcbLayerFamily.MECHANICAL:
+            return PcbLayer.MECHANICAL_1.default_color
+        if ref.family in {PcbLayerFamily.SIGNAL, PcbLayerFamily.INTERNAL_PLANE}:
+            return PcbLayer.MID1.default_color
+        return "#808080"
+
+    def _layer_color_override_for_ref(self, ref: PcbLayerRef) -> str | None:
+        for raw_layer, color in self.options.layer_colors.items():
+            try:
+                candidate = coerce_pcb_layer_ref(raw_layer)
+            except PcbLayerResolutionError:
+                continue
+            if candidate == ref:
+                return str(color)
+        return None
+
     def substitute_special_strings(self, text: str) -> str:
         """
         Resolve PCB special strings (for example `.PCB_MIXDOWN`) from project context.
@@ -251,6 +365,13 @@ class PcbSvgRenderContext:
         Resolve stable layer key for a legacy layer ID.
         """
         return self.layer_key_by_id.get(int(layer_id), f"L{int(layer_id)}")
+
+    def layer_token(self, layer_id: int) -> str:
+        """
+        Resolve stable V7-aware layer token for a legacy layer ID.
+        """
+        layer_id_i = int(layer_id)
+        return self.layer_token_by_id.get(layer_id_i, self.layer_name(layer_id_i))
 
     def layer_name(self, layer_id: int) -> str:
         """
@@ -296,29 +417,105 @@ class PcbSvgRenderContext:
         Build shared per-element layer metadata attributes.
         """
         layer_id_i = int(layer_id)
+        token = self.layer_token(layer_id_i)
+        metadata = self.layer_metadata_by_token.get(token)
+        if metadata is not None:
+            return self._layer_metadata_attrs_from_metadata(metadata)
         return [
             f'data-layer-id="{layer_id_i}"',
             f'data-layer-key="{html.escape(self.layer_key(layer_id_i))}"',
             f'data-layer-name="{html.escape(self.layer_name(layer_id_i))}"',
             f'data-layer-display-name="{html.escape(self.layer_display_name(layer_id_i))}"',
+            f'data-layer-token="{html.escape(token)}"',
+            'data-layer-family="unknown"',
             f'data-layer-role="{self.layer_role(layer_id_i)}"',
         ]
+
+    def layer_metadata_attrs_for_ref(self, ref: PcbLayerRef) -> list[str]:
+        """
+        Build per-element metadata for a V7-aware layer reference.
+        """
+        metadata = self.layer_metadata_by_token.get(ref.token)
+        if metadata is None:
+            metadata = _metadata_for_layer_ref(ref)
+        return self._layer_metadata_attrs_from_metadata(metadata)
+
+    def layer_identifier_for_ref(self, ref: PcbLayerRef) -> int | None:
+        """
+        Return an integer identifier for deterministic element ids only.
+        """
+        if ref.legacy_layer_id is not None:
+            return ref.legacy_layer_id
+        if ref.v7_saved_layer_id is not None:
+            return ref.v7_saved_layer_id
+        return ref.runtime_v7_layer_id
+
+    def _layer_metadata_attrs_from_metadata(
+        self,
+        metadata: _PcbSvgLayerMetadata,
+    ) -> list[str]:
+        attrs: list[str] = []
+        if metadata.legacy_layer_id is not None:
+            attrs.append(f'data-layer-id="{int(metadata.legacy_layer_id)}"')
+        attrs.extend(
+            [
+                f'data-layer-key="{html.escape(metadata.layer_key)}"',
+                f'data-layer-name="{html.escape(metadata.name)}"',
+                f'data-layer-display-name="{html.escape(metadata.display_name)}"',
+                f'data-layer-token="{html.escape(metadata.token)}"',
+                f'data-layer-family="{html.escape(metadata.family)}"',
+                f'data-layer-role="{html.escape(metadata.role)}"',
+            ]
+        )
+        if metadata.v7_saved_layer_id is not None:
+            attrs.append(f'data-layer-v7-saved-id="{int(metadata.v7_saved_layer_id)}"')
+        if metadata.runtime_v7_layer_id is not None:
+            attrs.append(
+                f'data-layer-runtime-v7-id="{int(metadata.runtime_v7_layer_id)}"'
+            )
+        if metadata.kind_id is not None:
+            attrs.append(f'data-layer-kind-id="{int(metadata.kind_id)}"')
+        if metadata.custom_name:
+            attrs.append(
+                f'data-layer-custom-name="{html.escape(metadata.custom_name)}"'
+            )
+        if metadata.semantic_key:
+            attrs.append(
+                f'data-layer-semantic-key="{html.escape(metadata.semantic_key)}"'
+            )
+        return attrs
 
     def render_layer_metadata_entries(self) -> list[dict[str, object]]:
         """
         Build the additive consumer-facing render-layer registry.
         """
         entries: list[dict[str, object]] = []
-        for layer_id in self.all_layer_ids:
-            layer_id_i = int(layer_id)
+        for token in self.all_layer_tokens:
+            metadata = self.layer_metadata_by_token.get(token)
+            if metadata is None:
+                continue
             entry: dict[str, object] = {
-                "id": layer_id_i,
-                "key": self.layer_key(layer_id_i),
-                "name": self.layer_name(layer_id_i),
-                "display_name": self.layer_display_name(layer_id_i),
-                "role": self.layer_role(layer_id_i),
+                "key": metadata.layer_key,
+                "name": metadata.name,
+                "display_name": metadata.display_name,
+                "token": metadata.token,
+                "family": metadata.family,
+                "role": metadata.role,
             }
-            if layer_id_i == PCB_SVG_DRILLS_LAYER_ID:
+            if metadata.legacy_layer_id is not None:
+                entry["id"] = metadata.legacy_layer_id
+                entry["legacy_layer_id"] = metadata.legacy_layer_id
+            if metadata.v7_saved_layer_id is not None:
+                entry["v7_saved_layer_id"] = metadata.v7_saved_layer_id
+            if metadata.runtime_v7_layer_id is not None:
+                entry["runtime_v7_layer_id"] = metadata.runtime_v7_layer_id
+            if metadata.kind_id is not None:
+                entry["kind_id"] = metadata.kind_id
+            if metadata.custom_name:
+                entry["custom_name"] = metadata.custom_name
+            if metadata.semantic_key:
+                entry["semantic_key"] = metadata.semantic_key
+            if metadata.legacy_layer_id == PCB_SVG_DRILLS_LAYER_ID:
                 entry.update(
                     {
                         "kind": "derived",
@@ -427,6 +624,7 @@ class PcbSvgRenderContext:
         *,
         view_kind: str,
         included_layer_ids: list[int],
+        included_layer_tokens: list[str],
         includes_board_outline: bool,
         pcbdoc_filename: str | None,
     ) -> dict[str, object]:
@@ -434,9 +632,13 @@ class PcbSvgRenderContext:
         Build document-level enrichment payload embedded in SVG metadata.
         """
         included_ids_sorted = sorted({int(layer_id) for layer_id in included_layer_ids})
+        included_tokens_sorted = sorted(
+            {str(token) for token in included_layer_tokens if str(token)}
+        )
 
         layers_payload: dict[str, object] = {
             "all_layer_ids": [int(layer_id) for layer_id in self.all_layer_ids],
+            "all_layer_tokens": [str(token) for token in self.all_layer_tokens],
             "layer_id_to_key": {
                 str(layer_id): self.layer_key(layer_id)
                 for layer_id in self.all_layer_ids
@@ -444,6 +646,14 @@ class PcbSvgRenderContext:
             "layer_id_to_name": {
                 str(layer_id): self.layer_name(layer_id)
                 for layer_id in self.all_layer_ids
+            },
+            "layer_token_to_key": {
+                token: metadata.layer_key
+                for token, metadata in sorted(self.layer_metadata_by_token.items())
+            },
+            "layer_token_to_name": {
+                token: metadata.name
+                for token, metadata in sorted(self.layer_metadata_by_token.items())
             },
         }
         if self.options.include_render_layer_metadata:
@@ -470,6 +680,7 @@ class PcbSvgRenderContext:
             "view": {
                 "kind": view_kind,
                 "included_layer_ids": included_ids_sorted,
+                "included_layer_tokens": included_tokens_sorted,
                 "includes_board_outline": bool(includes_board_outline),
             },
             "layers": layers_payload,
@@ -501,6 +712,111 @@ class PcbSvgRenderContext:
         return payload
 
 
+def _metadata_for_layer_ref(ref: PcbLayerRef) -> _PcbSvgLayerMetadata:
+    return _PcbSvgLayerMetadata(
+        token=ref.token,
+        layer_key=_default_layer_key_for_ref(ref),
+        name=ref.token,
+        display_name=_default_display_name_for_ref(ref),
+        role=_layer_role_for_ref(ref),
+        family=str(ref.family.value),
+        legacy_layer_id=ref.legacy_layer_id,
+        v7_saved_layer_id=ref.v7_saved_layer_id,
+        runtime_v7_layer_id=ref.runtime_v7_layer_id,
+    )
+
+
+def _default_layer_key_for_ref(ref: PcbLayerRef) -> str:
+    if ref.legacy_layer_id is not None:
+        return f"L{ref.legacy_layer_id}"
+    if ref.v7_saved_layer_id is not None:
+        return f"V7_{ref.v7_saved_layer_id}"
+    if ref.runtime_v7_layer_id is not None:
+        return f"TV7_{ref.runtime_v7_layer_id}"
+    return ref.token
+
+
+def _default_display_name_for_ref(ref: PcbLayerRef) -> str:
+    if ref.legacy_layer is not None:
+        return ref.legacy_layer.to_display_name()
+    if ref.family != PcbLayerFamily.SIGNAL:
+        return _non_signal_display_name_for_ref(ref)
+    if ref.signal_kind is not None:
+        signal_display_name = _SIGNAL_KIND_DISPLAY_NAMES.get(ref.signal_kind)
+        if signal_display_name is not None:
+            return signal_display_name
+    if ref.number is not None:
+        return f"Mid-Layer {ref.number}"
+    return ref.token
+
+
+def _non_signal_display_name_for_ref(ref: PcbLayerRef) -> str:
+    if ref.family == PcbLayerFamily.INTERNAL_PLANE and ref.number is not None:
+        return f"Internal Plane {ref.number}"
+    if ref.family == PcbLayerFamily.MECHANICAL and ref.number is not None:
+        return f"Mechanical {ref.number}"
+    return ref.token
+
+
+def _signal_layer_sort_index(ref: PcbLayerRef) -> int:
+    if ref.signal_kind is not None:
+        signal_sort_index = _SIGNAL_KIND_SORT_INDEXES.get(ref.signal_kind)
+        if signal_sort_index is not None:
+            return signal_sort_index
+    if ref.number is not None:
+        return 1 + ref.number
+    return 0
+
+
+def _native_layer_sort_index(ref: PcbLayerRef) -> int:
+    return ref.v7_saved_layer_id or ref.runtime_v7_layer_id or 0
+
+
+def _render_layer_sort_key(layer: _PcbSvgRenderLayer) -> tuple[int, int, str]:
+    ref = layer.ref
+    if ref.family == PcbLayerFamily.SIGNAL:
+        return (0, _signal_layer_sort_index(ref), ref.token)
+    if ref.legacy_layer is not None:
+        return (1, int(ref.legacy_layer), ref.token)
+    if ref.family == PcbLayerFamily.INTERNAL_PLANE and ref.number is not None:
+        return (2, ref.number, ref.token)
+    if ref.family == PcbLayerFamily.MECHANICAL and ref.number is not None:
+        return (3, ref.number, ref.token)
+    return (4, _native_layer_sort_index(ref), ref.token)
+
+
+def _layer_role_for_ref(ref: PcbLayerRef) -> str:
+    if ref.family in {PcbLayerFamily.SIGNAL, PcbLayerFamily.INTERNAL_PLANE}:
+        return "copper"
+    if ref.family == PcbLayerFamily.MECHANICAL:
+        return "mechanical"
+    if ref.legacy_layer is None:
+        return "other"
+    layer = ref.legacy_layer
+    if layer.is_overlay():
+        return "silkscreen"
+    if layer.is_solder_mask():
+        return "soldermask"
+    if layer.is_paste_mask():
+        return "paste"
+    if layer.value in {PcbLayer.DRILL_GUIDE.value, PcbLayer.DRILL_DRAWING.value}:
+        return "drill"
+    return "other"
+
+
+def _ref_for_resolved_layer(layer: object) -> PcbLayerRef | None:
+    legacy_id = getattr(layer, "legacy_id", None)
+    v7_id = getattr(layer, "v7_id", None)
+    try:
+        if legacy_id is not None:
+            return PcbLayerRef.from_legacy(int(legacy_id))
+        if v7_id is not None:
+            return PcbLayerRef.from_v7_saved_layer_id(int(v7_id))
+    except PcbLayerResolutionError:
+        return None
+    return None
+
+
 @dataclass(frozen=True)
 class _PcbSvgLayerCacheEntry:
     """
@@ -521,7 +837,7 @@ class _PcbSvgRenderCache:
 
     ctx: PcbSvgRenderContext
     layer_color_override: str | None
-    layer_entries: dict[int, _PcbSvgLayerCacheEntry]
+    layer_entries: dict[str, _PcbSvgLayerCacheEntry]
     board_clip_path_d: str
     hole_mask_elements: dict[int, tuple[str, ...]]
 
@@ -719,7 +1035,7 @@ class PcbSvgRenderer:
         layer_color_override = self.options.layer_svg_color_override
         visible_layers = self._collect_visible_layers(pcbdoc)
         for layer in visible_layers:
-            layer_name = layer.to_json_name()
+            layer_name = layer.token
             svgs[layer_name] = self._render_svg_document(
                 pcbdoc,
                 [layer],
@@ -730,7 +1046,9 @@ class PcbSvgRenderer:
             pcbdoc
         ):
             drill_source_layers = [
-                layer for layer in visible_layers if layer.is_copper()
+                layer.legacy_layer
+                for layer in visible_layers
+                if layer.legacy_layer is not None and layer.is_legacy_copper()
             ]
             if drill_source_layers:
                 svgs[PCB_SVG_DRILLS_LAYER_NAME] = self._render_svg_document(
@@ -788,7 +1106,7 @@ class PcbSvgRenderer:
 
         layer_svgs: dict[str, str] = {}
         for layer in layers:
-            layer_name = layer.to_json_name()
+            layer_name = layer.token
             layer_svgs[layer_name] = self._render_svg_document(
                 pcbdoc,
                 [layer],
@@ -800,7 +1118,11 @@ class PcbSvgRenderer:
         if self.options.drill_holes_as_layer_group and self._board_has_drill_holes(
             pcbdoc
         ):
-            drill_source_layers = [layer for layer in layers if layer.is_copper()]
+            drill_source_layers = [
+                layer.legacy_layer
+                for layer in layers
+                if layer.legacy_layer is not None and layer.is_legacy_copper()
+            ]
             if drill_source_layers:
                 layer_svgs[PCB_SVG_DRILLS_LAYER_NAME] = self._render_svg_document(
                     pcbdoc,
@@ -816,7 +1138,7 @@ class PcbSvgRenderer:
     def _render_svg_document(
         self,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         layer_color_override: str | None = None,
         project_parameters: dict[str, str] | None = None,
         render_cache: _PcbSvgRenderCache | None = None,
@@ -869,13 +1191,20 @@ class PcbSvgRenderer:
             board_clip_id=board_clip_id,
             layer_hole_masks=layer_hole_masks,
         )
-        active_layer_ids = self._rendered_layer_ids_from_layer_lines(
-            layers,
-            rendered_layer_lines,
+        active_layer_ids, active_layer_tokens = (
+            self._rendered_layer_identity_from_layer_lines(
+                layers,
+                rendered_layer_lines,
+            )
         )
         if drill_group_primitives:
             active_layer_ids.append(PCB_SVG_DRILLS_LAYER_ID)
-        active_layer_ids, view_kind = self._resolve_render_view(ctx, active_layer_ids)
+            active_layer_tokens.append(PCB_SVG_DRILLS_LAYER_NAME)
+        active_layer_ids, active_layer_tokens, view_kind = self._resolve_render_view(
+            ctx,
+            active_layer_ids,
+            active_layer_tokens,
+        )
         svg_attrs = self._build_svg_document_attrs(ctx, pcbdoc, view_kind)
 
         lines = [f"<svg {' '.join(svg_attrs)}>"]
@@ -884,6 +1213,7 @@ class PcbSvgRenderer:
             ctx,
             view_kind,
             active_layer_ids,
+            active_layer_tokens,
             includes_board_outline=bool(outline_group),
             pcbdoc=pcbdoc,
         )
@@ -956,7 +1286,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         render_cache: _PcbSvgRenderCache | None,
         *,
         drill_source_layers: list[PcbLayer] | None,
@@ -966,9 +1296,13 @@ class PcbSvgRenderer:
         if (self.options.drill_hole_mode or "").strip().lower() == "none":
             return []
 
-        drill_layers = (
-            drill_source_layers if drill_source_layers is not None else layers
-        )
+        drill_layers = drill_source_layers
+        if drill_layers is None:
+            drill_layers = [
+                layer.legacy_layer
+                for layer in layers
+                if layer.legacy_layer is not None and layer.is_legacy_copper()
+            ]
         drill_group_primitives: list[str] = []
         for drill_layer in drill_layers:
             if not drill_layer.is_copper():
@@ -990,8 +1324,9 @@ class PcbSvgRenderer:
         layer: PcbLayer,
         render_cache: _PcbSvgRenderCache | None,
     ) -> list[str]:
+        cache_key = PcbLayerRef.from_legacy(layer).token
         cache_entry = (
-            render_cache.layer_entries.get(layer.value)
+            render_cache.layer_entries.get(cache_key)
             if render_cache is not None
             else None
         )
@@ -1004,29 +1339,37 @@ class PcbSvgRenderer:
         )
 
     @staticmethod
-    def _rendered_layer_ids_from_layer_lines(
-        layers: list[PcbLayer],
+    def _rendered_layer_identity_from_layer_lines(
+        layers: list[_PcbSvgRenderLayer],
         layer_lines: list[str],
-    ) -> list[int]:
+    ) -> tuple[list[int], list[str]]:
         rendered_text = "\n".join(layer_lines)
-        return [
-            int(layer.value)
-            for layer in layers
-            if f'id="layer-{layer.to_json_name()}"' in rendered_text
-        ]
+        rendered_ids: list[int] = []
+        rendered_tokens: list[str] = []
+        for layer in layers:
+            if f'id="layer-{layer.token}"' not in rendered_text:
+                continue
+            rendered_tokens.append(layer.token)
+            if layer.legacy_layer_id is not None:
+                rendered_ids.append(layer.legacy_layer_id)
+        return rendered_ids, rendered_tokens
 
     def _resolve_render_view(
         self,
         ctx: PcbSvgRenderContext,
         active_layer_ids: list[int],
-    ) -> tuple[list[int], str]:
+        active_layer_tokens: list[str],
+    ) -> tuple[list[int], list[str], str]:
         active_layer_ids = sorted({int(layer_id) for layer_id in active_layer_ids})
+        active_layer_tokens = sorted(
+            {str(token) for token in active_layer_tokens if str(token)}
+        )
 
-        if not active_layer_ids:
-            return active_layer_ids, "board_outline_only"
-        if set(active_layer_ids) == set(ctx.all_layer_ids):
-            return active_layer_ids, "board"
-        return active_layer_ids, "layer_set"
+        if not active_layer_tokens and not active_layer_ids:
+            return active_layer_ids, active_layer_tokens, "board_outline_only"
+        if set(active_layer_tokens) == set(ctx.all_layer_tokens):
+            return active_layer_ids, active_layer_tokens, "board"
+        return active_layer_ids, active_layer_tokens, "layer_set"
 
     def _build_svg_document_attrs(
         self,
@@ -1096,7 +1439,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         render_cache: _PcbSvgRenderCache | None,
     ) -> tuple[str, str]:
         if not (
@@ -1121,7 +1464,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         render_cache: _PcbSvgRenderCache | None,
     ) -> dict[int, tuple[str, list[str]]]:
         if not self.options.clip_holes_from_copper or not layers:
@@ -1129,18 +1472,19 @@ class PcbSvgRenderer:
 
         layer_hole_masks: dict[int, tuple[str, list[str]]] = {}
         for layer in layers:
-            if not layer.is_copper():
+            legacy_layer = layer.legacy_layer
+            if legacy_layer is None or not legacy_layer.is_copper():
                 continue
             hole_elements = self._layer_hole_mask_elements(
                 ctx,
                 pcbdoc,
-                layer,
+                legacy_layer,
                 render_cache,
             )
             if not hole_elements:
                 continue
-            layer_hole_masks[layer.value] = (
-                f"mask-drills-{layer.value}",
+            layer_hole_masks[legacy_layer.value] = (
+                f"mask-drills-{legacy_layer.value}",
                 hole_elements,
             )
         return layer_hole_masks
@@ -1172,6 +1516,7 @@ class PcbSvgRenderer:
         ctx: PcbSvgRenderContext,
         view_kind: str,
         active_layer_ids: list[int],
+        active_layer_tokens: list[str],
         *,
         includes_board_outline: bool,
         pcbdoc: "AltiumPcbDoc",
@@ -1182,6 +1527,7 @@ class PcbSvgRenderer:
         enrichment_payload = ctx.enrichment_metadata_payload(
             view_kind=view_kind,
             included_layer_ids=active_layer_ids,
+            included_layer_tokens=active_layer_tokens,
             includes_board_outline=includes_board_outline,
             pcbdoc_filename=pcbdoc.filepath.name if pcbdoc.filepath else None,
         )
@@ -1250,7 +1596,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         layer_color_override: str | None,
         render_cache: _PcbSvgRenderCache | None,
         *,
@@ -1276,7 +1622,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layer: PcbLayer,
+        layer: _PcbSvgRenderLayer,
         layer_color_override: str | None,
         render_cache: _PcbSvgRenderCache | None,
         *,
@@ -1289,9 +1635,13 @@ class PcbSvgRenderer:
             and (self.options.clip_all_layers_to_board_outline or layer.is_copper())
             else None
         )
-        layer_hole_mask_id = layer_hole_masks.get(layer.value, (None, []))[0]
+        layer_hole_mask_id = (
+            layer_hole_masks.get(layer.legacy_layer_id, (None, []))[0]
+            if layer.legacy_layer_id is not None
+            else None
+        )
         cache_entry = (
-            render_cache.layer_entries.get(layer.value)
+            render_cache.layer_entries.get(layer.cache_key)
             if render_cache is not None
             else None
         )
@@ -1315,7 +1665,7 @@ class PcbSvgRenderer:
     def _render_cached_layer_group(
         self,
         ctx: PcbSvgRenderContext,
-        layer: PcbLayer,
+        layer: _PcbSvgRenderLayer,
         cache_entry: _PcbSvgLayerCacheEntry,
         *,
         clip_path_id: str | None,
@@ -1341,7 +1691,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layer: PcbLayer,
+        layer: _PcbSvgRenderLayer,
         layer_color_override: str | None,
         *,
         clip_path_id: str | None,
@@ -1349,7 +1699,7 @@ class PcbSvgRenderer:
     ) -> list[str]:
         if self.options.drill_holes_as_layer_group:
             layer_color, base_primitives, _, overlay_primitives = (
-                self._collect_layer_primitives(
+                self._collect_render_layer_primitives(
                     ctx,
                     pcbdoc,
                     layer,
@@ -1362,7 +1712,9 @@ class PcbSvgRenderer:
                 layer_color,
                 base_primitives,
                 [],
-                [] if self._pad_designator_overlays_render_top() else overlay_primitives,
+                []
+                if self._pad_designator_overlays_render_top()
+                else overlay_primitives,
                 clip_path_id=clip_path_id,
                 mask_id=mask_id,
             )
@@ -1379,7 +1731,7 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         render_cache: _PcbSvgRenderCache | None,
         *,
         board_clip_id: str | None,
@@ -1389,10 +1741,11 @@ class PcbSvgRenderer:
 
         overlay_primitives: list[str] = []
         for layer in layers:
-            if not layer.is_copper():
+            legacy_layer = layer.legacy_layer
+            if legacy_layer is None or not legacy_layer.is_copper():
                 continue
             cache_entry = (
-                render_cache.layer_entries.get(layer.value)
+                render_cache.layer_entries.get(layer.cache_key)
                 if render_cache is not None
                 else None
             )
@@ -1400,7 +1753,11 @@ class PcbSvgRenderer:
                 overlay_primitives.extend(cache_entry.overlay_primitives)
             else:
                 overlay_primitives.extend(
-                    self._render_pad_designator_overlay_for_layer(ctx, pcbdoc, layer)
+                    self._render_pad_designator_overlay_for_layer(
+                        ctx,
+                        pcbdoc,
+                        legacy_layer,
+                    )
                 )
         if not overlay_primitives:
             return []
@@ -1428,10 +1785,12 @@ class PcbSvgRenderer:
     def _pad_designator_overlays_render_top(self) -> bool:
         if not self.options.show_pad_designators:
             return False
-        return (
-            str(self.options.pad_designator_overlay_z_order).strip().lower()
-            in {"top", "above_layers", "above-layers", "front"}
-        )
+        return str(self.options.pad_designator_overlay_z_order).strip().lower() in {
+            "top",
+            "above_layers",
+            "above-layers",
+            "front",
+        }
 
     def _render_top_origin_datum_overlay_group(
         self,
@@ -1577,7 +1936,7 @@ class PcbSvgRenderer:
     def _build_render_cache(
         self,
         pcbdoc: "AltiumPcbDoc",
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         *,
         layer_color_override: str | None,
         project_parameters: dict[str, str] | None = None,
@@ -1591,29 +1950,34 @@ class PcbSvgRenderer:
         ) and layers:
             board_clip_path_d = self._board_outline_clip_path(ctx, outline)
 
-        layer_entries: dict[int, _PcbSvgLayerCacheEntry] = {}
+        layer_entries: dict[str, _PcbSvgLayerCacheEntry] = {}
         hole_mask_elements: dict[int, tuple[str, ...]] = {}
         for layer in layers:
             layer_color, base_primitives, drill_primitives, overlay_primitives = (
-                self._collect_layer_primitives(
+                self._collect_render_layer_primitives(
                     ctx,
                     pcbdoc,
                     layer,
                     layer_color_override,
                 )
             )
-            layer_entries[layer.value] = _PcbSvgLayerCacheEntry(
+            layer_entries[layer.cache_key] = _PcbSvgLayerCacheEntry(
                 layer_color=layer_color,
                 base_primitives=tuple(base_primitives),
                 drill_primitives=tuple(drill_primitives),
                 overlay_primitives=tuple(overlay_primitives),
             )
 
-            if self.options.clip_holes_from_copper and layer.is_copper():
+            legacy_layer = layer.legacy_layer
+            if (
+                self.options.clip_holes_from_copper
+                and legacy_layer is not None
+                and legacy_layer.is_copper()
+            ):
                 hole_elements = self._collect_drill_hole_elements(
                     ctx,
                     pcbdoc,
-                    layer,
+                    legacy_layer,
                     plated_hole_color="#000000",
                     non_plated_hole_color="#000000",
                     hole_opacity=1.0,
@@ -1622,7 +1986,7 @@ class PcbSvgRenderer:
                     include_metadata=False,
                 )
                 if hole_elements:
-                    hole_mask_elements[layer.value] = tuple(hole_elements)
+                    hole_mask_elements[legacy_layer.value] = tuple(hole_elements)
 
         return _PcbSvgRenderCache(
             ctx=ctx,
@@ -1635,7 +1999,7 @@ class PcbSvgRenderer:
     def _cache_matches_layer_color_override(
         self,
         cache: _PcbSvgRenderCache,
-        layers: list[PcbLayer],
+        layers: list[_PcbSvgRenderLayer],
         layer_color_override: str | None,
     ) -> bool:
         if cache.layer_color_override == layer_color_override:
@@ -1645,9 +2009,9 @@ class PcbSvgRenderer:
             expected_color = (
                 layer_color_override
                 if layer_color_override is not None
-                else cache.ctx.layer_color(layer)
+                else cache.ctx.layer_ref_color(layer.ref)
             )
-            entry = cache.layer_entries.get(layer.value)
+            entry = cache.layer_entries.get(layer.cache_key)
             if entry is None or entry.layer_color != expected_color:
                 return False
         return True
@@ -1668,9 +2032,12 @@ class PcbSvgRenderer:
         ) = self._build_component_metadata(pcbdoc)
         (
             all_layer_ids,
+            all_layer_tokens,
             layer_key_by_id,
             layer_name_by_id,
             layer_display_name_by_id,
+            layer_token_by_id,
+            layer_metadata_by_token,
         ) = self._build_layer_metadata(pcbdoc, resolved)
         primitive_index_by_identity = self._build_primitive_index_by_identity(pcbdoc)
         board_centroid_mils, board_centroid_relative = (
@@ -1695,7 +2062,10 @@ class PcbSvgRenderer:
             layer_key_by_id=layer_key_by_id,
             layer_name_by_id=layer_name_by_id,
             layer_display_name_by_id=layer_display_name_by_id,
+            layer_token_by_id=layer_token_by_id,
+            layer_metadata_by_token=layer_metadata_by_token,
             all_layer_ids=all_layer_ids,
+            all_layer_tokens=all_layer_tokens,
             board_centroid_mils=board_centroid_mils,
             board_centroid_relative_to_origin_mils=board_centroid_relative,
             primitive_index_by_identity=primitive_index_by_identity,
@@ -1808,55 +2178,102 @@ class PcbSvgRenderer:
         self,
         pcbdoc: "AltiumPcbDoc",
         resolved: Any,
-    ) -> tuple[tuple[int, ...], dict[int, str], dict[int, str], dict[int, str]]:
+    ) -> tuple[
+        tuple[int, ...],
+        tuple[str, ...],
+        dict[int, str],
+        dict[int, str],
+        dict[int, str],
+        dict[int, str],
+        dict[str, _PcbSvgLayerMetadata],
+    ]:
         all_layers_for_metadata = self._collect_visible_layers(pcbdoc, force_all=True)
-        all_layer_id_values = {int(layer.value) for layer in all_layers_for_metadata}
-        has_drill_holes = self._board_has_drill_holes(pcbdoc)
-        if has_drill_holes:
-            all_layer_id_values.add(PCB_SVG_DRILLS_LAYER_ID)
-        all_layer_ids = tuple(sorted(all_layer_id_values))
-        layer_name_by_id = {
-            int(layer.value): layer.to_json_name() for layer in all_layers_for_metadata
-        }
-        layer_display_name_by_id = {
-            int(layer.value): layer.to_display_name()
+        metadata_by_token = {
+            layer.token: _metadata_for_layer_ref(layer.ref)
             for layer in all_layers_for_metadata
         }
-        layer_key_by_id = {layer_id: f"L{layer_id}" for layer_id in all_layer_ids}
+        has_drill_holes = self._board_has_drill_holes(pcbdoc)
         if has_drill_holes:
-            layer_name_by_id[PCB_SVG_DRILLS_LAYER_ID] = PCB_SVG_DRILLS_LAYER_NAME
-            layer_display_name_by_id[PCB_SVG_DRILLS_LAYER_ID] = (
-                PCB_SVG_DRILLS_LAYER_DISPLAY_NAME
+            metadata_by_token[PCB_SVG_DRILLS_LAYER_NAME] = _PcbSvgLayerMetadata(
+                token=PCB_SVG_DRILLS_LAYER_NAME,
+                layer_key=PCB_SVG_DRILLS_LAYER_KEY,
+                name=PCB_SVG_DRILLS_LAYER_NAME,
+                display_name=PCB_SVG_DRILLS_LAYER_DISPLAY_NAME,
+                role="drill",
+                family="derived",
+                legacy_layer_id=PCB_SVG_DRILLS_LAYER_ID,
             )
-            layer_key_by_id[PCB_SVG_DRILLS_LAYER_ID] = PCB_SVG_DRILLS_LAYER_KEY
-        self._apply_resolved_layer_metadata(
+
+        metadata_by_token = self._apply_resolved_layer_metadata(
             resolved,
-            layer_key_by_id,
-            layer_display_name_by_id,
+            metadata_by_token,
         )
+        all_layer_ids = tuple(
+            sorted(
+                metadata.legacy_layer_id
+                for metadata in metadata_by_token.values()
+                if metadata.legacy_layer_id is not None
+            )
+        )
+        all_layer_tokens = tuple(sorted(metadata_by_token))
+        layer_key_by_id = {
+            metadata.legacy_layer_id: metadata.layer_key
+            for metadata in metadata_by_token.values()
+            if metadata.legacy_layer_id is not None
+        }
+        layer_name_by_id = {
+            metadata.legacy_layer_id: metadata.name
+            for metadata in metadata_by_token.values()
+            if metadata.legacy_layer_id is not None
+        }
+        layer_display_name_by_id = {
+            metadata.legacy_layer_id: metadata.display_name
+            for metadata in metadata_by_token.values()
+            if metadata.legacy_layer_id is not None
+        }
+        layer_token_by_id = {
+            metadata.legacy_layer_id: metadata.token
+            for metadata in metadata_by_token.values()
+            if metadata.legacy_layer_id is not None
+        }
         return (
             all_layer_ids,
+            all_layer_tokens,
             layer_key_by_id,
             layer_name_by_id,
             layer_display_name_by_id,
+            layer_token_by_id,
+            metadata_by_token,
         )
 
     def _apply_resolved_layer_metadata(
         self,
         resolved: Any,
-        layer_key_by_id: dict[int, str],
-        layer_display_name_by_id: dict[int, str],
-    ) -> None:
+        metadata_by_token: dict[str, _PcbSvgLayerMetadata],
+    ) -> dict[str, _PcbSvgLayerMetadata]:
         if resolved is None:
-            return
+            return metadata_by_token
         for layer in resolved.layers:
-            if layer.legacy_id is None:
+            ref = _ref_for_resolved_layer(layer)
+            if ref is None:
                 continue
-            legacy_id = int(layer.legacy_id)
-            if layer.layer_key:
-                layer_key_by_id[legacy_id] = layer.layer_key
-            if layer.display_name:
-                layer_display_name_by_id[legacy_id] = layer.display_name
+            metadata = metadata_by_token.get(ref.token)
+            if metadata is None:
+                continue
+            display_name = str(getattr(layer, "display_name", "") or "").strip()
+            layer_key = str(getattr(layer, "layer_key", "") or "").strip()
+            default_display = _default_display_name_for_ref(ref)
+            metadata_by_token[ref.token] = replace(
+                metadata,
+                layer_key=layer_key or metadata.layer_key,
+                display_name=display_name or metadata.display_name,
+                custom_name=(
+                    display_name
+                    if display_name and display_name != default_display
+                    else metadata.custom_name
+                ),
+            )
+        return metadata_by_token
 
     def _build_primitive_index_by_identity(
         self,
@@ -2167,17 +2584,20 @@ class PcbSvgRenderer:
         pcbdoc: "AltiumPcbDoc",
         *,
         force_all: bool = False,
-    ) -> list[PcbLayer]:
+    ) -> list[_PcbSvgRenderLayer]:
         requested_visible_layers = None if force_all else self.options.visible_layers
         visible_layer_order = self._visible_layer_order_hint(requested_visible_layers)
         visible = (
-            set()
+            {}
             if requested_visible_layers is None
-            else set(self._coerced_layers(requested_visible_layers))
+            else {
+                layer.ref: layer
+                for layer in self._coerced_layers(requested_visible_layers)
+            }
         )
         if not visible:
             resolved = self._resolved_layer_stack_safe(pcbdoc)
-            stackup_copper_layers = self._stackup_copper_layers(pcbdoc)
+            stackup_copper_layers = self._stackup_copper_layer_refs(pcbdoc)
             self._collect_visible_primitive_layers(
                 pcbdoc,
                 visible,
@@ -2198,7 +2618,10 @@ class PcbSvgRenderer:
             )
 
         if not visible:
-            visible = {PcbLayer.TOP, PcbLayer.BOTTOM}
+            visible = {
+                PcbLayerRef.top(): _PcbSvgRenderLayer(PcbLayerRef.top()),
+                PcbLayerRef.bottom(): _PcbSvgRenderLayer(PcbLayerRef.bottom()),
+            }
         return self._order_visible_layers(
             visible,
             force_all=force_all,
@@ -2206,29 +2629,26 @@ class PcbSvgRenderer:
         )
 
     @staticmethod
-    def _coerced_layers(layers: Collection[PcbLayer]) -> list[PcbLayer]:
-        return [
-            layer if isinstance(layer, PcbLayer) else PcbLayer(int(layer))
-            for layer in layers
-        ]
+    def _coerced_layers(layers: Collection[PcbLayerLike]) -> list[_PcbSvgRenderLayer]:
+        return [_PcbSvgRenderLayer(coerce_pcb_layer_ref(layer)) for layer in layers]
 
     def _visible_layer_order_hint(
         self,
-        visible_layers: Collection[PcbLayer] | None,
-    ) -> list[PcbLayer] | None:
+        visible_layers: Collection[PcbLayerLike] | None,
+    ) -> list[_PcbSvgRenderLayer] | None:
         if self.options.layer_render_order or not isinstance(visible_layers, Sequence):
             return None
-        ordered: list[PcbLayer] = []
+        ordered: list[_PcbSvgRenderLayer] = []
         for layer in self._coerced_layers(visible_layers):
-            if layer not in ordered:
+            if all(layer.ref != existing.ref for existing in ordered):
                 ordered.append(layer)
         return ordered
 
     def _collect_visible_primitive_layers(
         self,
         pcbdoc: "AltiumPcbDoc",
-        visible: set[PcbLayer],
-        stackup_copper_layers: set[PcbLayer] | None,
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
+        stackup_copper_layers: set[PcbLayerRef] | None,
     ) -> None:
         collection_names = (
             "tracks",
@@ -2243,14 +2663,25 @@ class PcbSvgRenderer:
             for primitive in getattr(pcbdoc, collection_name, []):
                 if self._should_skip_primitive_for_svg(primitive):
                     continue
-                layer = self._primitive_layer_enum(primitive)
-                if layer is None:
+                layer_ref = self._primitive_layer_ref(primitive)
+                if layer_ref is None:
                     continue
                 self._add_visible_layer(
                     visible,
-                    layer,
+                    layer_ref,
                     stackup_copper_layers,
                 )
+
+    def _primitive_layer_ref(self, primitive: object) -> PcbLayerRef | None:
+        layer_ref_method = getattr(primitive, "layer_ref", None)
+        if callable(layer_ref_method):
+            try:
+                ref = layer_ref_method()
+            except PcbLayerResolutionError:
+                return None
+            return ref if isinstance(ref, PcbLayerRef) else None
+        layer = self._primitive_layer_enum(primitive)
+        return PcbLayerRef.from_legacy(layer) if layer is not None else None
 
     def _primitive_layer_enum(self, primitive: object) -> PcbLayer | None:
         layer_value = getattr(primitive, "layer", None)
@@ -2264,8 +2695,8 @@ class PcbSvgRenderer:
     def _collect_visible_via_layers(
         self,
         pcbdoc: "AltiumPcbDoc",
-        visible: set[PcbLayer],
-        stackup_copper_layers: set[PcbLayer] | None,
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
+        stackup_copper_layers: set[PcbLayerRef] | None,
     ) -> None:
         for via in getattr(pcbdoc, "vias", []):
             if self._should_skip_primitive_for_svg(via):
@@ -2273,7 +2704,7 @@ class PcbSvgRenderer:
             for layer in self._iter_via_span_layers(via):
                 self._add_visible_layer(
                     visible,
-                    layer,
+                    PcbLayerRef.from_legacy(layer),
                     stackup_copper_layers,
                 )
 
@@ -2291,7 +2722,7 @@ class PcbSvgRenderer:
     def _collect_visible_derived_pad_layers(
         self,
         pcbdoc: "AltiumPcbDoc",
-        visible: set[PcbLayer],
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
     ) -> None:
         derived_pad_layers = (
             PcbLayer.TOP,
@@ -2306,12 +2737,16 @@ class PcbSvgRenderer:
                 continue
             for derived_layer in derived_pad_layers:
                 if pad._should_render_on_layer(derived_layer):  # noqa: SLF001
-                    visible.add(derived_layer)
+                    self._add_visible_layer(
+                        visible,
+                        PcbLayerRef.from_legacy(derived_layer),
+                        None,
+                    )
 
     def _collect_visible_derived_via_layers(
         self,
         pcbdoc: "AltiumPcbDoc",
-        visible: set[PcbLayer],
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
     ) -> None:
         derived_via_layers = (PcbLayer.TOP_SOLDER, PcbLayer.BOTTOM_SOLDER)
         for via in getattr(pcbdoc, "vias", []):
@@ -2319,14 +2754,18 @@ class PcbSvgRenderer:
                 continue
             for derived_layer in derived_via_layers:
                 if via._should_render_on_layer(derived_layer):  # noqa: SLF001
-                    visible.add(derived_layer)
+                    self._add_visible_layer(
+                        visible,
+                        PcbLayerRef.from_legacy(derived_layer),
+                        None,
+                    )
 
     def _collect_visible_polygon_layers(
         self,
         pcbdoc: "AltiumPcbDoc",
-        visible: set[PcbLayer],
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
         resolved: Any,
-        stackup_copper_layers: set[PcbLayer] | None,
+        stackup_copper_layers: set[PcbLayerRef] | None,
     ) -> None:
         for polygon in getattr(pcbdoc, "polygons", []):
             layer = self._resolve_polygon_layer(
@@ -2337,7 +2776,7 @@ class PcbSvgRenderer:
                 continue
             self._add_visible_layer(
                 visible,
-                layer,
+                PcbLayerRef.from_legacy(layer),
                 stackup_copper_layers,
             )
 
@@ -2384,47 +2823,51 @@ class PcbSvgRenderer:
 
     def _add_visible_layer(
         self,
-        visible: set[PcbLayer],
-        layer: PcbLayer,
-        stackup_copper_layers: set[PcbLayer] | None,
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
+        layer: PcbLayerRef,
+        stackup_copper_layers: set[PcbLayerRef] | None,
     ) -> None:
         if (
-            layer.is_copper()
+            layer.family in {PcbLayerFamily.SIGNAL, PcbLayerFamily.INTERNAL_PLANE}
             and stackup_copper_layers is not None
             and layer not in stackup_copper_layers
         ):
             return
-        visible.add(layer)
+        visible.setdefault(layer, _PcbSvgRenderLayer(layer))
 
     def _order_visible_layers(
         self,
-        visible: set[PcbLayer],
+        visible: dict[PcbLayerRef, _PcbSvgRenderLayer],
         *,
         force_all: bool,
-        visible_layer_order: list[PcbLayer] | None,
-    ) -> list[PcbLayer]:
+        visible_layer_order: list[_PcbSvgRenderLayer] | None,
+    ) -> list[_PcbSvgRenderLayer]:
         if not force_all and self.options.layer_render_order:
-            ordered_layers: list[PcbLayer] = []
-            for layer in self.options.layer_render_order:
-                if not isinstance(layer, PcbLayer):
-                    layer = PcbLayer(int(layer))
-                if layer in visible and layer not in ordered_layers:
+            ordered_layers: list[_PcbSvgRenderLayer] = []
+            for requested in self._coerced_layers(self.options.layer_render_order):
+                layer = visible.get(requested.ref)
+                if layer is not None and layer not in ordered_layers:
                     ordered_layers.append(layer)
-            for layer in sorted(visible, key=lambda item: item.value):
+            for layer in sorted(visible.values(), key=_render_layer_sort_key):
                 if layer not in ordered_layers:
                     ordered_layers.append(layer)
             return ordered_layers
         if not force_all and visible_layer_order:
             ordered_layers = [
-                layer for layer in visible_layer_order if layer in visible
+                visible[layer.ref]
+                for layer in visible_layer_order
+                if layer.ref in visible
             ]
-            for layer in sorted(visible, key=lambda item: item.value):
+            for layer in sorted(visible.values(), key=_render_layer_sort_key):
                 if layer not in ordered_layers:
                     ordered_layers.append(layer)
             return ordered_layers
-        return sorted(visible, key=lambda layer: layer.value)
+        return sorted(visible.values(), key=_render_layer_sort_key)
 
-    def _stackup_copper_layers(self, pcbdoc: "AltiumPcbDoc") -> set[PcbLayer] | None:
+    def _stackup_copper_layer_refs(
+        self,
+        pcbdoc: "AltiumPcbDoc",
+    ) -> set[PcbLayerRef] | None:
         """
         Resolve the real copper layer set from board stackup when available.
         """
@@ -2432,18 +2875,24 @@ class PcbSvgRenderer:
         if resolved is None:
             return None
 
-        stackup: set[PcbLayer] = set()
+        stackup: set[PcbLayerRef] = set()
         for layer in resolved.layers:
             legacy_id = getattr(layer, "legacy_id", None)
-            if legacy_id is None:
-                continue
+            v7_id = getattr(layer, "v7_id", None)
+            ref: PcbLayerRef | None = None
             try:
-                layer_enum = PcbLayer(int(legacy_id))
-            except ValueError:
+                if legacy_id is not None:
+                    ref = PcbLayerRef.from_legacy(int(legacy_id))
+                elif v7_id is not None:
+                    ref = PcbLayerRef.from_v7_saved_layer_id(int(v7_id))
+            except PcbLayerResolutionError:
                 continue
-            if not layer_enum.is_copper():
+            if ref is None or ref.family not in {
+                PcbLayerFamily.SIGNAL,
+                PcbLayerFamily.INTERNAL_PLANE,
+            }:
                 continue
-            stackup.add(layer_enum)
+            stackup.add(ref)
 
         if len(stackup) < 2:
             return None
@@ -2453,13 +2902,13 @@ class PcbSvgRenderer:
         self,
         ctx: PcbSvgRenderContext,
         pcbdoc: "AltiumPcbDoc",
-        layer: PcbLayer,
+        layer: _PcbSvgRenderLayer,
         layer_color_override: str | None = None,
         clip_path_id: str | None = None,
         mask_id: str | None = None,
     ) -> list[str]:
         layer_color, base_primitives, drill_primitives, overlay_primitives = (
-            self._collect_layer_primitives(
+            self._collect_render_layer_primitives(
                 ctx,
                 pcbdoc,
                 layer,
@@ -2528,10 +2977,72 @@ class PcbSvgRenderer:
         )
         return layer_color, base_primitives, drill_primitives, overlay_primitives
 
+    def _collect_render_layer_primitives(
+        self,
+        ctx: PcbSvgRenderContext,
+        pcbdoc: "AltiumPcbDoc",
+        layer: _PcbSvgRenderLayer,
+        layer_color_override: str | None = None,
+    ) -> tuple[str, list[str], list[str], list[str]]:
+        layer_color = layer_color_override or ctx.layer_ref_color(layer.ref)
+        if layer.legacy_layer is not None:
+            return self._collect_layer_primitives(
+                ctx,
+                pcbdoc,
+                layer.legacy_layer,
+                layer_color,
+            )
+
+        base_primitives: list[str] = []
+        region_collection = (
+            pcbdoc.shapebased_regions if pcbdoc.shapebased_regions else pcbdoc.regions
+        )
+        base_primitives.extend(
+            self._render_v7_ref_primitive_collection(
+                ctx,
+                region_collection,
+                layer,
+                layer_color,
+            )
+        )
+        base_primitives.extend(
+            self._render_v7_ref_primitive_collection(
+                ctx,
+                pcbdoc.fills,
+                layer,
+                layer_color,
+            )
+        )
+        base_primitives.extend(
+            self._render_v7_ref_primitive_collection(
+                ctx,
+                pcbdoc.tracks,
+                layer,
+                layer_color,
+            )
+        )
+        base_primitives.extend(
+            self._render_v7_ref_primitive_collection(
+                ctx,
+                pcbdoc.arcs,
+                layer,
+                layer_color,
+            )
+        )
+        base_primitives.extend(
+            self._render_v7_ref_primitive_collection(
+                ctx,
+                pcbdoc.texts,
+                layer,
+                layer_color,
+            )
+        )
+        return layer_color, base_primitives, [], []
+
     def _layer_group_attrs_from_primitives(
         self,
         ctx: PcbSvgRenderContext,
-        layer: PcbLayer,
+        layer: _PcbSvgRenderLayer,
         *,
         layer_color: str,
         total_primitive_count: int,
@@ -2547,7 +3058,7 @@ class PcbSvgRenderer:
         if mask_id and not split_drill_overlay:
             attrs.append(f'mask="url(#{html.escape(mask_id)})"')
         if self.options.include_metadata:
-            attrs.extend(ctx.layer_metadata_attrs(layer.value))
+            attrs.extend(ctx.layer_metadata_attrs_for_ref(layer.ref))
             attrs.extend(
                 [
                     f'data-color="{html.escape(layer_color)}"',
@@ -2632,7 +3143,7 @@ class PcbSvgRenderer:
     def _render_layer_group_from_primitives(
         self,
         ctx: PcbSvgRenderContext,
-        layer: PcbLayer,
+        layer: _PcbSvgRenderLayer,
         layer_color: str,
         base_primitives: list[str] | tuple[str, ...],
         drill_primitives: list[str] | tuple[str, ...],
@@ -2708,6 +3219,37 @@ class PcbSvgRenderer:
             }
             if self._to_svg_accepts_for_layer(to_svg):
                 call_kwargs["for_layer"] = layer
+            rendered = to_svg(ctx, **call_kwargs)
+            if rendered:
+                elements.extend(rendered)
+        return elements
+
+    def _render_v7_ref_primitive_collection(
+        self,
+        ctx: PcbSvgRenderContext,
+        collection: Sequence[object],
+        layer: _PcbSvgRenderLayer,
+        layer_color: str,
+    ) -> list[str]:
+        """
+        Render a migrated primitive collection for a V7-only layer reference.
+        """
+        elements: list[str] = []
+        for primitive in collection:
+            if self._should_skip_primitive_for_svg(primitive):
+                continue
+            primitive_ref = self._primitive_layer_ref(primitive)
+            if primitive_ref != layer.ref:
+                continue
+            to_svg = getattr(primitive, "to_svg", None)
+            if to_svg is None:
+                continue
+            call_kwargs: dict[str, object] = {
+                "stroke": layer_color,
+                "include_metadata": self.options.include_metadata,
+            }
+            if self._to_svg_accepts_for_layer(to_svg):
+                call_kwargs["for_layer"] = layer.ref
             rendered = to_svg(ctx, **call_kwargs)
             if rendered:
                 elements.extend(rendered)

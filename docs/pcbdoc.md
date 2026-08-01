@@ -125,9 +125,10 @@ public helper methods for authored geometry.
 
 ## Layer Arguments
 
-Current PcbDoc primitive authoring helpers are legacy-layer-first. Arguments
-named `layer`, `layer_start`, and `layer_end` accept documented `PcbLayer`
-values and supported legacy layer-name tokens such as `"Top Layer"`.
+PcbDoc primitive authoring helpers keep `PcbLayer` as the legacy enum and use
+`PcbLayerRef` for V7-aware layer identity. Arguments named `layer`,
+`layer_start`, and `layer_end` accept documented `PcbLayer` values and
+supported layer-name tokens such as `"Top Layer"`.
 
 `PcbLayer` mirrors Altium's compact legacy/TV6 enum. It includes Top, Mid1
 through Mid30, Bottom, and Mechanical 1 through Mechanical 16 only; values 73,
@@ -135,16 +136,30 @@ through Mid30, Bottom, and Mechanical 1 through Mechanical 16 only; values 73,
 V7 saved layer ids such as `16908305` for Mechanical 17 or `16777248` for
 Mid31 as `layer=` unless a method explicitly documents a V7 override.
 
-Board layer-stack and mechanical-kind metadata can describe extended V7 layer
-identities, but that metadata is distinct from primitive `layer=` authoring
-support. See [PCB layers](api_patterns/pcb_layers.md) for the current public
-boundary.
+For extended mechanical and AD 26.8 128-signal-layer workflows, pass
+`PcbLayerRef` values or documented semantic tokens. Track, arc, fill, text, and
+region helpers can author ordinary numbered mechanical layers through
+Mechanical53.
+They can also author V7-only signal refs such as `PcbLayerRef.mid_layer(126)`
+when a matching enabled layer stack has been attached with
+`set_layer_stack_document(...)`, normally from `.stackupx`.
+
+See [PCB layers](api_patterns/pcb_layers.md) for the current public boundary,
+including the still-gated pad/via and PcbLib signal-layer cases.
 
 ## Pads
 
 `AltiumPcbDoc.add_pad(...)` accepts `hole_shape="round"`, `"square"`, or
 `"slot"` through `PadHoleShape`. Square holes require a positive drill size.
 Slotted holes require `slot_length_mils`.
+
+`add_pad(...)` accepts fractional `corner_radius_percent` values for
+rounded-rectangle pads on the top or bottom layer, matching Altium's exact
+percent storage. Read the exact value back with
+`pad.corner_radius_percent_exact` or resolve the effective radius with
+`pad.corner_radius_mils_on_layer(layer)`. Whole-number percents keep the
+legacy integer-only storage, so existing output is unchanged. See the
+[PcbDoc format contract](format_contracts/pcbdoc.md) for the storage details.
 
 `AltiumPcbDoc.add_custom_pad(...)` authors a board custom pad as an anchor pad
 plus native custom-shape region records. `outline_points_mils` and
@@ -260,15 +275,16 @@ needs width and height without a root viewBox. This does not change geometry,
 layer keys, filenames, or metadata identifiers.
 
 Layer identifiers remain token-based for the current public SVG contract.
-`PcbLayer.to_json_name()` returns stable tokens such as `TOP`, `BOTTOM`, and
-`TOPOVERLAY`. `PcbLayer.to_display_name()` returns default user-facing labels
-such as `Top Layer` and `Top Overlay`.
+`PcbLayer.to_json_name()` returns legacy tokens such as `TOP`, `BOTTOM`, and
+`TOPOVERLAY`; `PcbLayerRef` covers V7 tokens such as `MECHANICAL33` and
+`MID126`. `PcbLayer.to_display_name()` returns default user-facing labels such
+as `Top Layer` and `Top Overlay`.
 For parsed PcbDoc files, prefer `ResolvedLayerStack` when actual board-specific
 layer names are required; SVG `data-layer-display-name` uses resolved names
 when available and falls back to `PcbLayer.to_display_name()`.
-Mechanical 17+ and AD 26.8.1 Mid31+ primitive rendering/export is future
-V7-aware layer-reference work and is not represented by adding more `PcbLayer`
-enum values.
+Supported simple primitives on Mechanical17 through Mechanical53 and
+StackUpX-backed Mid31 through Mid126 render/select by V7 tokens and do not
+invent legacy layer ids.
 
 ## Layer Stack Inspection
 
@@ -595,6 +611,8 @@ Start with:
 40. [`pcbdoc_extract_embedded_3d_models`](../examples/pcbdoc_extract_embedded_3d_models/README.md)
 41. [`pcbdoc_extract_embedded_fonts`](../examples/pcbdoc_extract_embedded_fonts/README.md)
 42. [`embedded_asset_inventory`](../examples/embedded_asset_inventory/README.md)
+43. [`pcbdoc_v7_128_signal_track_row`](../examples/pcbdoc_v7_128_signal_track_row/README.md)
+44. [`pcb_v7_mechanical_layer_track_rows`](../examples/pcb_v7_mechanical_layer_track_rows/README.md)
 
 See [API patterns](api_patterns/index.md) for public vs careful mutation
 guidance.

@@ -95,7 +95,11 @@ def _layer_sort_key(layer_key: str) -> tuple[int, str]:
 def _layer_output_path(layer_key: str) -> Path:
     if layer_key == DRILLS_LAYER_KEY:
         return OUTPUT_LAYERS_DIR / "layer_drills.svg"
-    layer = PcbLayer.from_json_name(layer_key)
+    try:
+        layer = PcbLayer.from_json_name(layer_key)
+    except ValueError:
+        # V7-only layers (e.g. MECHANICAL17..53) have no legacy enum value.
+        return OUTPUT_LAYERS_DIR / f"layer_v7_{_safe_filename(layer_key)}.svg"
     filename = f"layer_{layer.value:02d}_{_safe_filename(layer_key)}.svg"
     return OUTPUT_LAYERS_DIR / filename
 
@@ -116,7 +120,23 @@ def _layer_manifest_entry(
             "byte_count": output_path.stat().st_size,
         }
 
-    layer = PcbLayer.from_json_name(layer_key)
+    try:
+        layer = PcbLayer.from_json_name(layer_key)
+    except ValueError:
+        # V7-only layers carry their identity in the V7 token; there is no
+        # legacy enum value or id to report.
+        resolved = stack.layer_by_token(layer_key)
+        display_name = resolved.display_name if resolved is not None else layer_key
+        return {
+            "key": layer_key,
+            "display_name": display_name,
+            "legacy_id": None,
+            "enum_name": None,
+            "selector_examples": [layer_key, display_name],
+            "svg": _sample_relative(output_path),
+            "byte_count": output_path.stat().st_size,
+        }
+
     display_name = _display_name_for_layer(layer, stack)
     return {
         "key": layer_key,

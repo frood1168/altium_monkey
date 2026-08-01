@@ -11,14 +11,16 @@ from __future__ import annotations
 import uuid
 from typing import Sequence
 
+from .altium_pcb_layer_ref import (
+    PcbLayerRegistry,
+    PcbLayerLike,
+    _coerce_pcb_authoring_layer_storage,
+)
 from .altium_record_pcb__arc import AltiumPcbArc
 from .altium_record_pcb__fill import AltiumPcbFill
 from .altium_record_pcb__track import AltiumPcbTrack
 from .altium_record_types import PcbLayer
-from .altium_resolved_layer_stack import (
-    _legacy_layer_id_from_token,
-    legacy_layer_to_v7_save_id,
-)
+
 
 def parse_track_stream(data: bytes) -> tuple[AltiumPcbTrack, ...]:
     """
@@ -89,30 +91,14 @@ def build_fill_stream(fills: Sequence[AltiumPcbFill]) -> bytes:
     return b"".join(fill.serialize_to_binary() for fill in fills)
 
 
-def coerce_legacy_layer_id(layer: int | str | PcbLayer) -> int:
+def coerce_legacy_layer_id(layer: PcbLayerLike) -> int:
     """
     Resolve a public builder layer input into the legacy/TV6 PCB layer ID.
 
-    This helper does not validate or remap serialized V7 saved-layer IDs;
-    integer input is passed through as a legacy layer id, so passing a V7
-    saved-layer ID silently corrupts the legacy layer field. Methods that
-    need Mechanical 17+, Mid31+, or other V7-only identities must use a future
-    V7-aware layer reference path instead of passing those IDs through
-    `layer=`.
+    Raw integer input is legacy-only. V7-only references are accepted only when
+    the authoring projection is explicitly supported.
     """
-    if isinstance(layer, PcbLayer):
-        return int(layer.value)
-    if isinstance(layer, int):
-        return int(layer)
-    token = str(layer or "").strip()
-    legacy_id = _legacy_layer_id_from_token(token)
-    if legacy_id is None:
-        normalized = "".join(ch for ch in token.upper() if ch.isalnum())
-        if normalized.endswith("LAYER"):
-            legacy_id = _legacy_layer_id_from_token(normalized[:-5])
-    if legacy_id is None:
-        raise ValueError(f"Unsupported PCB layer token for authored primitive: {layer!r}")
-    return legacy_id
+    return _coerce_pcb_authoring_layer_storage(layer).legacy_layer_id
 
 
 def build_authored_track(
@@ -120,16 +106,17 @@ def build_authored_track(
     start_mils: tuple[float, float],
     end_mils: tuple[float, float],
     width_mils: float,
-    layer: int | str | PcbLayer = PcbLayer.TOP,
+    layer: PcbLayerLike = PcbLayer.TOP,
+    registry: PcbLayerRegistry | None = None,
     solder_mask_expansion_mils: float | None = None,
     paste_mask_expansion_mils: float | None = None,
 ) -> AltiumPcbTrack:
     """
     Create a modern authored TRACK record from first principles.
     """
-    legacy_layer = coerce_legacy_layer_id(layer)
+    layer_storage = _coerce_pcb_authoring_layer_storage(layer, registry=registry)
     track = AltiumPcbTrack()
-    track.layer = legacy_layer
+    track.layer = layer_storage.legacy_layer_id
     track.start_x = track._to_internal_units(start_mils[0])
     track.start_y = track._to_internal_units(start_mils[1])
     track.end_x = track._to_internal_units(end_mils[0])
@@ -140,10 +127,8 @@ def build_authored_track(
             solder_mask_expansion_mils
         )
     if paste_mask_expansion_mils is not None:
-        track.paste_mask_expansion = track._to_internal_units(
-            paste_mask_expansion_mils
-        )
-    track.v7_layer_id = legacy_layer_to_v7_save_id(legacy_layer)
+        track.paste_mask_expansion = track._to_internal_units(paste_mask_expansion_mils)
+    track.v7_layer_id = layer_storage.v7_saved_layer_id
     track._original_content_len = 49
     return track
 
@@ -167,16 +152,17 @@ def build_authored_arc(
     start_angle: float,
     end_angle: float,
     width_mils: float,
-    layer: int | str | PcbLayer = PcbLayer.TOP,
+    layer: PcbLayerLike = PcbLayer.TOP,
+    registry: PcbLayerRegistry | None = None,
     solder_mask_expansion_mils: float | None = None,
     paste_mask_expansion_mils: float | None = None,
 ) -> AltiumPcbArc:
     """
     Create a modern authored ARC record from first principles.
     """
-    legacy_layer = coerce_legacy_layer_id(layer)
+    layer_storage = _coerce_pcb_authoring_layer_storage(layer, registry=registry)
     arc = AltiumPcbArc()
-    arc.layer = legacy_layer
+    arc.layer = layer_storage.legacy_layer_id
     arc.center_x = arc._to_internal_units(center_mils[0])
     arc.center_y = arc._to_internal_units(center_mils[1])
     arc.radius = arc._to_internal_units(radius_mils)
@@ -184,12 +170,10 @@ def build_authored_arc(
     arc.end_angle = float(end_angle)
     arc.width = arc._to_internal_units(width_mils)
     if solder_mask_expansion_mils is not None:
-        arc.solder_mask_expansion = arc._to_internal_units(
-            solder_mask_expansion_mils
-        )
+        arc.solder_mask_expansion = arc._to_internal_units(solder_mask_expansion_mils)
     if paste_mask_expansion_mils is not None:
         arc.paste_mask_expansion = arc._to_internal_units(paste_mask_expansion_mils)
-    arc.v7_layer_id = legacy_layer_to_v7_save_id(legacy_layer)
+    arc.v7_layer_id = layer_storage.v7_saved_layer_id
     arc._original_content_len = 60
     return arc
 
@@ -211,16 +195,17 @@ def build_authored_fill(
     pos1_mils: tuple[float, float],
     pos2_mils: tuple[float, float],
     rotation_degrees: float = 0.0,
-    layer: int | str | PcbLayer = PcbLayer.TOP,
+    layer: PcbLayerLike = PcbLayer.TOP,
+    registry: PcbLayerRegistry | None = None,
     solder_mask_expansion_mils: float | None = None,
     paste_mask_expansion_mils: float | None = None,
 ) -> AltiumPcbFill:
     """
     Create a modern authored FILL record from first principles.
     """
-    legacy_layer = coerce_legacy_layer_id(layer)
+    layer_storage = _coerce_pcb_authoring_layer_storage(layer, registry=registry)
     fill = AltiumPcbFill()
-    fill.layer = legacy_layer
+    fill.layer = layer_storage.legacy_layer_id
     fill.pos1_x = fill._to_internal_units(pos1_mils[0])
     fill.pos1_y = fill._to_internal_units(pos1_mils[1])
     fill.pos2_x = fill._to_internal_units(pos2_mils[0])
@@ -244,7 +229,7 @@ def build_authored_fill(
         else 0
     )
     fill.keepout_restrictions = 0
-    fill.v7_layer_id = legacy_layer_to_v7_save_id(legacy_layer)
+    fill.v7_layer_id = layer_storage.v7_saved_layer_id
     fill._original_content_len = 50
     return fill
 

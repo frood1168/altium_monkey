@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .altium_pcb_enums import PadHoleShape, PadShape
 from .altium_record_pcb__pad import AltiumPcbPad
+from .altium_record_types import PcbLayer
 
 ROUNDED_RECTANGLE_ALT_SHAPE = 9
 ROUNDED_RECTANGLE_FULL_STACK_LAYER_CODE = 4
@@ -99,7 +100,7 @@ def apply_authored_pad_shape(
     shape: PadShapeInput,
     width_iu: int,
     height_iu: int,
-    corner_radius_percent: int | None,
+    corner_radius_percent: int | float | None,
 ) -> None:
     """
     Apply public semantic pad shape to native fields.
@@ -117,7 +118,11 @@ def apply_authored_pad_shape(
         pad.bot_shape = shape_id
         return
 
-    corner_pct = _normalize_corner_radius_percent(corner_radius_percent)
+    corner_pct, exact_pct = _normalize_corner_radius_percent(corner_radius_percent)
+    if exact_pct is not None:
+        pad.exact_corner_radius_percent_by_layer = {
+            _exact_corner_layer_token(pad): exact_pct
+        }
     base_shape = int(PadShape.CIRCLE)
     pad.shape = base_shape
     pad.top_shape = base_shape
@@ -156,7 +161,7 @@ def apply_authored_pad_local_stack(
     bottom_width_iu: int | None = None,
     bottom_height_iu: int | None = None,
     pad_mode: int | None = None,
-    corner_radius_percent: int | None = None,
+    corner_radius_percent: int | float | None = None,
 ) -> None:
     """
     Apply public top/mid/bottom pad-body options to native local-stack fields.
@@ -194,7 +199,14 @@ def apply_authored_pad_local_stack(
     if base == PadShape.CUSTOM:
         raise ValueError("local-stack pad body overrides do not support custom shape")
 
-    corner_pct = _normalize_corner_radius_percent(corner_radius_percent)
+    corner_pct, exact_pct = _normalize_corner_radius_percent(corner_radius_percent)
+    if exact_pct is not None:
+        # Native CornerRadiusChamfer evidence covers simple single-body pads
+        # only; local-stack fractional storage is unverified.
+        raise ValueError(
+            "fractional corner_radius_percent is not supported with "
+            "top/mid/bottom pad body overrides"
+        )
     pad.pad_mode = 1
 
     top_body = _resolve_layer_body(
@@ -301,10 +313,39 @@ def _apply_rounded_layer_markers(
         pad.corner_radius[index] = corner_pct
 
 
-def _normalize_corner_radius_percent(value: int | None) -> int:
-    percent = (
-        DEFAULT_ROUNDED_RECTANGLE_CORNER_RADIUS_PERCENT if value is None else int(value)
-    )
+def _normalize_corner_radius_percent(
+    value: int | float | None,
+) -> tuple[int, float | None]:
+    """
+    Return `(legacy_rounded_percent, exact_fractional_percent)`.
+
+    The exact value is None for integral inputs so whole-number percents keep
+    producing byte-identical output (no CornerRadiusChamfer lane). Fractional
+    inputs keep full precision in the exact lane while the legacy SubRecord 6
+    byte carries the rounded integer, matching native AD dual-lane storage.
+    """
+    if value is None:
+        return DEFAULT_ROUNDED_RECTANGLE_CORNER_RADIUS_PERCENT, None
+    percent = float(value)
     if not 0 <= percent <= 100:
         raise ValueError("corner_radius_percent must be between 0 and 100")
-    return percent
+    legacy = int(round(percent))
+    if float(legacy) == percent:
+        return legacy, None
+    return legacy, percent
+
+
+def _exact_corner_layer_token(pad: AltiumPcbPad) -> str:
+    """
+    Layer token for a fractional corner percent on the simple pad path.
+
+    Native evidence covers single-layer SMD pads only, so fractional
+    authoring is restricted to TOP/BOTTOM pads rather than inventing
+    unproven multilayer CornerRadiusChamfer storage.
+    """
+    if pad.layer in (int(PcbLayer.TOP), int(PcbLayer.BOTTOM)):
+        return PcbLayer(pad.layer).name
+    raise ValueError(
+        "fractional corner_radius_percent is only supported for pads on the "
+        "top or bottom layer; use a whole-number percent for other pads"
+    )

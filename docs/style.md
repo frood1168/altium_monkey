@@ -1,11 +1,11 @@
 # Public Docs Style Foundation
 
 The public documentation is Markdown-first in this release. The checked-in
-stylesheet at [assets/altium-monkey-docs.css](assets/altium-monkey-docs.css)
+stylesheet at [../assets/altium-monkey-docs.css](../assets/altium-monkey-docs.css)
 is the shared visual foundation for current static docs and future generated
 HTML docs.
 
-The visual source of truth is the Monkey Kit `altium_monkey` golden bundle.
+The visual source of truth is the Monkey Kit `altium-monkey` golden bundle.
 The public docs copy uses the amber phosphor theme, the Altium Monkey ASCII
 mark, and the generated Altium Stroke font assets.
 
@@ -35,30 +35,33 @@ without coupling to Monkey Kit token names.
 
 ## Font Assets
 
-The upstream stroke-font generator produced:
+The upstream stroke-font generator produced Regular and Bold weights:
 
-1. [assets/fonts/altium-stroke.woff2](assets/fonts/altium-stroke.woff2)
-2. [assets/fonts/altium-stroke.woff](assets/fonts/altium-stroke.woff)
-3. [assets/fonts/altium-stroke.ttf](assets/fonts/altium-stroke.ttf)
-4. [assets/fonts/altium-stroke.otf](assets/fonts/altium-stroke.otf)
-5. [assets/fonts/altium-monkey-stroke-fonts.css](assets/fonts/altium-monkey-stroke-fonts.css)
+1. [../assets/fonts/altium-stroke.woff2](../assets/fonts/altium-stroke.woff2)
+2. [../assets/fonts/altium-stroke.woff](../assets/fonts/altium-stroke.woff)
+3. [../assets/fonts/altium-stroke.ttf](../assets/fonts/altium-stroke.ttf)
+4. [../assets/fonts/altium-stroke.otf](../assets/fonts/altium-stroke.otf)
+5. [../assets/fonts/altium-stroke-bold.woff2](../assets/fonts/altium-stroke-bold.woff2)
+6. [../assets/fonts/altium-stroke-bold.woff](../assets/fonts/altium-stroke-bold.woff)
+7. [../assets/fonts/altium-stroke-bold.ttf](../assets/fonts/altium-stroke-bold.ttf)
+8. [../assets/fonts/altium-stroke-bold.otf](../assets/fonts/altium-stroke-bold.otf)
+9. [../assets/fonts/altium-monkey-stroke-fonts.css](../assets/fonts/altium-monkey-stroke-fonts.css)
 
-`assets/altium-monkey-docs.css` embeds the same `@font-face`, using
+A themed showcase page is published at
+[../assets/fonts/demo.html](../assets/fonts/demo.html).
+
+`../assets/altium-monkey-docs.css` embeds the same `@font-face`, using
 `font-family: "Altium Stroke"`. Use this face for Altium-style schematic text
 samples or generated design-document diagrams. Do not force it onto monospace
 code blocks or the ASCII monkey mark.
 
 ## Monkey Mark
 
-The Altium Monkey mark is published as:
-
-1. [assets/monkey/altium-monkey.html](assets/monkey/altium-monkey.html)
-2. [assets/monkey/altium-monkey.txt](assets/monkey/altium-monkey.txt)
-3. [assets/monkey/altium-monkey-preview.png](assets/monkey/altium-monkey-preview.png)
-
-Generated HTML docs can embed the HTML fragment when a branded status/header
-mark is useful. The fragment assumes `assets/altium-monkey-docs.css` or the
-portable Monkey Kit CSS has already been loaded.
+The Altium Monkey ASCII mark is maintained privately as a Monkey Kit golden
+bundle and is always written lowercase (`altium-monkey`). Generated HTML docs
+can embed the mark when a branded status/header mark is useful; embeds assume
+`../assets/altium-monkey-docs.css` or the portable Monkey Kit CSS has already
+been loaded.
 
 ## Generated Docs Guidance
 
@@ -70,5 +73,5 @@ Generated pages that want the full Monkey Kit document treatment should set
 `data-theme="amber"` on the root element and load:
 
 ```html
-<link rel="stylesheet" href="assets/altium-monkey-docs.css">
+<link rel="stylesheet" href="../assets/altium-monkey-docs.css">
 ```

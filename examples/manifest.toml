@@ -392,6 +392,45 @@ requires_extra = []
 tags = ["pcbdoc", "layer-stack", "generation", "stackup", "stackupx"]
 
 [[examples]]
+id = "pcbdoc_v7_128_signal_track_row"
+title = "Create a 128-signal-layer PcbDoc track row"
+summary = "Generate a public-local AD 26.8 style 128-signal StackUpX file, re-import it, author one track on every signal layer through PcbLayerRef, and verify exact V7 saved-layer readback plus SVG metadata."
+areas = ["pcbdoc"]
+status = "ready"
+entrypoint = "pcbdoc_v7_128_signal_track_row/pcbdoc_v7_128_signal_track_row.py"
+doc = "pcbdoc_v7_128_signal_track_row/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcbdoc_v7_128_signal_track_row/output/pcbdoc_v7_128_signal_track_row.PcbDoc",
+  "pcbdoc_v7_128_signal_track_row/output/ad26_128_signal.stackupx",
+  "pcbdoc_v7_128_signal_track_row/output/pcbdoc_v7_128_signal_track_row.svg",
+  "pcbdoc_v7_128_signal_track_row/output/pcbdoc_v7_128_signal_track_row.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "layer-stack", "generation", "stackupx", "v7-layers", "128-signal"]
+
+[[examples]]
+id = "pcb_v7_mechanical_layer_track_rows"
+title = "Create V7 mechanical layer track rows"
+summary = "Generate a PcbDoc and PcbLib footprint with one track on every ordinary numbered Mechanical1 through Mechanical53 layer through PcbLayerRef, custom display names, save/reparse checks, and SVG metadata."
+areas = ["pcbdoc", "pcblib"]
+status = "ready"
+entrypoint = "pcb_v7_mechanical_layer_track_rows/pcb_v7_mechanical_layer_track_rows.py"
+doc = "pcb_v7_mechanical_layer_track_rows/README.md"
+inputs = []
+assets = []
+outputs = [
+  "pcb_v7_mechanical_layer_track_rows/output/pcb_v7_mechanical_layer_track_rows.PcbDoc",
+  "pcb_v7_mechanical_layer_track_rows/output/pcb_v7_mechanical_layer_track_rows.PcbLib",
+  "pcb_v7_mechanical_layer_track_rows/output/pcbdoc_mechanical_layer_track_rows.svg",
+  "pcb_v7_mechanical_layer_track_rows/output/pcblib_mechanical_layer_track_rows.svg",
+  "pcb_v7_mechanical_layer_track_rows/output/pcb_v7_mechanical_layer_track_rows.json",
+]
+requires_extra = []
+tags = ["pcbdoc", "pcblib", "generation", "v7-layers", "mechanical-layers", "svg"]
+
+[[examples]]
 id = "pcbdoc_create_custom_rigid_stack"
 title = "Create a custom rigid PcbDoc layer stack"
 summary = "Author a custom four-layer rigid stack through explicit AltiumLayerStackDocument.from_rigid_layer_rows rows, save PcbDoc/.stackup/.stackupx outputs, and write a semantic comparison manifest."

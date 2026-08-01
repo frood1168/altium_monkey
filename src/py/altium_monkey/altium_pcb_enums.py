@@ -120,6 +120,15 @@ class PcbV7SavedLayerId(IntEnum):
     DRC_DETAIL_MARKERS = 0x01030000 + PcbV7LayerPartition.DRC_DETAIL_LAYER
 
 
+PCB_MECHANICAL_LAYER_NUMBER_MAX = 0xFFFF
+PCB_USER_MECHANICAL_LAYER_AUTHORING_MAX = 53
+PCB_ROUTE_GUIDE_MECHANICAL_LAYER_NUMBER = 32767
+PCB_COVERLAY_OUTLINE_MECHANICAL_INDEX_BASE = 64530
+PCB_COVERLAY_OUTLINE_MECHANICAL_INDEX_MAX = (
+    PCB_COVERLAY_OUTLINE_MECHANICAL_INDEX_BASE + 1000
+)
+
+
 def _legacy_pcb_layer_to_v7_saved_layer_id(layer_id: int | PcbLayer) -> int:
     layer_id = int(layer_id)
     if PcbLayer.TOP.value <= layer_id <= PcbLayer.MID30.value:
@@ -193,7 +202,7 @@ def pcb_mechanical_layer_number_to_v7_saved_layer_id(
 ) -> int | None:
     """Return the saved V7 id for a mechanical layer number, or ``None`` if invalid."""
 
-    if not 1 <= int(mechanical_number) <= 32:
+    if not 1 <= int(mechanical_number) <= PCB_MECHANICAL_LAYER_NUMBER_MAX:
         return None
     first_mechanical = _legacy_pcb_layer_to_v7_saved_layer_id(PcbLayer.MECHANICAL_1)
     return first_mechanical + int(mechanical_number) - 1

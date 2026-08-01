@@ -1,16 +1,16 @@
 :root[data-theme="amber"], [data-theme="amber"] {
-  --mk-accent: #ffb000;
-  --mk-accent-bright: #ffd475;
-  --mk-accent-dim: #946600;
+  --mk-accent: #f0a400;
+  --mk-accent-bright: #f7ce75;
+  --mk-accent-dim: #8b5f00;
   --mk-bg: #050403;
-  --mk-border: #6b4a00;
+  --mk-border: #654500;
   --mk-error: #ff5a65;
-  --mk-glow: 0 0 18px rgb(255 176 0 / 0.32);
-  --mk-grid: #523800;
+  --mk-glow: 0 0 18px rgb(240 164 0 / 0.32);
+  --mk-grid: #4d3400;
   --mk-input: #090704;
   --mk-panel: #0c0904;
   --mk-panel-raised: #151005;
-  --mk-selection: #ffeec7;
+  --mk-selection: #fcebc7;
   --mk-success: #70ff86;
   --mk-text: #f9d987;
   --mk-text-dim: #b9954e;

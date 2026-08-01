@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
+from .altium_pcb_layer_ref import _normalize_layer_token
 from .altium_pcb_stream_helpers import parse_altium_int_token as _parse_altium_int_token
 from .altium_record_types import PcbLayer
 
@@ -29,13 +30,6 @@ _SYS_V7_TO_LEGACY = {
     14: PcbLayer.DRILL_DRAWING.value,
     15: PcbLayer.MULTI_LAYER.value,
 }
-
-
-def _normalize_layer_token(value: str) -> str:
-    """
-    Normalize display names/tokens for resilient lookup.
-    """
-    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())
 
 
 def _optional_bool(value: object) -> bool | None:
@@ -134,6 +128,36 @@ _LEGACY_TO_STANDARD_TOKEN: dict[int, str] = {
 }
 
 
+def _standard_token_from_v7_key(v7_id: int | None) -> str | None:
+    """
+    Resolve the public layer token for a V7 saved-layer id.
+    """
+    if v7_id is None:
+        return None
+
+    layer_value = int(v7_id)
+    if layer_value == 0x0100FFFF:
+        return "BOTTOM"
+    if layer_value < 0x01000000:
+        return None
+
+    group = (layer_value >> 16) & 0xFF
+    species = layer_value & 0xFFFF
+    if group == 0:
+        if species == 1:
+            return "TOP"
+        if 2 <= species <= 0x7F:
+            return f"MID{species - 1}"
+        return None
+    if group == 1 and 1 <= species <= 16:
+        return f"PLANE{species}"
+    if group == 2 and species > 0:
+        return f"MECHANICAL{species}"
+
+    legacy_id, _group = _legacy_id_from_saved_layer_id(layer_value)
+    return _standard_layer_token(legacy_id)
+
+
 def _legacy_to_v7_key(layer_id: int) -> int | None:
     """
     Convert legacy layer ID (1..74) to V7 cache key when defined.
@@ -220,15 +244,24 @@ def _legacy_layer_id_from_token(token: str) -> int | None:
 
     mid_match = re.match(r"^MID(?:LAYER)?(\d+)$", normalized)
     if mid_match:
-        return PcbLayer.TOP.value + int(mid_match.group(1))
+        mid_number = int(mid_match.group(1))
+        if 1 <= mid_number <= 30:
+            return PcbLayer.TOP.value + mid_number
+        return None
 
     plane_match = re.match(r"^(?:INTERNAL)?PLANE(\d+)$", normalized)
     if plane_match:
-        return PcbLayer.INTERNAL_PLANE_1.value + int(plane_match.group(1)) - 1
+        plane_number = int(plane_match.group(1))
+        if 1 <= plane_number <= 16:
+            return PcbLayer.INTERNAL_PLANE_1.value + plane_number - 1
+        return None
 
     mech_match = re.match(r"^MECHANICAL(\d+)$", normalized)
     if mech_match:
-        return PcbLayer.MECHANICAL_1.value + int(mech_match.group(1)) - 1
+        mechanical_number = int(mech_match.group(1))
+        if 1 <= mechanical_number <= 16:
+            return PcbLayer.MECHANICAL_1.value + mechanical_number - 1
+        return None
 
     return None
 
@@ -435,6 +468,9 @@ class ResolvedLayerStack:
         token_map: dict[str, ResolvedLayer] = {}
         for layer in self.layers:
             token_map.setdefault(_normalize_layer_token(layer.display_name), layer)
+            v7_token = _standard_token_from_v7_key(layer.v7_id)
+            if v7_token:
+                token_map.setdefault(v7_token, layer)
             if layer.legacy_id is not None:
                 legacy_map.setdefault(layer.legacy_id, layer)
                 standard_token = _standard_layer_token(layer.legacy_id)
@@ -809,11 +845,17 @@ def _legacy_id_from_saved_layer_id(
                 return PcbLayer.BOTTOM.value, group
             if index == 1:
                 return PcbLayer.TOP.value, group
-            return PcbLayer.TOP.value + index - 1, group
+            if 2 <= index <= 31:
+                return PcbLayer.TOP.value + index - 1, group
+            return None, group
         if group == 1:
-            return PcbLayer.INTERNAL_PLANE_1.value + index - 1, group
+            if 1 <= index <= 16:
+                return PcbLayer.INTERNAL_PLANE_1.value + index - 1, group
+            return None, group
         if group == 2:
-            return PcbLayer.MECHANICAL_1.value + index - 1, group
+            if 1 <= index <= 16:
+                return PcbLayer.MECHANICAL_1.value + index - 1, group
+            return None, group
         if group == 3:
             return _SYS_V7_TO_LEGACY.get(index), group
         return None, group
@@ -853,6 +895,7 @@ def _legacy_v8_physical_stack(raw_record: dict[str, object]) -> list[dict[str, o
         )
         normalized_name = _normalize_layer_token(name)
         is_dielectric = normalized_name.startswith("DIELECTRIC")
+        is_signal_or_plane = group in {0, 1}
         is_physical = is_dielectric or (
             legacy_id
             in {
@@ -875,6 +918,7 @@ def _legacy_v8_physical_stack(raw_record: dict[str, object]) -> list[dict[str, o
                 <= legacy_id
                 <= PcbLayer.INTERNAL_PLANE_16.value
             )
+            or is_signal_or_plane
         )
         if not is_physical:
             continue
@@ -1607,6 +1651,7 @@ def _build_resolved_layer_metadata(
             v9_reverse_name.setdefault(name, v7_id)
 
     v9_stack_index: dict[str, int] = {}
+    v9_layer_id_by_name: dict[str, int] = {}
     v9_thickness_mils: dict[str, float] = {}
     v9_material_by_name: dict[str, str] = {}
     if v9_stack:
@@ -1614,6 +1659,8 @@ def _build_resolved_layer_metadata(
             if not v9.name or v9.name in v9_stack_index:
                 continue
             v9_stack_index[v9.name] = v9.stack_index
+            if v9.layer_id:
+                v9_layer_id_by_name[v9.name] = int(v9.layer_id)
             if v9.copper_thickness > 0:
                 v9_thickness_mils[v9.name] = v9.copper_thickness
             elif v9.diel_height > 0:
@@ -1632,7 +1679,9 @@ def _build_resolved_layer_metadata(
         legacy_id = name_to_legacy.get(layer_name)
         v7_id = _legacy_to_v7_key(legacy_id) if legacy_id is not None else None
         if v7_id is None:
-            v7_id = v9_reverse_name.get(layer_name)
+            v7_id = v9_reverse_name.get(layer_name) or v9_layer_id_by_name.get(
+                layer_name
+            )
         resolved_layers.append(
             ResolvedLayer(
                 layer_key=_simple_layer_key(layer_name, legacy_id, v7_id),
@@ -1651,6 +1700,10 @@ def _build_resolved_layer_metadata(
         token = _standard_layer_token(legacy_id)
         if token:
             standard_layer_names.setdefault(token, layer_name)
+    for layer in resolved_layers:
+        token = _standard_token_from_v7_key(layer.v7_id)
+        if token:
+            standard_layer_names.setdefault(token, layer.display_name)
     standard_layer_names.setdefault("TOP", seed.top_layer_name)
     standard_layer_names.setdefault("BOTTOM", seed.bottom_layer_name)
 

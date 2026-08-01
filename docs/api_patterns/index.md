@@ -87,10 +87,11 @@ preserves that order when placing a symbol into a schematic.
 
 For PcbDoc and PcbLib authoring, use the high-level `add_*` methods. They keep
 the record lists, net tables, embedded model streams, layer references, and
-authoring metadata synchronized. Current PCB `layer=` arguments are
-legacy-layer-first; see [PCB layers](pcb_layers.md) before working with V7
-saved layer ids, Mechanical 17+ metadata, or AD 26.8.1 extended signal-layer
-metadata. Save with `save(...)` when finished.
+authoring metadata synchronized. PCB `layer=` arguments accept legacy
+`PcbLayer` values and documented V7-aware `PcbLayerRef` values or semantic
+tokens; see [PCB layers](pcb_layers.md) before working with V7 saved layer ids,
+Mechanical 17+ metadata, or AD 26.8.1 extended signal-layer metadata. Save with
+`save(...)` when finished.
 
 For single-item inspection and extraction, use
 [`asset_inventory(...)`](extractable_assets.md). `AltiumPcbDoc`,

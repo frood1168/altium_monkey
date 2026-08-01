@@ -32,6 +32,15 @@ from .altium_pcb_enums import (
     PcbViaStructureFeatureSide,
     PcbViaStructureFeatureType,
 )
+from .altium_pcb_layer_ref import (
+    PcbLayerFamily,
+    PcbLayerRef,
+    PcbLayerRegistry,
+    PcbLayerRegistryEntry,
+    PcbLayerResolutionError,
+    PcbPrimitiveLayerState,
+    resolve_pcb_primitive_layer_state,
+)
 from .altium_pcb_rule import AltiumPlaneClearanceRule, AltiumPlaneConnectRule
 from .altium_record_types import PcbLayer
 from .altium_board import resolve_outline_arc_segment
@@ -1127,6 +1136,7 @@ class PcbIpc2581Context:
 
     # Unified layer stack resolution (IPC-first consumer).
     resolved_layer_stack: ResolvedLayerStack | None = None
+    layer_registry: PcbLayerRegistry = field(default_factory=PcbLayerRegistry)
 
     # Net  ->  set of layer names that the net has copper on
     # (tracks, arcs, fills, regions, pads, polygons  -  used for via padstack layer selection)
@@ -1283,6 +1293,199 @@ class PcbIpc2581Context:
             params_ci["comment"] = comment or ""
 
         return substitute_pcb_special_strings(text, params_ci)
+
+
+def _layer_ref_from_resolved_layer(layer: object) -> PcbLayerRef | None:
+    v7_id = getattr(layer, "v7_id", None)
+    if v7_id is not None:
+        try:
+            ref = PcbLayerRef.from_v7_saved_layer_id(int(v7_id))
+        except PcbLayerResolutionError:
+            ref = None
+        if ref is not None and ref.family != PcbLayerFamily.UNKNOWN:
+            return ref
+
+    legacy_id = getattr(layer, "legacy_id", None)
+    if legacy_id is None:
+        return None
+    try:
+        return PcbLayerRef.from_legacy(int(legacy_id))
+    except PcbLayerResolutionError:
+        return None
+
+
+def _layer_registry_from_resolved_stack(
+    resolved: ResolvedLayerStack,
+) -> PcbLayerRegistry:
+    entries: list[PcbLayerRegistryEntry] = []
+    for layer in resolved.layers:
+        ref = _layer_ref_from_resolved_layer(layer)
+        if ref is None:
+            continue
+        entries.append(
+            PcbLayerRegistryEntry(
+                ref=ref,
+                display_name=str(layer.display_name),
+                stack_index=layer.stack_index,
+            )
+        )
+    return PcbLayerRegistry(entries=tuple(entries))
+
+
+def _primitive_layer_state(
+    ctx: PcbIpc2581Context,
+    primitive: object,
+    layer_value: object | None = None,
+) -> PcbPrimitiveLayerState | None:
+    if layer_value is not None:
+        try:
+            return resolve_pcb_primitive_layer_state(
+                SimpleNamespace(layer=layer_value),
+                registry=ctx.layer_registry,
+                v7_saved_layer_id_field=None,
+            )
+        except PcbLayerResolutionError:
+            pass
+
+    layer_state_method = getattr(primitive, "layer_state", None)
+    if callable(layer_state_method):
+        try:
+            state = layer_state_method(registry=ctx.layer_registry)
+        except PcbLayerResolutionError:
+            state = None
+        if isinstance(state, PcbPrimitiveLayerState):
+            return state
+
+    try:
+        return resolve_pcb_primitive_layer_state(
+            primitive,
+            registry=ctx.layer_registry,
+        )
+    except PcbLayerResolutionError:
+        pass
+
+    return None
+
+
+def _layer_name_from_state(
+    ctx: PcbIpc2581Context,
+    state: PcbPrimitiveLayerState,
+) -> str | None:
+    entry = ctx.layer_registry.entry_for_ref(state.ref)
+    if entry is not None:
+        return entry.display_name
+
+    if state.ref.legacy_layer_id is not None:
+        return ctx.resolve_layer(state.ref.legacy_layer_id)
+
+    return ctx.display_name_for_token(state.ref.token)
+
+
+def _layer_name_from_primitive(
+    ctx: PcbIpc2581Context,
+    primitive: object,
+    layer_value: object | None = None,
+) -> str | None:
+    state = _primitive_layer_state(ctx, primitive, layer_value)
+    if state is None:
+        return None
+    return _layer_name_from_state(ctx, state)
+
+
+def _ordered_signal_layer_names(ctx: PcbIpc2581Context) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for layer_name in (
+        ctx.top_layer_name,
+        *ctx.inner_signal_layers,
+        ctx.bottom_layer_name,
+    ):
+        if not layer_name or layer_name in seen or layer_name not in ctx.layer_names:
+            continue
+        names.append(layer_name)
+        seen.add(layer_name)
+    return tuple(names)
+
+
+def _legacy_signal_position(
+    layer_id: int,
+    *,
+    signal_layer_count: int,
+) -> int | None:
+    if layer_id == PcbLayer.TOP.value:
+        return 0
+    if layer_id == PcbLayer.BOTTOM.value:
+        return signal_layer_count - 1
+    if PcbLayer.TOP.value < layer_id < PcbLayer.BOTTOM.value:
+        position = layer_id - PcbLayer.TOP.value
+        if position < signal_layer_count - 1:
+            return position
+    return None
+
+
+def _legacy_signal_layer_id_for_position(
+    position: int,
+    *,
+    signal_layer_count: int,
+) -> int | None:
+    if position == 0:
+        return PcbLayer.TOP.value
+    if position == signal_layer_count - 1:
+        return PcbLayer.BOTTOM.value
+    if 1 <= position <= 30:
+        return PcbLayer.TOP.value + position
+    return None
+
+
+def _legacy_signal_layer_entries_for_span(
+    ctx: PcbIpc2581Context,
+    start_layer_id: int,
+    end_layer_id: int,
+) -> tuple[tuple[str, int | None], ...]:
+    return tuple(
+        (layer_name, layer_id)
+        for layer_id in range(
+            min(int(start_layer_id), int(end_layer_id)),
+            max(int(start_layer_id), int(end_layer_id)) + 1,
+        )
+        for layer_name in [ctx._layer_id_map.get(layer_id)]
+        if layer_name and layer_name in ctx.layer_names
+    )
+
+
+def _signal_layer_entries_for_legacy_span(
+    ctx: PcbIpc2581Context,
+    start_layer_id: int,
+    end_layer_id: int,
+) -> tuple[tuple[str, int | None], ...]:
+    signal_layer_names = _ordered_signal_layer_names(ctx)
+    signal_layer_count = len(signal_layer_names)
+    if signal_layer_count <= PcbLayer.BOTTOM.value:
+        return _legacy_signal_layer_entries_for_span(ctx, start_layer_id, end_layer_id)
+
+    start_pos = _legacy_signal_position(
+        int(start_layer_id),
+        signal_layer_count=signal_layer_count,
+    )
+    end_pos = _legacy_signal_position(
+        int(end_layer_id),
+        signal_layer_count=signal_layer_count,
+    )
+    if start_pos is None or end_pos is None:
+        return _legacy_signal_layer_entries_for_span(ctx, start_layer_id, end_layer_id)
+
+    span_lo = min(start_pos, end_pos)
+    span_hi = max(start_pos, end_pos)
+    return tuple(
+        (
+            signal_layer_names[position],
+            _legacy_signal_layer_id_for_position(
+                position,
+                signal_layer_count=signal_layer_count,
+            ),
+        )
+        for position in range(span_lo, span_hi + 1)
+    )
 
 
 def _altium_mils_token_to_internal_units(value: object) -> int | None:
@@ -1644,30 +1847,45 @@ def _build_net_layers(ctx: PcbIpc2581Context) -> None:
     nl: dict[str, set[str]] = {}
     nl_nonpad: dict[str, set[str]] = {}
 
-    def _add(mapping: dict[str, set[str]], net_index: Any, layer_id: int) -> None:
+    def _add(
+        mapping: dict[str, set[str]],
+        net_index: Any,
+        primitive: object,
+        layer_value: object | None = None,
+    ) -> None:
         net_name = ctx.resolve_net(net_index)
         if net_name == "No Net":
             return
-        layer_name = ctx._layer_id_map.get(layer_id)
+        layer_name = _layer_name_from_primitive(ctx, primitive, layer_value)
         if layer_name and layer_name in ctx.layer_names:
             mapping.setdefault(net_name, set()).add(layer_name)
 
+    def _add_layer_name(
+        mapping: dict[str, set[str]],
+        net_index: Any,
+        layer_name: str,
+    ) -> None:
+        net_name = ctx.resolve_net(net_index)
+        if net_name == "No Net" or layer_name not in ctx.layer_names:
+            return
+        mapping.setdefault(net_name, set()).add(layer_name)
+
     # Tracks
     for t in pcbdoc.tracks:
-        _add(nl, t.net_index, t.layer)
-        _add(nl_nonpad, t.net_index, t.layer)
+        _add(nl, t.net_index, t)
+        _add(nl_nonpad, t.net_index, t)
     # Arcs
     for a in pcbdoc.arcs:
-        _add(nl, a.net_index, a.layer)
-        _add(nl_nonpad, a.net_index, a.layer)
+        _add(nl, a.net_index, a)
+        _add(nl_nonpad, a.net_index, a)
     # Fills
     for f in pcbdoc.fills:
-        _add(nl, f.net_index, f.layer)
-        _add(nl_nonpad, f.net_index, f.layer)
+        _add(nl, f.net_index, f)
+        _add(nl_nonpad, f.net_index, f)
     # Regions (polygon pour child regions carry the polygon's net)
     for r in pcbdoc.regions:
-        _add(nl, r.net_index, r.layer)
-        _add(nl_nonpad, r.net_index, r.layer)
+        _add(nl, r.net_index, r)
+        _add(nl_nonpad, r.net_index, r)
     # NOTE: Vias are intentionally excluded from net_layers.  They create
     # connections between layers but are not evidence of copper features.
     # Via padstacks use net_layers to decide which inner signal layers to
@@ -1676,15 +1894,14 @@ def _build_net_layers(ctx: PcbIpc2581Context) -> None:
     for pad in pcbdoc.pads:
         if pad.layer == PcbLayer.MULTI_LAYER.value:
             # TH pad: present on Top + all inners + Bottom
-            _add(nl, pad.net_index, PcbLayer.TOP.value)
-            for inner_name in ctx.inner_signal_layers:
-                for lid, name in ctx._layer_id_map.items():
-                    if name == inner_name:
-                        _add(nl, pad.net_index, lid)
-                        break
-            _add(nl, pad.net_index, PcbLayer.BOTTOM.value)
+            for layer_name, _legacy_layer_id in _signal_layer_entries_for_legacy_span(
+                ctx,
+                PcbLayer.TOP.value,
+                PcbLayer.BOTTOM.value,
+            ):
+                _add_layer_name(nl, pad.net_index, layer_name)
         else:
-            _add(nl, pad.net_index, pad.layer)
+            _add(nl, pad.net_index, pad)
     # Polygons (net is int index, layer may be string name)
     for poly in getattr(pcbdoc, "polygons", []):
         poly_net = getattr(poly, "net", None)
@@ -1832,12 +2049,17 @@ def _segment_distance_to_point_mils(
 def _layer_name_from_primitive_layer(
     ctx: PcbIpc2581Context,
     layer_value: Any,
+    primitive: object | None = None,
 ) -> str | None:
     """
     Resolve an Altium primitive layer token/id to an IPC display name.
     """
     if layer_value is None:
         return None
+    if primitive is not None:
+        layer_name = _layer_name_from_primitive(ctx, primitive)
+        if layer_name is not None:
+            return layer_name
     if isinstance(layer_value, int):
         return ctx._layer_id_map.get(int(layer_value))
     resolved = ctx.display_name_for_token(str(layer_value))
@@ -1866,7 +2088,7 @@ def _build_local_nonpad_copper_index(
         net_name = ctx.resolve_net(net_index)
         if net_name == "No Net":
             return
-        layer_name = _layer_name_from_primitive_layer(ctx, layer_value)
+        layer_name = _layer_name_from_primitive_layer(ctx, layer_value, primitive)
         if layer_name not in inner_set:
             return
         index.setdefault((net_name, layer_name), []).append((kind, primitive))
@@ -5138,8 +5360,8 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         hole_sz = via.hole_size
         x_mm = ctx.coord_to_mm(via.x)
         y_mm = ctx.coord_to_mm(via.y)
-        start = getattr(via, "layer_start", PcbLayer.TOP.value)
-        end = getattr(via, "layer_end", PcbLayer.BOTTOM.value)
+        start = int(getattr(via, "layer_start", PcbLayer.TOP.value))
+        end = int(getattr(via, "layer_end", PcbLayer.BOTTOM.value))
         span_lo = min(start, end)
         span_hi = max(start, end)
         from_name = ctx.resolve_layer(span_lo)
@@ -5165,21 +5387,28 @@ def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         ipr = via.is_pad_removed
         has_per_layer = max(dbl) > 0
         emitted_layers: set[str] = set()
-        for lid in range(span_lo, span_hi + 1):
-            layer_name = ctx._layer_id_map.get(lid)
+        for (
+            layer_name,
+            legacy_layer_id,
+        ) in _signal_layer_entries_for_legacy_span(ctx, span_lo, span_hi):
             if (
                 not layer_name
                 or layer_name not in ctx.layer_names
                 or layer_name in emitted_layers
             ):
                 continue
-            dbl_idx = lid - 1
-            if 0 <= dbl_idx < 32 and ipr[dbl_idx]:
+            dbl_idx = int(legacy_layer_id) - 1 if legacy_layer_id is not None else None
+            if dbl_idx is not None and 0 <= dbl_idx < 32 and ipr[dbl_idx]:
                 continue
             emitted_layers.add(layer_name)
             layer_d = (
                 dbl[dbl_idx]
-                if has_per_layer and 0 <= dbl_idx < 32 and dbl[dbl_idx] > 0
+                if (
+                    has_per_layer
+                    and dbl_idx is not None
+                    and 0 <= dbl_idx < 32
+                    and dbl[dbl_idx] > 0
+                )
                 else d
             )
             layer_copper_id = _register_pad_shape_by_dims(ctx, layer_d, layer_d, 1)
@@ -6252,8 +6481,21 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
         return (outline, holes)
 
     def _add_prim(layer_id: int, net_index: Any, ptype: str, prim: Any) -> None:
+        layer_state = _primitive_layer_state(ctx, prim)
+        if _is_component_owned(prim):
+            # Component-owned library primitives are board-layer projections in
+            # IPC export; preserve the placed layer byte instead of an internal
+            # footprint side field. Board-owned primitives keep V7 identity.
+            layer_state = _primitive_layer_state(ctx, prim, layer_id)
+        stored_legacy_layer_id = (
+            int(layer_state.stored_legacy_layer_id)
+            if layer_state is not None
+            and layer_state.stored_legacy_layer_id is not None
+            else int(layer_id)
+        )
         if (
-            layer_id in {PcbLayer.DRILL_DRAWING.value, PcbLayer.DRILL_GUIDE.value}
+            stored_legacy_layer_id
+            in {PcbLayer.DRILL_DRAWING.value, PcbLayer.DRILL_GUIDE.value}
             and ctx.drill_pair_layers
         ):
             # Real primitives on legacy drill drawing/guide layers need to land
@@ -6266,8 +6508,12 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 layer_names = ctx.drill_pair_layers[first_pair]
             layer_name = (
                 layer_names[0]
-                if layer_id == PcbLayer.DRILL_DRAWING.value
+                if stored_legacy_layer_id == PcbLayer.DRILL_DRAWING.value
                 else layer_names[1]
+            )
+        elif layer_state is not None:
+            layer_name = _layer_name_from_state(ctx, layer_state) or ctx.resolve_layer(
+                stored_legacy_layer_id
             )
         else:
             layer_name = ctx.resolve_layer(layer_id)
@@ -6297,7 +6543,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             layer_name = target_layer
         elif (
             net_name == "No Net"
-            and not _is_copper_or_plane_layer(layer_id)
+            and not _is_copper_or_plane_layer(stored_legacy_layer_id)
             and "Board Outline" not in layer_name
             and layer_name in ctx.board_outline_proxy_layers
             and ptype in {"track", "arc"}
@@ -6359,29 +6605,19 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 chars.append(chr(code))
         return "".join(chars)
 
-    def _parse_mechanical_layer_token(token: str) -> int | None:
+    def _parse_mechanical_layer_token(token: str) -> PcbLayerRef | None:
         """
-        Parse layer token like 'MECHANICAL3' to legacy layer ID.
+        Parse layer token like 'MECHANICAL3' to a V7-aware layer ref.
         """
         if not token:
             return None
-        if ctx.resolved_layer_stack is not None:
-            resolved_layer = ctx.resolved_layer_stack.layer_by_token(token)
-            if (
-                resolved_layer is not None
-                and resolved_layer.legacy_id is not None
-                and PcbLayer.MECHANICAL_1.value
-                <= resolved_layer.legacy_id
-                <= PcbLayer.MECHANICAL_16.value
-            ):
-                return int(resolved_layer.legacy_id)
-        m = re.match(r"^\s*MECHANICAL(\d+)\s*$", token, re.IGNORECASE)
-        if not m:
+        try:
+            ref = ctx.layer_registry.coerce(str(token))
+        except PcbLayerResolutionError:
             return None
-        idx = int(m.group(1))
-        if 1 <= idx <= 16:
-            return PcbLayer.MECHANICAL_1.value + idx - 1
-        return None
+        if ref.family != PcbLayerFamily.MECHANICAL:
+            return None
+        return ref
 
     def _parse_dimensions6_primitives() -> list[tuple[str, object]]:
         """
@@ -6394,14 +6630,18 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
 
         datum_bar_extension_iu = int(round(3.5 / _MIL_TO_MM * _UNITS_PER_MIL))
 
+        def _legacy_storage_layer_id(ref: PcbLayerRef) -> int:
+            return ref.legacy_layer_id or PcbLayer.MECHANICAL_16.value
+
         def _append_track(
-            layer_id: int, x1: int, y1: int, x2: int, y2: int, width: int
+            ref: PcbLayerRef, x1: int, y1: int, x2: int, y2: int, width: int
         ) -> None:
             out.append(
                 (
                     "track",
                     SimpleNamespace(
-                        layer=layer_id,
+                        layer=_legacy_storage_layer_id(ref),
+                        v7_layer_id=ref.v7_saved_layer_id or 0,
                         net_index=None,
                         component_index=None,
                         start_x=x1,
@@ -6416,7 +6656,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             )
 
         def _append_text(
-            layer_id: int,
+            ref: PcbLayerRef,
             dimension: Any,
             text_x: int,
             text_y: int,
@@ -6453,7 +6693,8 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 (
                     "text",
                     SimpleNamespace(
-                        layer=layer_id,
+                        layer=_legacy_storage_layer_id(ref),
+                        barcode_layer_v7=ref.v7_saved_layer_id or 0,
                         net_index=None,
                         component_index=None,
                         text_content=dimension.formatted_text(),
@@ -6486,8 +6727,8 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             layer_token = getattr(dimension, "dimension_layer_token", "") or getattr(
                 dimension, "layer_token", ""
             )
-            layer_id = _parse_mechanical_layer_token(layer_token)
-            if layer_id is None:
+            layer_ref = _parse_mechanical_layer_token(layer_token)
+            if layer_ref is None:
                 continue
 
             w = getattr(dimension, "line_width", None) or 100000
@@ -6519,13 +6760,27 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                             min(x for x, _y in ref_points) - datum_bar_extension_iu
                         )
                         for ref_x, ref_y in ref_points:
-                            _append_track(layer_id, guide_start, ref_y, ref_x, ref_y, w)
+                            _append_track(
+                                layer_ref,
+                                guide_start,
+                                ref_y,
+                                ref_x,
+                                ref_y,
+                                w,
+                            )
                     else:
                         guide_start = (
                             min(y for _x, y in ref_points) - datum_bar_extension_iu
                         )
                         for ref_x, ref_y in ref_points:
-                            _append_track(layer_id, ref_x, guide_start, ref_x, ref_y, w)
+                            _append_track(
+                                layer_ref,
+                                ref_x,
+                                guide_start,
+                                ref_x,
+                                ref_y,
+                                w,
+                            )
 
                     if text_points:
                         for point in text_points:
@@ -6537,7 +6792,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                             if text_rotation is None:
                                 text_rotation = guide_angle
                             _append_text(
-                                layer_id,
+                                layer_ref,
                                 dimension,
                                 int(text_x),
                                 int(text_y),
@@ -6563,7 +6818,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                             if text_rotation is None:
                                 text_rotation = guide_angle
                             _append_text(
-                                layer_id,
+                                layer_ref,
                                 dimension,
                                 int(text_x),
                                 int(text_y),
@@ -6597,7 +6852,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 y2_int = int(y2)
             except (TypeError, ValueError):
                 continue
-            _append_track(layer_id, x1_int, y1_int, x2_int, y2_int, w)
+            _append_track(layer_ref, x1_int, y1_int, x2_int, y2_int, w)
 
             text_point = getattr(dimension, "primary_text_point", lambda: None)()
             text_x = (
@@ -6617,7 +6872,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             if text_rotation is None:
                 text_rotation = getattr(dimension, "angle_deg", None) or 0.0
             _append_text(
-                layer_id,
+                layer_ref,
                 dimension,
                 int(text_x),
                 int(text_y),
@@ -6779,6 +7034,7 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
                 _is_component_owned(fill)
                 and fill.layer in _COPPER_LAYER_IDS
                 and _is_no_net(fill.net_index)
+                and not bool(getattr(fill, "user_routed", False))
             ):
                 continue
             _add_prim(fill.layer, fill.net_index, "fill", fill)
@@ -7878,6 +8134,7 @@ def _build_layer_list(ctx: PcbIpc2581Context) -> None:
     ctx.layer_names = list(resolved.layer_names)
     ctx._layer_id_map = dict(resolved.legacy_id_to_name)
     ctx._layer_v9_group = dict(resolved.v9_group_by_name)
+    ctx.layer_registry = _layer_registry_from_resolved_stack(resolved)
 
     def _round_mils_coord(value: float) -> float:
         return round(float(value), 4)

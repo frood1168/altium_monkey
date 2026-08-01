@@ -1634,6 +1634,31 @@ class PcbPrimitive(Primitive):
         )
 
 
+class PcbV7LayerTokenMixin:
+    """
+    Mixin for PCB records that persist their V7 layer as V7_LAYER text.
+
+    Host classes must provide a ``properties`` dict holding native
+    pipe-separated record properties.
+    """
+
+    properties: dict[str, str]
+
+    @property
+    def v7_layer(self) -> str:
+        """Return the native V7_LAYER property text when present."""
+
+        return str(self.properties.get("V7_LAYER", "")).strip()
+
+    @v7_layer.setter
+    def v7_layer(self, value: str) -> None:
+        text = str(value or "").strip()
+        if text:
+            self.properties["V7_LAYER"] = text
+        else:
+            self.properties.pop("V7_LAYER", None)
+
+
 class PcbGraphicalObject(PcbPrimitive):
     """
     Base class for PCB graphical primitives (tracks, arcs, pads, etc.).

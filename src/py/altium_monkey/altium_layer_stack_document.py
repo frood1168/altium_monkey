@@ -23,6 +23,7 @@ from .altium_pcb_stream_helpers import (
     parse_altium_bool_token as _parse_altium_bool_token,
 )
 from .altium_pcb_stream_helpers import parse_altium_int_token as _parse_int_token
+from .altium_pcb_layer_ref import PcbLayerFamily, PcbLayerRef, PcbLayerResolutionError
 from .altium_record_types import PcbLayer
 from .altium_text_helpers import normalized_object_text as _text
 
@@ -163,6 +164,7 @@ _BRANCHSECTIONSTACK_V8_RE = re.compile(
     re.IGNORECASE,
 )
 _AUTHORING_NAMESPACE = uuid.UUID("be2608b0-1b1d-59ec-bcfe-0eb88e9d8684")
+_MAX_NATIVE_SIGNAL_LAYER_COUNT = 128
 
 
 def is_layer_stack_source_entry_key(key: str | None) -> bool:
@@ -3913,8 +3915,18 @@ def _rigid_copper_legacy_layer_id(index: int, layer_count: int) -> int:
 
 
 def _rigid_copper_v7_layer_id(index: int, layer_count: int) -> int:
-    legacy_layer_id = _rigid_copper_legacy_layer_id(index, layer_count)
-    return _v7_layer_id_from_legacy_copper(legacy_layer_id)
+    ref = _rigid_copper_layer_ref(index, layer_count)
+    if ref.v7_saved_layer_id is None:
+        raise ValueError(f"{ref.token} has no saved-layer id")
+    return ref.v7_saved_layer_id
+
+
+def _rigid_copper_layer_ref(index: int, layer_count: int) -> PcbLayerRef:
+    if index == 0:
+        return PcbLayerRef.top()
+    if index == layer_count - 1:
+        return PcbLayerRef.bottom()
+    return PcbLayerRef.mid_layer(index)
 
 
 def _v7_layer_id_from_legacy_copper(legacy_layer_id: int) -> int:
@@ -3962,6 +3974,32 @@ def _native_pcbdoc_writer_problem_reasons(
         if len(region.outline_vertices) < 3:
             reasons.append("native writer requires region outline geometry")
             break
+    reasons.extend(_stackupx_non_guid_id_reasons(document))
+    return tuple(reasons)
+
+
+def _stackupx_non_guid_id_reasons(
+    document: AltiumLayerStackDocument,
+) -> tuple[str, ...]:
+    """
+    Backstop for StackUpX-sourced stacks: Altium's Layer Stack Manager parses
+    board substack and layer ids with ``Guid.TryParse`` and fails to open on
+    anything else, so non-GUID ids must never reach native board data.
+    """
+    if document.source.origin != "stackupx":
+        return ()
+    from .altium_stackupx import _is_guid_text
+
+    reasons: list[str] = []
+    for stack in tuple(document.physical_stacks or ()):
+        if stack.stack_ref and not _is_guid_text(stack.stack_ref):
+            reasons.append(
+                f"native writer requires GUID stack ids: {stack.stack_ref!r}"
+            )
+        for layer in stack.layers:
+            record_id = _text(layer.source_record_id)
+            if record_id and not _is_guid_text(record_id):
+                reasons.append(f"native writer requires GUID layer ids: {record_id!r}")
     return tuple(reasons)
 
 
@@ -3982,8 +4020,8 @@ def _rigid_stack_layer_problem_reasons(stack: AltiumPhysicalStack) -> tuple[str,
     copper_positions = _copper_layer_positions(stack)
     if len(copper_positions) < 2:
         reasons.append("rigid native writer requires at least two copper layers")
-    if len(copper_positions) > 32:
-        reasons.append("rigid native writer supports at most 32 copper layers")
+    if len(copper_positions) > _MAX_NATIVE_SIGNAL_LAYER_COUNT:
+        reasons.append("rigid native writer supports at most 128 signal/copper layers")
     for left, right in zip(copper_positions, copper_positions[1:]):
         if not any(
             layer.family == "dielectric" for layer in stack.layers[left + 1 : right]
@@ -4006,9 +4044,15 @@ def _semantic_rigid_board_data_entries(
     board_data = PcbDocBoardData.default()
     substack_guid = board_data.default_substack_guid()
     substacks = _semantic_substacks(document, substack_guid)
-    stack_entries = _semantic_legacy_layer_entry_strings(
-        document
-    ) + _semantic_native_stack_entry_strings(document, substacks)
+    legacy_entries = (
+        ()
+        if _has_v7_only_signal_layers(document)
+        else _semantic_legacy_layer_entry_strings(document)
+    )
+    stack_entries = legacy_entries + _semantic_native_stack_entry_strings(
+        document,
+        substacks,
+    )
     board_data = _replace_board_data_entry_range(
         board_data,
         _is_native_stack_section_entry_key,
@@ -4066,6 +4110,29 @@ def _semantic_legacy_layer_entry_strings(
     return PcbDocLayerStackBuilder.build_legacy_layer_entry_strings(
         _rigid_stack_template_from_document(document)
     )
+
+
+def _has_v7_only_signal_layers(document: AltiumLayerStackDocument) -> bool:
+    for stack in tuple(document.physical_stacks or ()):
+        for layer in tuple(stack.layers or ()):
+            if str(layer.family or "").strip().lower() != "copper":
+                continue
+            layer_ref = _signal_layer_ref_from_stack_layer(layer)
+            if layer_ref is not None and layer_ref.legacy_layer_id is None:
+                return True
+    return False
+
+
+def _signal_layer_ref_from_stack_layer(
+    layer: AltiumStackLayer,
+) -> PcbLayerRef | None:
+    if layer.layer_id is None:
+        return None
+    try:
+        ref = PcbLayerRef.from_v7_saved_layer_id(int(layer.layer_id))
+    except PcbLayerResolutionError:
+        return None
+    return ref if ref.family == PcbLayerFamily.SIGNAL else None
 
 
 def _is_native_stack_section_entry_key(key: str | None) -> bool:
