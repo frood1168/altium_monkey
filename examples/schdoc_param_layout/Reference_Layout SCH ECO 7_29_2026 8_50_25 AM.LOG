@@ -1,0 +1,1649 @@
+Removed Parameter Field4:Farnell from Part J?
+Removed Parameter Field4:Farnell from Part U?
+Removed Parameter Field5:2358234 from Part J?
+Removed Parameter Field5:2545875 from Part U?
+Removed Parameter Field6:503398-1892 from Part J?
+Removed Parameter Field6:RT9742GGJ5 from Part U?
+Removed Parameter Field7:Molex from Part J?
+Removed Parameter Field7:RichTek from Part U?
+Removed Parameter Field8:UCON00512 from Part J?
+Removed Parameter Field8:USWI00166 from Part U?
+Removed Parameter Manufacturer:Diodes Inc. from Part Q?
+Removed Parameter Manufacturer:Diodes Inc. from Part Q?
+Removed Parameter Manufacturer:Diodes Inc. from Part U103
+Removed Parameter Manufacturer:Diodes Inc. from Part U403
+Removed Parameter Manufacturer:GTIC from Part U201
+Removed Parameter Manufacturer:GTIC from Part U202
+Removed Parameter Manufacturer:HCI from Part X?
+Removed Parameter Manufacturer:HCI from Part X?
+Removed Parameter Manufacturer:Infineon from Part U404
+Removed Parameter Manufacturer:Infineon from Part U410
+Removed Parameter Manufacturer:Lattice from Part U214
+Removed Parameter Manufacturer:Maxim from Part U207
+Removed Parameter Manufacturer:Maxscend from Part U206
+Removed Parameter Manufacturer:Maxscend from Part U400
+Removed Parameter Manufacturer:Maxscend from Part U401
+Removed Parameter Manufacturer:Maxscend from Part U407
+Removed Parameter Manufacturer:Murata from Part D7
+Removed Parameter Manufacturer:Murata from Part FL?
+Removed Parameter Manufacturer:Nexperia from Part U210
+Removed Parameter Manufacturer:Pulse Electronics from Part FL201
+Removed Parameter Manufacturer:RFMD from Part U409
+Removed Parameter Manufacturer:Shenzhen Fuman from Part U208
+Removed Parameter Manufacturer:Shenzhen Fuman from Part U408
+Removed Parameter Manufacturer:Shenzhen Fuman from Part U411
+Removed Parameter Manufacturer:Shenzhen Fuman from Part U?
+Removed Parameter Manufacturer:Shenzhen SCTF Electronics from Part X?
+Removed Parameter Manufacturer:Silicon Laboratories Inc from Part U209
+Removed Parameter Manufacturer:TDK from Part T?
+Removed Parameter Manufacturer:TE Connectivity from Part SW100
+Removed Parameter Manufacturer:TECH PUBLIC from Part U?
+Removed Parameter Manufacturer:Texas Instruments from Part U100
+Removed Parameter Manufacturer:Texas Instruments from Part U405
+Removed Parameter Manufacturer:TTM from Part T?
+Removed Parameter Manufacturer:TTM from Part T?
+Removed Parameter Manufacturer:UMW from Part U102
+Removed Parameter Manufacturer:UMW from Part U211
+Removed Parameter Manufacturer:UMW from Part U213
+Removed Parameter Manufacturer:UMW from Part U300
+Removed Parameter Manufacturer:UMW from Part U303
+Removed Parameter Manufacturer:UMW from Part U304
+Removed Parameter Manufacturer:Xinglight from Part D105
+Removed Parameter Manufacturer:Xinglight from Part D108
+Removed Parameter Manufacturer:Yageo from Part RN205
+Removed Parameter Manufacturer:Yangzhou Yangjie from Part Q?
+Removed Parameter Manufacturer:Yangzhou Yangjie from Part Q?
+Removed Parameter Manufacturer:Yangzhou Yangjie from Part Q?
+Removed Parameter Manufacturer:Yangzhou Yangjie from Part Q?
+Removed Parameter Manufacturer:Yangzhou Yangjie from Part Q?
+Removed Parameter Part Description:9 (8 + 1) Position Card Connector microSD™ Surface Mount, Right Angle Gold from Part J?
+Removed Parameter Part Description:Power Switch/Driver 1:1 N-Channel 1A TSOT-23-5 from Part U?
+Removed Parameter Part Number:8122S-25.000NQ33FTL from Part X?
+Removed Parameter Part Number:B0310J50100AHF from Part T?
+Removed Parameter Part Number:B0310J50100AHF from Part T?
+Removed Parameter Part Number:BC847BS from Part Q?
+Removed Parameter Part Number:BC847BS from Part Q?
+Removed Parameter Part Number:BC857BS from Part Q?
+Removed Parameter Part Number:BC857BS from Part Q?
+Removed Parameter Part Number:DLM0NSB280HY2D from Part FL?
+Removed Parameter Part Number:DMC2400UV-7 from Part Q?
+Removed Parameter Part Number:DMC2400UV-7 from Part Q?
+Removed Parameter Part Number:TFSZ06052460-3310A2X from Part T?
+Removed Parameter Part Number:TPAZ1143-04F from Part U?
+Removed Parameter Part Number:YJL3401A from Part Q?
+Removed Parameter sch_layout_lock:1 from Part X?
+Removed Parameter Sim.Pins:1=K 2=A from Part D108
+Removed Parameter Substitution: from Part T?
+Removed Parameter Substitution:Alpha & Omega AO3401A from Part Q?
+Removed Parameter Substitution:any equivalent from Part RN205
+Removed Parameter Substitution:DMC2400UV* from Part Q?
+Removed Parameter Substitution:DMC2400UV* from Part Q?
+Removed Parameter Substitution:MAX2831ETM+ from Part U207
+Removed Parameter Substitution:RFFC5072* from Part U409
+Removed Parameter Substitution:SI5351C-B-GM* from Part U209
+Removed Parameter Substitution:SN74LVC1G3157DCKR, TI SN74LVC1G3157DCKR from Part U211
+Removed Parameter Substitution:SN74LVC1G3157DCKR, TI SN74LVC1G3157DCKR from Part U213
+Removed Parameter Substitution:TI SN74LVC1G08DCKR from Part U300
+Removed Parameter Substitution:TI SN74LVC1G32DCKR from Part U304
+Removed Parameter Substitution:TI SN74LVC1G86DCKR from Part U303
+Removed Parameter Substitution:TRF37C73* from Part U405
+Change Value of Parameter PartNumber in Part X? Old=32.00MHz New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U210 Old=74HC4051BQ,115 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part X? Old=8121S-J32.000NQ33DTK New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U103 Old=AP22652W6-7 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U403 Old=AP22652W6-7 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part T1 Old=B0310J50100AHF New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part T1 Old=B0310J50100AHF New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part T1 Old=B0310J50100AHF New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part T1 Old=B0310J50100AHF New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U404 Old=BGB741L7ESDE6327XTSA1 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U410 Old=BGB741L7ESDE6327XTSA1 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part FL201 Old=BPF1608LM02R2400A New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U211 Old=ET3157 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U213 Old=ET3157 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U? Old=FM8625H New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U408 Old=FM8625H New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U411 Old=FM8625H New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U208 Old=FM8625H New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part SW100 Old=FSMRA3JH New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U202 Old=GT4227QA New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U201 Old=GT4227QA New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U214 Old=ICE40UP5K-SG48ITR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part D7 Old=LXES15AAA1-153 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U207 Old=MAX2831ETM+T New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U206 Old=MXD8546F New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U407 Old=MXD8546F New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U401 Old=MXD8638C New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U400 Old=MXD8638C New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U500 Old=PCA9557 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U? Old=PE4259 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U409 Old=RFFC5072TR7 New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U209 Old=SI5351C-B-GM New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U300 Old=SN74LVC1G08DCKR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U304 Old=SN74LVC1G32DCKR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U303 Old=SN74LVC1G86DCKR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U501 Old=TC7MBL3245CFT New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U100 Old=TPS62410DRCR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U405 Old=TRF37C73IDSGR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part U102 Old=XC6206P252MR New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part D105 Old=XL-3210SURUBC New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part D108 Old=XL-3210UOC New=GCM1555C1H100JA16D
+Change Value of Parameter PartNumber in Part RN205 Old=YC124-JR-07100RL New=GCM1555C1H100JA16D
+Change Value of Parameter Value in Part Q? Old=2NPN New=10pF
+Change Value of Parameter Value in Part Q? Old=2NPN New=10pF
+Change Value of Parameter Value in Part Q? Old=2PNP New=10pF
+Change Value of Parameter Value in Part Q? Old=2PNP New=10pF
+Change Value of Parameter Value in Part U210 Old=74HC4051 New=10pF
+Change Value of Parameter Value in Part U300 Old=74LVC1G08 New=10pF
+Change Value of Parameter Value in Part U304 Old=74LVC1G32 New=10pF
+Change Value of Parameter Value in Part U303 Old=74LVC1G86 New=10pF
+Change Value of Parameter Value in Part U211 Old=74LVC1G3157 New=10pF
+Change Value of Parameter Value in Part U213 Old=74LVC1G3157 New=10pF
+Change Value of Parameter Value in Part RN205 Old=100 New=10pF
+Change Value of Parameter Value in Part J? Old=503398-1892 New=10pF
+Change Value of Parameter Value in Part U403 Old=AP22652 New=10pF
+Change Value of Parameter Value in Part U103 Old=AP22652 New=10pF
+Change Value of Parameter Value in Part U404 Old=BGB741L7ESD New=10pF
+Change Value of Parameter Value in Part U410 Old=BGB741L7ESD New=10pF
+Change Value of Parameter Value in Part FL201 Old=BPF New=10pF
+Change Value of Parameter Value in Part FL? Old=CommonModeChoke New=10pF
+Change Value of Parameter Value in Part U411 Old=FM8625H New=10pF
+Change Value of Parameter Value in Part U408 Old=FM8625H New=10pF
+Change Value of Parameter Value in Part U? Old=FM8625H New=10pF
+Change Value of Parameter Value in Part U208 Old=FM8625H New=10pF
+Change Value of Parameter Value in Part U202 Old=GT4227 New=10pF
+Change Value of Parameter Value in Part U201 Old=GT4227 New=10pF
+Change Value of Parameter Value in Part U214 Old=ICE40UP5K New=10pF
+Change Value of Parameter Value in Part T? Old=IF_BALUN New=10pF
+Change Value of Parameter Value in Part U102 Old=LDO_2V5 New=10pF
+Change Value of Parameter Value in Part D105 Old=LED New=10pF
+Change Value of Parameter Value in Part D108 Old=LED New=10pF
+Change Value of Parameter Value in Part U207 Old=MAX2831 New=10pF
+Change Value of Parameter Value in Part X? Old=MCU_XTAL New=10pF
+Change Value of Parameter Value in Part H? Old=MountingHole_Pad New=10pF
+Change Value of Parameter Value in Part U206 Old=MXD8546F New=10pF
+Change Value of Parameter Value in Part U407 Old=MXD8546F New=10pF
+Change Value of Parameter Value in Part U401 Old=MXD8638C New=10pF
+Change Value of Parameter Value in Part U400 Old=MXD8638C New=10pF
+Change Value of Parameter Value in Part Q? Old=NMOS/PMOS New=10pF
+Change Value of Parameter Value in Part Q? Old=NMOS/PMOS New=10pF
+Change Value of Parameter Value in Part Q? Old=PMOS New=10pF
+Change Value of Parameter Value in Part T? Old=RF_BALUN New=10pF
+Change Value of Parameter Value in Part T? Old=RF_BALUN New=10pF
+Change Value of Parameter Value in Part U409 Old=RFFC5072 New=10pF
+Change Value of Parameter Value in Part U? Old=RT9742GGJ5 New=10pF
+Change Value of Parameter Value in Part U209 Old=SI5351C New=10pF
+Change Value of Parameter Value in Part SW100 Old=SWITCH New=10pF
+Change Value of Parameter Value in Part X? Old=TCXO New=10pF
+Change Value of Parameter Value in Part X? Old=TCXO New=10pF
+Change Value of Parameter Value in Part U100 Old=TPS62410 New=10pF
+Change Value of Parameter Value in Part U405 Old=TRF37C73 New=10pF
+Change Value of Parameter Value in Part U? Old=TVS_USB New=10pF
+Added Parameter Capacitance=10pF to Part D7
+Added Parameter Capacitance=10pF to Part D105
+Added Parameter Capacitance=10pF to Part D108
+Added Parameter Capacitance=10pF to Part FL201
+Added Parameter Capacitance=10pF to Part FL?
+Added Parameter Capacitance=10pF to Part H?
+Added Parameter Capacitance=10pF to Part J?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part Q?
+Added Parameter Capacitance=10pF to Part RN205
+Added Parameter Capacitance=10pF to Part SW100
+Added Parameter Capacitance=10pF to Part T1
+Added Parameter Capacitance=10pF to Part T1
+Added Parameter Capacitance=10pF to Part T1
+Added Parameter Capacitance=10pF to Part T1
+Added Parameter Capacitance=10pF to Part T?
+Added Parameter Capacitance=10pF to Part T?
+Added Parameter Capacitance=10pF to Part T?
+Added Parameter Capacitance=10pF to Part U100
+Added Parameter Capacitance=10pF to Part U102
+Added Parameter Capacitance=10pF to Part U103
+Added Parameter Capacitance=10pF to Part U201
+Added Parameter Capacitance=10pF to Part U202
+Added Parameter Capacitance=10pF to Part U206
+Added Parameter Capacitance=10pF to Part U207
+Added Parameter Capacitance=10pF to Part U208
+Added Parameter Capacitance=10pF to Part U209
+Added Parameter Capacitance=10pF to Part U210
+Added Parameter Capacitance=10pF to Part U211
+Added Parameter Capacitance=10pF to Part U213
+Added Parameter Capacitance=10pF to Part U214
+Added Parameter Capacitance=10pF to Part U300
+Added Parameter Capacitance=10pF to Part U303
+Added Parameter Capacitance=10pF to Part U304
+Added Parameter Capacitance=10pF to Part U400
+Added Parameter Capacitance=10pF to Part U401
+Added Parameter Capacitance=10pF to Part U403
+Added Parameter Capacitance=10pF to Part U404
+Added Parameter Capacitance=10pF to Part U405
+Added Parameter Capacitance=10pF to Part U407
+Added Parameter Capacitance=10pF to Part U408
+Added Parameter Capacitance=10pF to Part U409
+Added Parameter Capacitance=10pF to Part U410
+Added Parameter Capacitance=10pF to Part U411
+Added Parameter Capacitance=10pF to Part U500
+Added Parameter Capacitance=10pF to Part U501
+Added Parameter Capacitance=10pF to Part U?
+Added Parameter Capacitance=10pF to Part U?
+Added Parameter Capacitance=10pF to Part U?
+Added Parameter Capacitance=10pF to Part U?
+Added Parameter Capacitance=10pF to Part U?
+Added Parameter Capacitance=10pF to Part U?
+Added Parameter Capacitance=10pF to Part X?
+Added Parameter Capacitance=10pF to Part X?
+Added Parameter Capacitance=10pF to Part X?
+Added Parameter Case Code (Imperial)=0402 to Part D7
+Added Parameter Case Code (Imperial)=0402 to Part D105
+Added Parameter Case Code (Imperial)=0402 to Part D108
+Added Parameter Case Code (Imperial)=0402 to Part FL201
+Added Parameter Case Code (Imperial)=0402 to Part FL?
+Added Parameter Case Code (Imperial)=0402 to Part H?
+Added Parameter Case Code (Imperial)=0402 to Part J?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part Q?
+Added Parameter Case Code (Imperial)=0402 to Part RN205
+Added Parameter Case Code (Imperial)=0402 to Part SW100
+Added Parameter Case Code (Imperial)=0402 to Part T1
+Added Parameter Case Code (Imperial)=0402 to Part T1
+Added Parameter Case Code (Imperial)=0402 to Part T1
+Added Parameter Case Code (Imperial)=0402 to Part T1
+Added Parameter Case Code (Imperial)=0402 to Part T?
+Added Parameter Case Code (Imperial)=0402 to Part T?
+Added Parameter Case Code (Imperial)=0402 to Part T?
+Added Parameter Case Code (Imperial)=0402 to Part U100
+Added Parameter Case Code (Imperial)=0402 to Part U102
+Added Parameter Case Code (Imperial)=0402 to Part U103
+Added Parameter Case Code (Imperial)=0402 to Part U201
+Added Parameter Case Code (Imperial)=0402 to Part U202
+Added Parameter Case Code (Imperial)=0402 to Part U206
+Added Parameter Case Code (Imperial)=0402 to Part U207
+Added Parameter Case Code (Imperial)=0402 to Part U208
+Added Parameter Case Code (Imperial)=0402 to Part U209
+Added Parameter Case Code (Imperial)=0402 to Part U210
+Added Parameter Case Code (Imperial)=0402 to Part U211
+Added Parameter Case Code (Imperial)=0402 to Part U213
+Added Parameter Case Code (Imperial)=0402 to Part U214
+Added Parameter Case Code (Imperial)=0402 to Part U300
+Added Parameter Case Code (Imperial)=0402 to Part U303
+Added Parameter Case Code (Imperial)=0402 to Part U304
+Added Parameter Case Code (Imperial)=0402 to Part U400
+Added Parameter Case Code (Imperial)=0402 to Part U401
+Added Parameter Case Code (Imperial)=0402 to Part U403
+Added Parameter Case Code (Imperial)=0402 to Part U404
+Added Parameter Case Code (Imperial)=0402 to Part U405
+Added Parameter Case Code (Imperial)=0402 to Part U407
+Added Parameter Case Code (Imperial)=0402 to Part U408
+Added Parameter Case Code (Imperial)=0402 to Part U409
+Added Parameter Case Code (Imperial)=0402 to Part U410
+Added Parameter Case Code (Imperial)=0402 to Part U411
+Added Parameter Case Code (Imperial)=0402 to Part U500
+Added Parameter Case Code (Imperial)=0402 to Part U501
+Added Parameter Case Code (Imperial)=0402 to Part U?
+Added Parameter Case Code (Imperial)=0402 to Part U?
+Added Parameter Case Code (Imperial)=0402 to Part U?
+Added Parameter Case Code (Imperial)=0402 to Part U?
+Added Parameter Case Code (Imperial)=0402 to Part U?
+Added Parameter Case Code (Imperial)=0402 to Part U?
+Added Parameter Case Code (Imperial)=0402 to Part X?
+Added Parameter Case Code (Imperial)=0402 to Part X?
+Added Parameter Case Code (Imperial)=0402 to Part X?
+Added Parameter Case Code (Metric)=1005 to Part D7
+Added Parameter Case Code (Metric)=1005 to Part D105
+Added Parameter Case Code (Metric)=1005 to Part D108
+Added Parameter Case Code (Metric)=1005 to Part FL201
+Added Parameter Case Code (Metric)=1005 to Part FL?
+Added Parameter Case Code (Metric)=1005 to Part H?
+Added Parameter Case Code (Metric)=1005 to Part J?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part Q?
+Added Parameter Case Code (Metric)=1005 to Part RN205
+Added Parameter Case Code (Metric)=1005 to Part SW100
+Added Parameter Case Code (Metric)=1005 to Part T1
+Added Parameter Case Code (Metric)=1005 to Part T1
+Added Parameter Case Code (Metric)=1005 to Part T1
+Added Parameter Case Code (Metric)=1005 to Part T1
+Added Parameter Case Code (Metric)=1005 to Part T?
+Added Parameter Case Code (Metric)=1005 to Part T?
+Added Parameter Case Code (Metric)=1005 to Part T?
+Added Parameter Case Code (Metric)=1005 to Part U100
+Added Parameter Case Code (Metric)=1005 to Part U102
+Added Parameter Case Code (Metric)=1005 to Part U103
+Added Parameter Case Code (Metric)=1005 to Part U201
+Added Parameter Case Code (Metric)=1005 to Part U202
+Added Parameter Case Code (Metric)=1005 to Part U206
+Added Parameter Case Code (Metric)=1005 to Part U207
+Added Parameter Case Code (Metric)=1005 to Part U208
+Added Parameter Case Code (Metric)=1005 to Part U209
+Added Parameter Case Code (Metric)=1005 to Part U210
+Added Parameter Case Code (Metric)=1005 to Part U211
+Added Parameter Case Code (Metric)=1005 to Part U213
+Added Parameter Case Code (Metric)=1005 to Part U214
+Added Parameter Case Code (Metric)=1005 to Part U300
+Added Parameter Case Code (Metric)=1005 to Part U303
+Added Parameter Case Code (Metric)=1005 to Part U304
+Added Parameter Case Code (Metric)=1005 to Part U400
+Added Parameter Case Code (Metric)=1005 to Part U401
+Added Parameter Case Code (Metric)=1005 to Part U403
+Added Parameter Case Code (Metric)=1005 to Part U404
+Added Parameter Case Code (Metric)=1005 to Part U405
+Added Parameter Case Code (Metric)=1005 to Part U407
+Added Parameter Case Code (Metric)=1005 to Part U408
+Added Parameter Case Code (Metric)=1005 to Part U409
+Added Parameter Case Code (Metric)=1005 to Part U410
+Added Parameter Case Code (Metric)=1005 to Part U411
+Added Parameter Case Code (Metric)=1005 to Part U500
+Added Parameter Case Code (Metric)=1005 to Part U501
+Added Parameter Case Code (Metric)=1005 to Part U?
+Added Parameter Case Code (Metric)=1005 to Part U?
+Added Parameter Case Code (Metric)=1005 to Part U?
+Added Parameter Case Code (Metric)=1005 to Part U?
+Added Parameter Case Code (Metric)=1005 to Part U?
+Added Parameter Case Code (Metric)=1005 to Part U?
+Added Parameter Case Code (Metric)=1005 to Part X?
+Added Parameter Case Code (Metric)=1005 to Part X?
+Added Parameter Case Code (Metric)=1005 to Part X?
+Added Parameter Case/Package=0402 to Part D7
+Added Parameter Case/Package=0402 to Part D105
+Added Parameter Case/Package=0402 to Part D108
+Added Parameter Case/Package=0402 to Part FL201
+Added Parameter Case/Package=0402 to Part FL?
+Added Parameter Case/Package=0402 to Part H?
+Added Parameter Case/Package=0402 to Part J?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part Q?
+Added Parameter Case/Package=0402 to Part RN205
+Added Parameter Case/Package=0402 to Part SW100
+Added Parameter Case/Package=0402 to Part T1
+Added Parameter Case/Package=0402 to Part T1
+Added Parameter Case/Package=0402 to Part T1
+Added Parameter Case/Package=0402 to Part T1
+Added Parameter Case/Package=0402 to Part T?
+Added Parameter Case/Package=0402 to Part T?
+Added Parameter Case/Package=0402 to Part T?
+Added Parameter Case/Package=0402 to Part U100
+Added Parameter Case/Package=0402 to Part U102
+Added Parameter Case/Package=0402 to Part U103
+Added Parameter Case/Package=0402 to Part U201
+Added Parameter Case/Package=0402 to Part U202
+Added Parameter Case/Package=0402 to Part U206
+Added Parameter Case/Package=0402 to Part U207
+Added Parameter Case/Package=0402 to Part U208
+Added Parameter Case/Package=0402 to Part U209
+Added Parameter Case/Package=0402 to Part U210
+Added Parameter Case/Package=0402 to Part U211
+Added Parameter Case/Package=0402 to Part U213
+Added Parameter Case/Package=0402 to Part U214
+Added Parameter Case/Package=0402 to Part U300
+Added Parameter Case/Package=0402 to Part U303
+Added Parameter Case/Package=0402 to Part U304
+Added Parameter Case/Package=0402 to Part U400
+Added Parameter Case/Package=0402 to Part U401
+Added Parameter Case/Package=0402 to Part U403
+Added Parameter Case/Package=0402 to Part U404
+Added Parameter Case/Package=0402 to Part U405
+Added Parameter Case/Package=0402 to Part U407
+Added Parameter Case/Package=0402 to Part U408
+Added Parameter Case/Package=0402 to Part U409
+Added Parameter Case/Package=0402 to Part U410
+Added Parameter Case/Package=0402 to Part U411
+Added Parameter Case/Package=0402 to Part U500
+Added Parameter Case/Package=0402 to Part U501
+Added Parameter Case/Package=0402 to Part U?
+Added Parameter Case/Package=0402 to Part U?
+Added Parameter Case/Package=0402 to Part U?
+Added Parameter Case/Package=0402 to Part U?
+Added Parameter Case/Package=0402 to Part U?
+Added Parameter Case/Package=0402 to Part U?
+Added Parameter Case/Package=0402 to Part X?
+Added Parameter Case/Package=0402 to Part X?
+Added Parameter Case/Package=0402 to Part X?
+Added Parameter Dielectric Material=Ceramic to Part D7
+Added Parameter Dielectric Material=Ceramic to Part D105
+Added Parameter Dielectric Material=Ceramic to Part D108
+Added Parameter Dielectric Material=Ceramic to Part FL201
+Added Parameter Dielectric Material=Ceramic to Part FL?
+Added Parameter Dielectric Material=Ceramic to Part H?
+Added Parameter Dielectric Material=Ceramic to Part J?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part Q?
+Added Parameter Dielectric Material=Ceramic to Part RN205
+Added Parameter Dielectric Material=Ceramic to Part SW100
+Added Parameter Dielectric Material=Ceramic to Part T1
+Added Parameter Dielectric Material=Ceramic to Part T1
+Added Parameter Dielectric Material=Ceramic to Part T1
+Added Parameter Dielectric Material=Ceramic to Part T1
+Added Parameter Dielectric Material=Ceramic to Part T?
+Added Parameter Dielectric Material=Ceramic to Part T?
+Added Parameter Dielectric Material=Ceramic to Part T?
+Added Parameter Dielectric Material=Ceramic to Part U100
+Added Parameter Dielectric Material=Ceramic to Part U102
+Added Parameter Dielectric Material=Ceramic to Part U103
+Added Parameter Dielectric Material=Ceramic to Part U201
+Added Parameter Dielectric Material=Ceramic to Part U202
+Added Parameter Dielectric Material=Ceramic to Part U206
+Added Parameter Dielectric Material=Ceramic to Part U207
+Added Parameter Dielectric Material=Ceramic to Part U208
+Added Parameter Dielectric Material=Ceramic to Part U209
+Added Parameter Dielectric Material=Ceramic to Part U210
+Added Parameter Dielectric Material=Ceramic to Part U211
+Added Parameter Dielectric Material=Ceramic to Part U213
+Added Parameter Dielectric Material=Ceramic to Part U214
+Added Parameter Dielectric Material=Ceramic to Part U300
+Added Parameter Dielectric Material=Ceramic to Part U303
+Added Parameter Dielectric Material=Ceramic to Part U304
+Added Parameter Dielectric Material=Ceramic to Part U400
+Added Parameter Dielectric Material=Ceramic to Part U401
+Added Parameter Dielectric Material=Ceramic to Part U403
+Added Parameter Dielectric Material=Ceramic to Part U404
+Added Parameter Dielectric Material=Ceramic to Part U405
+Added Parameter Dielectric Material=Ceramic to Part U407
+Added Parameter Dielectric Material=Ceramic to Part U408
+Added Parameter Dielectric Material=Ceramic to Part U409
+Added Parameter Dielectric Material=Ceramic to Part U410
+Added Parameter Dielectric Material=Ceramic to Part U411
+Added Parameter Dielectric Material=Ceramic to Part U500
+Added Parameter Dielectric Material=Ceramic to Part U501
+Added Parameter Dielectric Material=Ceramic to Part U?
+Added Parameter Dielectric Material=Ceramic to Part U?
+Added Parameter Dielectric Material=Ceramic to Part U?
+Added Parameter Dielectric Material=Ceramic to Part U?
+Added Parameter Dielectric Material=Ceramic to Part U?
+Added Parameter Dielectric Material=Ceramic to Part U?
+Added Parameter Dielectric Material=Ceramic to Part X?
+Added Parameter Dielectric Material=Ceramic to Part X?
+Added Parameter Dielectric Material=Ceramic to Part X?
+Added Parameter Dielectric=C0G to Part D7
+Added Parameter Dielectric=C0G to Part D105
+Added Parameter Dielectric=C0G to Part D108
+Added Parameter Dielectric=C0G to Part FL201
+Added Parameter Dielectric=C0G to Part FL?
+Added Parameter Dielectric=C0G to Part H?
+Added Parameter Dielectric=C0G to Part J?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part Q?
+Added Parameter Dielectric=C0G to Part RN205
+Added Parameter Dielectric=C0G to Part SW100
+Added Parameter Dielectric=C0G to Part T1
+Added Parameter Dielectric=C0G to Part T1
+Added Parameter Dielectric=C0G to Part T1
+Added Parameter Dielectric=C0G to Part T1
+Added Parameter Dielectric=C0G to Part T?
+Added Parameter Dielectric=C0G to Part T?
+Added Parameter Dielectric=C0G to Part T?
+Added Parameter Dielectric=C0G to Part U100
+Added Parameter Dielectric=C0G to Part U102
+Added Parameter Dielectric=C0G to Part U103
+Added Parameter Dielectric=C0G to Part U201
+Added Parameter Dielectric=C0G to Part U202
+Added Parameter Dielectric=C0G to Part U206
+Added Parameter Dielectric=C0G to Part U207
+Added Parameter Dielectric=C0G to Part U208
+Added Parameter Dielectric=C0G to Part U209
+Added Parameter Dielectric=C0G to Part U210
+Added Parameter Dielectric=C0G to Part U211
+Added Parameter Dielectric=C0G to Part U213
+Added Parameter Dielectric=C0G to Part U214
+Added Parameter Dielectric=C0G to Part U300
+Added Parameter Dielectric=C0G to Part U303
+Added Parameter Dielectric=C0G to Part U304
+Added Parameter Dielectric=C0G to Part U400
+Added Parameter Dielectric=C0G to Part U401
+Added Parameter Dielectric=C0G to Part U403
+Added Parameter Dielectric=C0G to Part U404
+Added Parameter Dielectric=C0G to Part U405
+Added Parameter Dielectric=C0G to Part U407
+Added Parameter Dielectric=C0G to Part U408
+Added Parameter Dielectric=C0G to Part U409
+Added Parameter Dielectric=C0G to Part U410
+Added Parameter Dielectric=C0G to Part U411
+Added Parameter Dielectric=C0G to Part U500
+Added Parameter Dielectric=C0G to Part U501
+Added Parameter Dielectric=C0G to Part U?
+Added Parameter Dielectric=C0G to Part U?
+Added Parameter Dielectric=C0G to Part U?
+Added Parameter Dielectric=C0G to Part U?
+Added Parameter Dielectric=C0G to Part U?
+Added Parameter Dielectric=C0G to Part U?
+Added Parameter Dielectric=C0G to Part X?
+Added Parameter Dielectric=C0G to Part X?
+Added Parameter Dielectric=C0G to Part X?
+Added Parameter Height=500µm to Part D7
+Added Parameter Height=500µm to Part D105
+Added Parameter Height=500µm to Part D108
+Added Parameter Height=500µm to Part FL201
+Added Parameter Height=500µm to Part FL?
+Added Parameter Height=500µm to Part H?
+Added Parameter Height=500µm to Part J?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part Q?
+Added Parameter Height=500µm to Part RN205
+Added Parameter Height=500µm to Part SW100
+Added Parameter Height=500µm to Part T1
+Added Parameter Height=500µm to Part T1
+Added Parameter Height=500µm to Part T1
+Added Parameter Height=500µm to Part T1
+Added Parameter Height=500µm to Part T?
+Added Parameter Height=500µm to Part T?
+Added Parameter Height=500µm to Part T?
+Added Parameter Height=500µm to Part U100
+Added Parameter Height=500µm to Part U102
+Added Parameter Height=500µm to Part U103
+Added Parameter Height=500µm to Part U201
+Added Parameter Height=500µm to Part U202
+Added Parameter Height=500µm to Part U206
+Added Parameter Height=500µm to Part U207
+Added Parameter Height=500µm to Part U208
+Added Parameter Height=500µm to Part U209
+Added Parameter Height=500µm to Part U210
+Added Parameter Height=500µm to Part U211
+Added Parameter Height=500µm to Part U213
+Added Parameter Height=500µm to Part U214
+Added Parameter Height=500µm to Part U300
+Added Parameter Height=500µm to Part U303
+Added Parameter Height=500µm to Part U304
+Added Parameter Height=500µm to Part U400
+Added Parameter Height=500µm to Part U401
+Added Parameter Height=500µm to Part U403
+Added Parameter Height=500µm to Part U404
+Added Parameter Height=500µm to Part U405
+Added Parameter Height=500µm to Part U407
+Added Parameter Height=500µm to Part U408
+Added Parameter Height=500µm to Part U409
+Added Parameter Height=500µm to Part U410
+Added Parameter Height=500µm to Part U411
+Added Parameter Height=500µm to Part U500
+Added Parameter Height=500µm to Part U501
+Added Parameter Height=500µm to Part U?
+Added Parameter Height=500µm to Part U?
+Added Parameter Height=500µm to Part U?
+Added Parameter Height=500µm to Part U?
+Added Parameter Height=500µm to Part U?
+Added Parameter Height=500µm to Part U?
+Added Parameter Height=500µm to Part X?
+Added Parameter Height=500µm to Part X?
+Added Parameter Height=500µm to Part X?
+Added Parameter Length=1mm to Part D7
+Added Parameter Length=1mm to Part D105
+Added Parameter Length=1mm to Part D108
+Added Parameter Length=1mm to Part FL201
+Added Parameter Length=1mm to Part FL?
+Added Parameter Length=1mm to Part H?
+Added Parameter Length=1mm to Part J?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part Q?
+Added Parameter Length=1mm to Part RN205
+Added Parameter Length=1mm to Part SW100
+Added Parameter Length=1mm to Part T1
+Added Parameter Length=1mm to Part T1
+Added Parameter Length=1mm to Part T1
+Added Parameter Length=1mm to Part T1
+Added Parameter Length=1mm to Part T?
+Added Parameter Length=1mm to Part T?
+Added Parameter Length=1mm to Part T?
+Added Parameter Length=1mm to Part U100
+Added Parameter Length=1mm to Part U102
+Added Parameter Length=1mm to Part U103
+Added Parameter Length=1mm to Part U201
+Added Parameter Length=1mm to Part U202
+Added Parameter Length=1mm to Part U206
+Added Parameter Length=1mm to Part U207
+Added Parameter Length=1mm to Part U208
+Added Parameter Length=1mm to Part U209
+Added Parameter Length=1mm to Part U210
+Added Parameter Length=1mm to Part U211
+Added Parameter Length=1mm to Part U213
+Added Parameter Length=1mm to Part U214
+Added Parameter Length=1mm to Part U300
+Added Parameter Length=1mm to Part U303
+Added Parameter Length=1mm to Part U304
+Added Parameter Length=1mm to Part U400
+Added Parameter Length=1mm to Part U401
+Added Parameter Length=1mm to Part U403
+Added Parameter Length=1mm to Part U404
+Added Parameter Length=1mm to Part U405
+Added Parameter Length=1mm to Part U407
+Added Parameter Length=1mm to Part U408
+Added Parameter Length=1mm to Part U409
+Added Parameter Length=1mm to Part U410
+Added Parameter Length=1mm to Part U411
+Added Parameter Length=1mm to Part U500
+Added Parameter Length=1mm to Part U501
+Added Parameter Length=1mm to Part U?
+Added Parameter Length=1mm to Part U?
+Added Parameter Length=1mm to Part U?
+Added Parameter Length=1mm to Part U?
+Added Parameter Length=1mm to Part U?
+Added Parameter Length=1mm to Part U?
+Added Parameter Length=1mm to Part X?
+Added Parameter Length=1mm to Part X?
+Added Parameter Length=1mm to Part X?
+Added Parameter Material=Ceramic to Part D7
+Added Parameter Material=Ceramic to Part D105
+Added Parameter Material=Ceramic to Part D108
+Added Parameter Material=Ceramic to Part FL201
+Added Parameter Material=Ceramic to Part FL?
+Added Parameter Material=Ceramic to Part H?
+Added Parameter Material=Ceramic to Part J?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part Q?
+Added Parameter Material=Ceramic to Part RN205
+Added Parameter Material=Ceramic to Part SW100
+Added Parameter Material=Ceramic to Part T1
+Added Parameter Material=Ceramic to Part T1
+Added Parameter Material=Ceramic to Part T1
+Added Parameter Material=Ceramic to Part T1
+Added Parameter Material=Ceramic to Part T?
+Added Parameter Material=Ceramic to Part T?
+Added Parameter Material=Ceramic to Part T?
+Added Parameter Material=Ceramic to Part U100
+Added Parameter Material=Ceramic to Part U102
+Added Parameter Material=Ceramic to Part U103
+Added Parameter Material=Ceramic to Part U201
+Added Parameter Material=Ceramic to Part U202
+Added Parameter Material=Ceramic to Part U206
+Added Parameter Material=Ceramic to Part U207
+Added Parameter Material=Ceramic to Part U208
+Added Parameter Material=Ceramic to Part U209
+Added Parameter Material=Ceramic to Part U210
+Added Parameter Material=Ceramic to Part U211
+Added Parameter Material=Ceramic to Part U213
+Added Parameter Material=Ceramic to Part U214
+Added Parameter Material=Ceramic to Part U300
+Added Parameter Material=Ceramic to Part U303
+Added Parameter Material=Ceramic to Part U304
+Added Parameter Material=Ceramic to Part U400
+Added Parameter Material=Ceramic to Part U401
+Added Parameter Material=Ceramic to Part U403
+Added Parameter Material=Ceramic to Part U404
+Added Parameter Material=Ceramic to Part U405
+Added Parameter Material=Ceramic to Part U407
+Added Parameter Material=Ceramic to Part U408
+Added Parameter Material=Ceramic to Part U409
+Added Parameter Material=Ceramic to Part U410
+Added Parameter Material=Ceramic to Part U411
+Added Parameter Material=Ceramic to Part U500
+Added Parameter Material=Ceramic to Part U501
+Added Parameter Material=Ceramic to Part U?
+Added Parameter Material=Ceramic to Part U?
+Added Parameter Material=Ceramic to Part U?
+Added Parameter Material=Ceramic to Part U?
+Added Parameter Material=Ceramic to Part U?
+Added Parameter Material=Ceramic to Part U?
+Added Parameter Material=Ceramic to Part X?
+Added Parameter Material=Ceramic to Part X?
+Added Parameter Material=Ceramic to Part X?
+Added Parameter Max Operating Temperature=125°C to Part D7
+Added Parameter Max Operating Temperature=125°C to Part D105
+Added Parameter Max Operating Temperature=125°C to Part D108
+Added Parameter Max Operating Temperature=125°C to Part FL201
+Added Parameter Max Operating Temperature=125°C to Part FL?
+Added Parameter Max Operating Temperature=125°C to Part H?
+Added Parameter Max Operating Temperature=125°C to Part J?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part Q?
+Added Parameter Max Operating Temperature=125°C to Part RN205
+Added Parameter Max Operating Temperature=125°C to Part SW100
+Added Parameter Max Operating Temperature=125°C to Part T1
+Added Parameter Max Operating Temperature=125°C to Part T1
+Added Parameter Max Operating Temperature=125°C to Part T1
+Added Parameter Max Operating Temperature=125°C to Part T1
+Added Parameter Max Operating Temperature=125°C to Part T?
+Added Parameter Max Operating Temperature=125°C to Part T?
+Added Parameter Max Operating Temperature=125°C to Part T?
+Added Parameter Max Operating Temperature=125°C to Part U100
+Added Parameter Max Operating Temperature=125°C to Part U102
+Added Parameter Max Operating Temperature=125°C to Part U103
+Added Parameter Max Operating Temperature=125°C to Part U201
+Added Parameter Max Operating Temperature=125°C to Part U202
+Added Parameter Max Operating Temperature=125°C to Part U206
+Added Parameter Max Operating Temperature=125°C to Part U207
+Added Parameter Max Operating Temperature=125°C to Part U208
+Added Parameter Max Operating Temperature=125°C to Part U209
+Added Parameter Max Operating Temperature=125°C to Part U210
+Added Parameter Max Operating Temperature=125°C to Part U211
+Added Parameter Max Operating Temperature=125°C to Part U213
+Added Parameter Max Operating Temperature=125°C to Part U214
+Added Parameter Max Operating Temperature=125°C to Part U300
+Added Parameter Max Operating Temperature=125°C to Part U303
+Added Parameter Max Operating Temperature=125°C to Part U304
+Added Parameter Max Operating Temperature=125°C to Part U400
+Added Parameter Max Operating Temperature=125°C to Part U401
+Added Parameter Max Operating Temperature=125°C to Part U403
+Added Parameter Max Operating Temperature=125°C to Part U404
+Added Parameter Max Operating Temperature=125°C to Part U405
+Added Parameter Max Operating Temperature=125°C to Part U407
+Added Parameter Max Operating Temperature=125°C to Part U408
+Added Parameter Max Operating Temperature=125°C to Part U409
+Added Parameter Max Operating Temperature=125°C to Part U410
+Added Parameter Max Operating Temperature=125°C to Part U411
+Added Parameter Max Operating Temperature=125°C to Part U500
+Added Parameter Max Operating Temperature=125°C to Part U501
+Added Parameter Max Operating Temperature=125°C to Part U?
+Added Parameter Max Operating Temperature=125°C to Part U?
+Added Parameter Max Operating Temperature=125°C to Part U?
+Added Parameter Max Operating Temperature=125°C to Part U?
+Added Parameter Max Operating Temperature=125°C to Part U?
+Added Parameter Max Operating Temperature=125°C to Part U?
+Added Parameter Max Operating Temperature=125°C to Part X?
+Added Parameter Max Operating Temperature=125°C to Part X?
+Added Parameter Max Operating Temperature=125°C to Part X?
+Added Parameter Min Operating Temperature=-55°C to Part D7
+Added Parameter Min Operating Temperature=-55°C to Part D105
+Added Parameter Min Operating Temperature=-55°C to Part D108
+Added Parameter Min Operating Temperature=-55°C to Part FL201
+Added Parameter Min Operating Temperature=-55°C to Part FL?
+Added Parameter Min Operating Temperature=-55°C to Part H?
+Added Parameter Min Operating Temperature=-55°C to Part J?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part Q?
+Added Parameter Min Operating Temperature=-55°C to Part RN205
+Added Parameter Min Operating Temperature=-55°C to Part SW100
+Added Parameter Min Operating Temperature=-55°C to Part T1
+Added Parameter Min Operating Temperature=-55°C to Part T1
+Added Parameter Min Operating Temperature=-55°C to Part T1
+Added Parameter Min Operating Temperature=-55°C to Part T1
+Added Parameter Min Operating Temperature=-55°C to Part T?
+Added Parameter Min Operating Temperature=-55°C to Part T?
+Added Parameter Min Operating Temperature=-55°C to Part T?
+Added Parameter Min Operating Temperature=-55°C to Part U100
+Added Parameter Min Operating Temperature=-55°C to Part U102
+Added Parameter Min Operating Temperature=-55°C to Part U103
+Added Parameter Min Operating Temperature=-55°C to Part U201
+Added Parameter Min Operating Temperature=-55°C to Part U202
+Added Parameter Min Operating Temperature=-55°C to Part U206
+Added Parameter Min Operating Temperature=-55°C to Part U207
+Added Parameter Min Operating Temperature=-55°C to Part U208
+Added Parameter Min Operating Temperature=-55°C to Part U209
+Added Parameter Min Operating Temperature=-55°C to Part U210
+Added Parameter Min Operating Temperature=-55°C to Part U211
+Added Parameter Min Operating Temperature=-55°C to Part U213
+Added Parameter Min Operating Temperature=-55°C to Part U214
+Added Parameter Min Operating Temperature=-55°C to Part U300
+Added Parameter Min Operating Temperature=-55°C to Part U303
+Added Parameter Min Operating Temperature=-55°C to Part U304
+Added Parameter Min Operating Temperature=-55°C to Part U400
+Added Parameter Min Operating Temperature=-55°C to Part U401
+Added Parameter Min Operating Temperature=-55°C to Part U403
+Added Parameter Min Operating Temperature=-55°C to Part U404
+Added Parameter Min Operating Temperature=-55°C to Part U405
+Added Parameter Min Operating Temperature=-55°C to Part U407
+Added Parameter Min Operating Temperature=-55°C to Part U408
+Added Parameter Min Operating Temperature=-55°C to Part U409
+Added Parameter Min Operating Temperature=-55°C to Part U410
+Added Parameter Min Operating Temperature=-55°C to Part U411
+Added Parameter Min Operating Temperature=-55°C to Part U500
+Added Parameter Min Operating Temperature=-55°C to Part U501
+Added Parameter Min Operating Temperature=-55°C to Part U?
+Added Parameter Min Operating Temperature=-55°C to Part U?
+Added Parameter Min Operating Temperature=-55°C to Part U?
+Added Parameter Min Operating Temperature=-55°C to Part U?
+Added Parameter Min Operating Temperature=-55°C to Part U?
+Added Parameter Min Operating Temperature=-55°C to Part U?
+Added Parameter Min Operating Temperature=-55°C to Part X?
+Added Parameter Min Operating Temperature=-55°C to Part X?
+Added Parameter Min Operating Temperature=-55°C to Part X?
+Added Parameter Mounting Technology=Surface Mount to Part D7
+Added Parameter Mounting Technology=Surface Mount to Part D105
+Added Parameter Mounting Technology=Surface Mount to Part D108
+Added Parameter Mounting Technology=Surface Mount to Part FL201
+Added Parameter Mounting Technology=Surface Mount to Part FL?
+Added Parameter Mounting Technology=Surface Mount to Part H?
+Added Parameter Mounting Technology=Surface Mount to Part J?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part Q?
+Added Parameter Mounting Technology=Surface Mount to Part RN205
+Added Parameter Mounting Technology=Surface Mount to Part SW100
+Added Parameter Mounting Technology=Surface Mount to Part T1
+Added Parameter Mounting Technology=Surface Mount to Part T1
+Added Parameter Mounting Technology=Surface Mount to Part T1
+Added Parameter Mounting Technology=Surface Mount to Part T1
+Added Parameter Mounting Technology=Surface Mount to Part T?
+Added Parameter Mounting Technology=Surface Mount to Part T?
+Added Parameter Mounting Technology=Surface Mount to Part T?
+Added Parameter Mounting Technology=Surface Mount to Part U100
+Added Parameter Mounting Technology=Surface Mount to Part U102
+Added Parameter Mounting Technology=Surface Mount to Part U103
+Added Parameter Mounting Technology=Surface Mount to Part U201
+Added Parameter Mounting Technology=Surface Mount to Part U202
+Added Parameter Mounting Technology=Surface Mount to Part U206
+Added Parameter Mounting Technology=Surface Mount to Part U207
+Added Parameter Mounting Technology=Surface Mount to Part U208
+Added Parameter Mounting Technology=Surface Mount to Part U209
+Added Parameter Mounting Technology=Surface Mount to Part U210
+Added Parameter Mounting Technology=Surface Mount to Part U211
+Added Parameter Mounting Technology=Surface Mount to Part U213
+Added Parameter Mounting Technology=Surface Mount to Part U214
+Added Parameter Mounting Technology=Surface Mount to Part U300
+Added Parameter Mounting Technology=Surface Mount to Part U303
+Added Parameter Mounting Technology=Surface Mount to Part U304
+Added Parameter Mounting Technology=Surface Mount to Part U400
+Added Parameter Mounting Technology=Surface Mount to Part U401
+Added Parameter Mounting Technology=Surface Mount to Part U403
+Added Parameter Mounting Technology=Surface Mount to Part U404
+Added Parameter Mounting Technology=Surface Mount to Part U405
+Added Parameter Mounting Technology=Surface Mount to Part U407
+Added Parameter Mounting Technology=Surface Mount to Part U408
+Added Parameter Mounting Technology=Surface Mount to Part U409
+Added Parameter Mounting Technology=Surface Mount to Part U410
+Added Parameter Mounting Technology=Surface Mount to Part U411
+Added Parameter Mounting Technology=Surface Mount to Part U500
+Added Parameter Mounting Technology=Surface Mount to Part U501
+Added Parameter Mounting Technology=Surface Mount to Part U?
+Added Parameter Mounting Technology=Surface Mount to Part U?
+Added Parameter Mounting Technology=Surface Mount to Part U?
+Added Parameter Mounting Technology=Surface Mount to Part U?
+Added Parameter Mounting Technology=Surface Mount to Part U?
+Added Parameter Mounting Technology=Surface Mount to Part U?
+Added Parameter Mounting Technology=Surface Mount to Part X?
+Added Parameter Mounting Technology=Surface Mount to Part X?
+Added Parameter Mounting Technology=Surface Mount to Part X?
+Added Parameter Number of Terminals=2 to Part D7
+Added Parameter Number of Terminals=2 to Part D105
+Added Parameter Number of Terminals=2 to Part D108
+Added Parameter Number of Terminals=2 to Part FL201
+Added Parameter Number of Terminals=2 to Part FL?
+Added Parameter Number of Terminals=2 to Part H?
+Added Parameter Number of Terminals=2 to Part J?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part Q?
+Added Parameter Number of Terminals=2 to Part RN205
+Added Parameter Number of Terminals=2 to Part SW100
+Added Parameter Number of Terminals=2 to Part T1
+Added Parameter Number of Terminals=2 to Part T1
+Added Parameter Number of Terminals=2 to Part T1
+Added Parameter Number of Terminals=2 to Part T1
+Added Parameter Number of Terminals=2 to Part T?
+Added Parameter Number of Terminals=2 to Part T?
+Added Parameter Number of Terminals=2 to Part T?
+Added Parameter Number of Terminals=2 to Part U100
+Added Parameter Number of Terminals=2 to Part U102
+Added Parameter Number of Terminals=2 to Part U103
+Added Parameter Number of Terminals=2 to Part U201
+Added Parameter Number of Terminals=2 to Part U202
+Added Parameter Number of Terminals=2 to Part U206
+Added Parameter Number of Terminals=2 to Part U207
+Added Parameter Number of Terminals=2 to Part U208
+Added Parameter Number of Terminals=2 to Part U209
+Added Parameter Number of Terminals=2 to Part U210
+Added Parameter Number of Terminals=2 to Part U211
+Added Parameter Number of Terminals=2 to Part U213
+Added Parameter Number of Terminals=2 to Part U214
+Added Parameter Number of Terminals=2 to Part U300
+Added Parameter Number of Terminals=2 to Part U303
+Added Parameter Number of Terminals=2 to Part U304
+Added Parameter Number of Terminals=2 to Part U400
+Added Parameter Number of Terminals=2 to Part U401
+Added Parameter Number of Terminals=2 to Part U403
+Added Parameter Number of Terminals=2 to Part U404
+Added Parameter Number of Terminals=2 to Part U405
+Added Parameter Number of Terminals=2 to Part U407
+Added Parameter Number of Terminals=2 to Part U408
+Added Parameter Number of Terminals=2 to Part U409
+Added Parameter Number of Terminals=2 to Part U410
+Added Parameter Number of Terminals=2 to Part U411
+Added Parameter Number of Terminals=2 to Part U500
+Added Parameter Number of Terminals=2 to Part U501
+Added Parameter Number of Terminals=2 to Part U?
+Added Parameter Number of Terminals=2 to Part U?
+Added Parameter Number of Terminals=2 to Part U?
+Added Parameter Number of Terminals=2 to Part U?
+Added Parameter Number of Terminals=2 to Part U?
+Added Parameter Number of Terminals=2 to Part U?
+Added Parameter Number of Terminals=2 to Part X?
+Added Parameter Number of Terminals=2 to Part X?
+Added Parameter Number of Terminals=2 to Part X?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part FL?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part H?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part J?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part Q?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part T?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part T?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part T?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part U?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part U?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part U?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part U?
+Added Parameter PartNumber=GCM1555C1H100JA16D to Part X?
+Added Parameter Ratings=AEC-Q200 to Part D7
+Added Parameter Ratings=AEC-Q200 to Part D105
+Added Parameter Ratings=AEC-Q200 to Part D108
+Added Parameter Ratings=AEC-Q200 to Part FL201
+Added Parameter Ratings=AEC-Q200 to Part FL?
+Added Parameter Ratings=AEC-Q200 to Part H?
+Added Parameter Ratings=AEC-Q200 to Part J?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part Q?
+Added Parameter Ratings=AEC-Q200 to Part RN205
+Added Parameter Ratings=AEC-Q200 to Part SW100
+Added Parameter Ratings=AEC-Q200 to Part T1
+Added Parameter Ratings=AEC-Q200 to Part T1
+Added Parameter Ratings=AEC-Q200 to Part T1
+Added Parameter Ratings=AEC-Q200 to Part T1
+Added Parameter Ratings=AEC-Q200 to Part T?
+Added Parameter Ratings=AEC-Q200 to Part T?
+Added Parameter Ratings=AEC-Q200 to Part T?
+Added Parameter Ratings=AEC-Q200 to Part U100
+Added Parameter Ratings=AEC-Q200 to Part U102
+Added Parameter Ratings=AEC-Q200 to Part U103
+Added Parameter Ratings=AEC-Q200 to Part U201
+Added Parameter Ratings=AEC-Q200 to Part U202
+Added Parameter Ratings=AEC-Q200 to Part U206
+Added Parameter Ratings=AEC-Q200 to Part U207
+Added Parameter Ratings=AEC-Q200 to Part U208
+Added Parameter Ratings=AEC-Q200 to Part U209
+Added Parameter Ratings=AEC-Q200 to Part U210
+Added Parameter Ratings=AEC-Q200 to Part U211
+Added Parameter Ratings=AEC-Q200 to Part U213
+Added Parameter Ratings=AEC-Q200 to Part U214
+Added Parameter Ratings=AEC-Q200 to Part U300
+Added Parameter Ratings=AEC-Q200 to Part U303
+Added Parameter Ratings=AEC-Q200 to Part U304
+Added Parameter Ratings=AEC-Q200 to Part U400
+Added Parameter Ratings=AEC-Q200 to Part U401
+Added Parameter Ratings=AEC-Q200 to Part U403
+Added Parameter Ratings=AEC-Q200 to Part U404
+Added Parameter Ratings=AEC-Q200 to Part U405
+Added Parameter Ratings=AEC-Q200 to Part U407
+Added Parameter Ratings=AEC-Q200 to Part U408
+Added Parameter Ratings=AEC-Q200 to Part U409
+Added Parameter Ratings=AEC-Q200 to Part U410
+Added Parameter Ratings=AEC-Q200 to Part U411
+Added Parameter Ratings=AEC-Q200 to Part U500
+Added Parameter Ratings=AEC-Q200 to Part U501
+Added Parameter Ratings=AEC-Q200 to Part U?
+Added Parameter Ratings=AEC-Q200 to Part U?
+Added Parameter Ratings=AEC-Q200 to Part U?
+Added Parameter Ratings=AEC-Q200 to Part U?
+Added Parameter Ratings=AEC-Q200 to Part U?
+Added Parameter Ratings=AEC-Q200 to Part U?
+Added Parameter Ratings=AEC-Q200 to Part X?
+Added Parameter Ratings=AEC-Q200 to Part X?
+Added Parameter Ratings=AEC-Q200 to Part X?
+Added Parameter REACH SVHC=Yes to Part D7
+Added Parameter REACH SVHC=Yes to Part D105
+Added Parameter REACH SVHC=Yes to Part D108
+Added Parameter REACH SVHC=Yes to Part FL201
+Added Parameter REACH SVHC=Yes to Part FL?
+Added Parameter REACH SVHC=Yes to Part H?
+Added Parameter REACH SVHC=Yes to Part J?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part Q?
+Added Parameter REACH SVHC=Yes to Part RN205
+Added Parameter REACH SVHC=Yes to Part SW100
+Added Parameter REACH SVHC=Yes to Part T1
+Added Parameter REACH SVHC=Yes to Part T1
+Added Parameter REACH SVHC=Yes to Part T1
+Added Parameter REACH SVHC=Yes to Part T1
+Added Parameter REACH SVHC=Yes to Part T?
+Added Parameter REACH SVHC=Yes to Part T?
+Added Parameter REACH SVHC=Yes to Part T?
+Added Parameter REACH SVHC=Yes to Part U100
+Added Parameter REACH SVHC=Yes to Part U102
+Added Parameter REACH SVHC=Yes to Part U103
+Added Parameter REACH SVHC=Yes to Part U201
+Added Parameter REACH SVHC=Yes to Part U202
+Added Parameter REACH SVHC=Yes to Part U206
+Added Parameter REACH SVHC=Yes to Part U207
+Added Parameter REACH SVHC=Yes to Part U208
+Added Parameter REACH SVHC=Yes to Part U209
+Added Parameter REACH SVHC=Yes to Part U210
+Added Parameter REACH SVHC=Yes to Part U211
+Added Parameter REACH SVHC=Yes to Part U213
+Added Parameter REACH SVHC=Yes to Part U214
+Added Parameter REACH SVHC=Yes to Part U300
+Added Parameter REACH SVHC=Yes to Part U303
+Added Parameter REACH SVHC=Yes to Part U304
+Added Parameter REACH SVHC=Yes to Part U400
+Added Parameter REACH SVHC=Yes to Part U401
+Added Parameter REACH SVHC=Yes to Part U403
+Added Parameter REACH SVHC=Yes to Part U404
+Added Parameter REACH SVHC=Yes to Part U405
+Added Parameter REACH SVHC=Yes to Part U407
+Added Parameter REACH SVHC=Yes to Part U408
+Added Parameter REACH SVHC=Yes to Part U409
+Added Parameter REACH SVHC=Yes to Part U410
+Added Parameter REACH SVHC=Yes to Part U411
+Added Parameter REACH SVHC=Yes to Part U500
+Added Parameter REACH SVHC=Yes to Part U501
+Added Parameter REACH SVHC=Yes to Part U?
+Added Parameter REACH SVHC=Yes to Part U?
+Added Parameter REACH SVHC=Yes to Part U?
+Added Parameter REACH SVHC=Yes to Part U?
+Added Parameter REACH SVHC=Yes to Part U?
+Added Parameter REACH SVHC=Yes to Part U?
+Added Parameter REACH SVHC=Yes to Part X?
+Added Parameter REACH SVHC=Yes to Part X?
+Added Parameter REACH SVHC=Yes to Part X?
+Added Parameter Temperature Coefficient=30ppm/°C to Part D7
+Added Parameter Temperature Coefficient=30ppm/°C to Part D105
+Added Parameter Temperature Coefficient=30ppm/°C to Part D108
+Added Parameter Temperature Coefficient=30ppm/°C to Part FL201
+Added Parameter Temperature Coefficient=30ppm/°C to Part FL?
+Added Parameter Temperature Coefficient=30ppm/°C to Part H?
+Added Parameter Temperature Coefficient=30ppm/°C to Part J?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part Q?
+Added Parameter Temperature Coefficient=30ppm/°C to Part RN205
+Added Parameter Temperature Coefficient=30ppm/°C to Part SW100
+Added Parameter Temperature Coefficient=30ppm/°C to Part T1
+Added Parameter Temperature Coefficient=30ppm/°C to Part T1
+Added Parameter Temperature Coefficient=30ppm/°C to Part T1
+Added Parameter Temperature Coefficient=30ppm/°C to Part T1
+Added Parameter Temperature Coefficient=30ppm/°C to Part T?
+Added Parameter Temperature Coefficient=30ppm/°C to Part T?
+Added Parameter Temperature Coefficient=30ppm/°C to Part T?
+Added Parameter Temperature Coefficient=30ppm/°C to Part U100
+Added Parameter Temperature Coefficient=30ppm/°C to Part U102
+Added Parameter Temperature Coefficient=30ppm/°C to Part U103
+Added Parameter Temperature Coefficient=30ppm/°C to Part U201
+Added Parameter Temperature Coefficient=30ppm/°C to Part U202
+Added Parameter Temperature Coefficient=30ppm/°C to Part U206
+Added Parameter Temperature Coefficient=30ppm/°C to Part U207
+Added Parameter Temperature Coefficient=30ppm/°C to Part U208
+Added Parameter Temperature Coefficient=30ppm/°C to Part U209
+Added Parameter Temperature Coefficient=30ppm/°C to Part U210
+Added Parameter Temperature Coefficient=30ppm/°C to Part U211
+Added Parameter Temperature Coefficient=30ppm/°C to Part U213
+Added Parameter Temperature Coefficient=30ppm/°C to Part U214
+Added Parameter Temperature Coefficient=30ppm/°C to Part U300
+Added Parameter Temperature Coefficient=30ppm/°C to Part U303
+Added Parameter Temperature Coefficient=30ppm/°C to Part U304
+Added Parameter Temperature Coefficient=30ppm/°C to Part U400
+Added Parameter Temperature Coefficient=30ppm/°C to Part U401
+Added Parameter Temperature Coefficient=30ppm/°C to Part U403
+Added Parameter Temperature Coefficient=30ppm/°C to Part U404
+Added Parameter Temperature Coefficient=30ppm/°C to Part U405
+Added Parameter Temperature Coefficient=30ppm/°C to Part U407
+Added Parameter Temperature Coefficient=30ppm/°C to Part U408
+Added Parameter Temperature Coefficient=30ppm/°C to Part U409
+Added Parameter Temperature Coefficient=30ppm/°C to Part U410
+Added Parameter Temperature Coefficient=30ppm/°C to Part U411
+Added Parameter Temperature Coefficient=30ppm/°C to Part U500
+Added Parameter Temperature Coefficient=30ppm/°C to Part U501
+Added Parameter Temperature Coefficient=30ppm/°C to Part U?
+Added Parameter Temperature Coefficient=30ppm/°C to Part U?
+Added Parameter Temperature Coefficient=30ppm/°C to Part U?
+Added Parameter Temperature Coefficient=30ppm/°C to Part U?
+Added Parameter Temperature Coefficient=30ppm/°C to Part U?
+Added Parameter Temperature Coefficient=30ppm/°C to Part U?
+Added Parameter Temperature Coefficient=30ppm/°C to Part X?
+Added Parameter Temperature Coefficient=30ppm/°C to Part X?
+Added Parameter Temperature Coefficient=30ppm/°C to Part X?
+Added Parameter Termination=SMD/SMT to Part D7
+Added Parameter Termination=SMD/SMT to Part D105
+Added Parameter Termination=SMD/SMT to Part D108
+Added Parameter Termination=SMD/SMT to Part FL201
+Added Parameter Termination=SMD/SMT to Part FL?
+Added Parameter Termination=SMD/SMT to Part H?
+Added Parameter Termination=SMD/SMT to Part J?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part Q?
+Added Parameter Termination=SMD/SMT to Part RN205
+Added Parameter Termination=SMD/SMT to Part SW100
+Added Parameter Termination=SMD/SMT to Part T1
+Added Parameter Termination=SMD/SMT to Part T1
+Added Parameter Termination=SMD/SMT to Part T1
+Added Parameter Termination=SMD/SMT to Part T1
+Added Parameter Termination=SMD/SMT to Part T?
+Added Parameter Termination=SMD/SMT to Part T?
+Added Parameter Termination=SMD/SMT to Part T?
+Added Parameter Termination=SMD/SMT to Part U100
+Added Parameter Termination=SMD/SMT to Part U102
+Added Parameter Termination=SMD/SMT to Part U103
+Added Parameter Termination=SMD/SMT to Part U201
+Added Parameter Termination=SMD/SMT to Part U202
+Added Parameter Termination=SMD/SMT to Part U206
+Added Parameter Termination=SMD/SMT to Part U207
+Added Parameter Termination=SMD/SMT to Part U208
+Added Parameter Termination=SMD/SMT to Part U209
+Added Parameter Termination=SMD/SMT to Part U210
+Added Parameter Termination=SMD/SMT to Part U211
+Added Parameter Termination=SMD/SMT to Part U213
+Added Parameter Termination=SMD/SMT to Part U214
+Added Parameter Termination=SMD/SMT to Part U300
+Added Parameter Termination=SMD/SMT to Part U303
+Added Parameter Termination=SMD/SMT to Part U304
+Added Parameter Termination=SMD/SMT to Part U400
+Added Parameter Termination=SMD/SMT to Part U401
+Added Parameter Termination=SMD/SMT to Part U403
+Added Parameter Termination=SMD/SMT to Part U404
+Added Parameter Termination=SMD/SMT to Part U405
+Added Parameter Termination=SMD/SMT to Part U407
+Added Parameter Termination=SMD/SMT to Part U408
+Added Parameter Termination=SMD/SMT to Part U409
+Added Parameter Termination=SMD/SMT to Part U410
+Added Parameter Termination=SMD/SMT to Part U411
+Added Parameter Termination=SMD/SMT to Part U500
+Added Parameter Termination=SMD/SMT to Part U501
+Added Parameter Termination=SMD/SMT to Part U?
+Added Parameter Termination=SMD/SMT to Part U?
+Added Parameter Termination=SMD/SMT to Part U?
+Added Parameter Termination=SMD/SMT to Part U?
+Added Parameter Termination=SMD/SMT to Part U?
+Added Parameter Termination=SMD/SMT to Part U?
+Added Parameter Termination=SMD/SMT to Part X?
+Added Parameter Termination=SMD/SMT to Part X?
+Added Parameter Termination=SMD/SMT to Part X?
+Added Parameter Thickness=500µm to Part D7
+Added Parameter Thickness=500µm to Part D105
+Added Parameter Thickness=500µm to Part D108
+Added Parameter Thickness=500µm to Part FL201
+Added Parameter Thickness=500µm to Part FL?
+Added Parameter Thickness=500µm to Part H?
+Added Parameter Thickness=500µm to Part J?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part Q?
+Added Parameter Thickness=500µm to Part RN205
+Added Parameter Thickness=500µm to Part SW100
+Added Parameter Thickness=500µm to Part T1
+Added Parameter Thickness=500µm to Part T1
+Added Parameter Thickness=500µm to Part T1
+Added Parameter Thickness=500µm to Part T1
+Added Parameter Thickness=500µm to Part T?
+Added Parameter Thickness=500µm to Part T?
+Added Parameter Thickness=500µm to Part T?
+Added Parameter Thickness=500µm to Part U100
+Added Parameter Thickness=500µm to Part U102
+Added Parameter Thickness=500µm to Part U103
+Added Parameter Thickness=500µm to Part U201
+Added Parameter Thickness=500µm to Part U202
+Added Parameter Thickness=500µm to Part U206
+Added Parameter Thickness=500µm to Part U207
+Added Parameter Thickness=500µm to Part U208
+Added Parameter Thickness=500µm to Part U209
+Added Parameter Thickness=500µm to Part U210
+Added Parameter Thickness=500µm to Part U211
+Added Parameter Thickness=500µm to Part U213
+Added Parameter Thickness=500µm to Part U214
+Added Parameter Thickness=500µm to Part U300
+Added Parameter Thickness=500µm to Part U303
+Added Parameter Thickness=500µm to Part U304
+Added Parameter Thickness=500µm to Part U400
+Added Parameter Thickness=500µm to Part U401
+Added Parameter Thickness=500µm to Part U403
+Added Parameter Thickness=500µm to Part U404
+Added Parameter Thickness=500µm to Part U405
+Added Parameter Thickness=500µm to Part U407
+Added Parameter Thickness=500µm to Part U408
+Added Parameter Thickness=500µm to Part U409
+Added Parameter Thickness=500µm to Part U410
+Added Parameter Thickness=500µm to Part U411
+Added Parameter Thickness=500µm to Part U500
+Added Parameter Thickness=500µm to Part U501
+Added Parameter Thickness=500µm to Part U?
+Added Parameter Thickness=500µm to Part U?
+Added Parameter Thickness=500µm to Part U?
+Added Parameter Thickness=500µm to Part U?
+Added Parameter Thickness=500µm to Part U?
+Added Parameter Thickness=500µm to Part U?
+Added Parameter Thickness=500µm to Part X?
+Added Parameter Thickness=500µm to Part X?
+Added Parameter Thickness=500µm to Part X?
+Added Parameter Tolerance=5% to Part D7
+Added Parameter Tolerance=5% to Part D105
+Added Parameter Tolerance=5% to Part D108
+Added Parameter Tolerance=5% to Part FL201
+Added Parameter Tolerance=5% to Part FL?
+Added Parameter Tolerance=5% to Part H?
+Added Parameter Tolerance=5% to Part J?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part Q?
+Added Parameter Tolerance=5% to Part RN205
+Added Parameter Tolerance=5% to Part SW100
+Added Parameter Tolerance=5% to Part T1
+Added Parameter Tolerance=5% to Part T1
+Added Parameter Tolerance=5% to Part T1
+Added Parameter Tolerance=5% to Part T1
+Added Parameter Tolerance=5% to Part T?
+Added Parameter Tolerance=5% to Part T?
+Added Parameter Tolerance=5% to Part T?
+Added Parameter Tolerance=5% to Part U100
+Added Parameter Tolerance=5% to Part U102
+Added Parameter Tolerance=5% to Part U103
+Added Parameter Tolerance=5% to Part U201
+Added Parameter Tolerance=5% to Part U202
+Added Parameter Tolerance=5% to Part U206
+Added Parameter Tolerance=5% to Part U207
+Added Parameter Tolerance=5% to Part U208
+Added Parameter Tolerance=5% to Part U209
+Added Parameter Tolerance=5% to Part U210
+Added Parameter Tolerance=5% to Part U211
+Added Parameter Tolerance=5% to Part U213
+Added Parameter Tolerance=5% to Part U214
+Added Parameter Tolerance=5% to Part U300
+Added Parameter Tolerance=5% to Part U303
+Added Parameter Tolerance=5% to Part U304
+Added Parameter Tolerance=5% to Part U400
+Added Parameter Tolerance=5% to Part U401
+Added Parameter Tolerance=5% to Part U403
+Added Parameter Tolerance=5% to Part U404
+Added Parameter Tolerance=5% to Part U405
+Added Parameter Tolerance=5% to Part U407
+Added Parameter Tolerance=5% to Part U408
+Added Parameter Tolerance=5% to Part U409
+Added Parameter Tolerance=5% to Part U410
+Added Parameter Tolerance=5% to Part U411
+Added Parameter Tolerance=5% to Part U500
+Added Parameter Tolerance=5% to Part U501
+Added Parameter Tolerance=5% to Part U?
+Added Parameter Tolerance=5% to Part U?
+Added Parameter Tolerance=5% to Part U?
+Added Parameter Tolerance=5% to Part U?
+Added Parameter Tolerance=5% to Part U?
+Added Parameter Tolerance=5% to Part U?
+Added Parameter Tolerance=5% to Part X?
+Added Parameter Tolerance=5% to Part X?
+Added Parameter Tolerance=5% to Part X?
+Added Parameter Value=10pF to Part D7
+Added Parameter Value=10pF to Part T1
+Added Parameter Value=10pF to Part T1
+Added Parameter Value=10pF to Part T1
+Added Parameter Value=10pF to Part T1
+Added Parameter Value=10pF to Part U500
+Added Parameter Value=10pF to Part U501
+Added Parameter Value=10pF to Part U?
+Added Parameter Value=10pF to Part U?
+Added Parameter Value=10pF to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part D7
+Added Parameter Voltage Rating (DC)=50V to Part D105
+Added Parameter Voltage Rating (DC)=50V to Part D108
+Added Parameter Voltage Rating (DC)=50V to Part FL201
+Added Parameter Voltage Rating (DC)=50V to Part FL?
+Added Parameter Voltage Rating (DC)=50V to Part H?
+Added Parameter Voltage Rating (DC)=50V to Part J?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part Q?
+Added Parameter Voltage Rating (DC)=50V to Part RN205
+Added Parameter Voltage Rating (DC)=50V to Part SW100
+Added Parameter Voltage Rating (DC)=50V to Part T1
+Added Parameter Voltage Rating (DC)=50V to Part T1
+Added Parameter Voltage Rating (DC)=50V to Part T1
+Added Parameter Voltage Rating (DC)=50V to Part T1
+Added Parameter Voltage Rating (DC)=50V to Part T?
+Added Parameter Voltage Rating (DC)=50V to Part T?
+Added Parameter Voltage Rating (DC)=50V to Part T?
+Added Parameter Voltage Rating (DC)=50V to Part U100
+Added Parameter Voltage Rating (DC)=50V to Part U102
+Added Parameter Voltage Rating (DC)=50V to Part U103
+Added Parameter Voltage Rating (DC)=50V to Part U201
+Added Parameter Voltage Rating (DC)=50V to Part U202
+Added Parameter Voltage Rating (DC)=50V to Part U206
+Added Parameter Voltage Rating (DC)=50V to Part U207
+Added Parameter Voltage Rating (DC)=50V to Part U208
+Added Parameter Voltage Rating (DC)=50V to Part U209
+Added Parameter Voltage Rating (DC)=50V to Part U210
+Added Parameter Voltage Rating (DC)=50V to Part U211
+Added Parameter Voltage Rating (DC)=50V to Part U213
+Added Parameter Voltage Rating (DC)=50V to Part U214
+Added Parameter Voltage Rating (DC)=50V to Part U300
+Added Parameter Voltage Rating (DC)=50V to Part U303
+Added Parameter Voltage Rating (DC)=50V to Part U304
+Added Parameter Voltage Rating (DC)=50V to Part U400
+Added Parameter Voltage Rating (DC)=50V to Part U401
+Added Parameter Voltage Rating (DC)=50V to Part U403
+Added Parameter Voltage Rating (DC)=50V to Part U404
+Added Parameter Voltage Rating (DC)=50V to Part U405
+Added Parameter Voltage Rating (DC)=50V to Part U407
+Added Parameter Voltage Rating (DC)=50V to Part U408
+Added Parameter Voltage Rating (DC)=50V to Part U409
+Added Parameter Voltage Rating (DC)=50V to Part U410
+Added Parameter Voltage Rating (DC)=50V to Part U411
+Added Parameter Voltage Rating (DC)=50V to Part U500
+Added Parameter Voltage Rating (DC)=50V to Part U501
+Added Parameter Voltage Rating (DC)=50V to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part U?
+Added Parameter Voltage Rating (DC)=50V to Part X?
+Added Parameter Voltage Rating (DC)=50V to Part X?
+Added Parameter Voltage Rating (DC)=50V to Part X?
+Added Parameter Voltage Rating=50V to Part D7
+Added Parameter Voltage Rating=50V to Part D105
+Added Parameter Voltage Rating=50V to Part D108
+Added Parameter Voltage Rating=50V to Part FL201
+Added Parameter Voltage Rating=50V to Part FL?
+Added Parameter Voltage Rating=50V to Part H?
+Added Parameter Voltage Rating=50V to Part J?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part Q?
+Added Parameter Voltage Rating=50V to Part RN205
+Added Parameter Voltage Rating=50V to Part SW100
+Added Parameter Voltage Rating=50V to Part T1
+Added Parameter Voltage Rating=50V to Part T1
+Added Parameter Voltage Rating=50V to Part T1
+Added Parameter Voltage Rating=50V to Part T1
+Added Parameter Voltage Rating=50V to Part T?
+Added Parameter Voltage Rating=50V to Part T?
+Added Parameter Voltage Rating=50V to Part T?
+Added Parameter Voltage Rating=50V to Part U100
+Added Parameter Voltage Rating=50V to Part U102
+Added Parameter Voltage Rating=50V to Part U103
+Added Parameter Voltage Rating=50V to Part U201
+Added Parameter Voltage Rating=50V to Part U202
+Added Parameter Voltage Rating=50V to Part U206
+Added Parameter Voltage Rating=50V to Part U207
+Added Parameter Voltage Rating=50V to Part U208
+Added Parameter Voltage Rating=50V to Part U209
+Added Parameter Voltage Rating=50V to Part U210
+Added Parameter Voltage Rating=50V to Part U211
+Added Parameter Voltage Rating=50V to Part U213
+Added Parameter Voltage Rating=50V to Part U214
+Added Parameter Voltage Rating=50V to Part U300
+Added Parameter Voltage Rating=50V to Part U303
+Added Parameter Voltage Rating=50V to Part U304
+Added Parameter Voltage Rating=50V to Part U400
+Added Parameter Voltage Rating=50V to Part U401
+Added Parameter Voltage Rating=50V to Part U403
+Added Parameter Voltage Rating=50V to Part U404
+Added Parameter Voltage Rating=50V to Part U405
+Added Parameter Voltage Rating=50V to Part U407
+Added Parameter Voltage Rating=50V to Part U408
+Added Parameter Voltage Rating=50V to Part U409
+Added Parameter Voltage Rating=50V to Part U410
+Added Parameter Voltage Rating=50V to Part U411
+Added Parameter Voltage Rating=50V to Part U500
+Added Parameter Voltage Rating=50V to Part U501
+Added Parameter Voltage Rating=50V to Part U?
+Added Parameter Voltage Rating=50V to Part U?
+Added Parameter Voltage Rating=50V to Part U?
+Added Parameter Voltage Rating=50V to Part U?
+Added Parameter Voltage Rating=50V to Part U?
+Added Parameter Voltage Rating=50V to Part U?
+Added Parameter Voltage Rating=50V to Part X?
+Added Parameter Voltage Rating=50V to Part X?
+Added Parameter Voltage Rating=50V to Part X?
+Added Parameter Voltage=25V to Part D7
+Added Parameter Voltage=25V to Part D105
+Added Parameter Voltage=25V to Part D108
+Added Parameter Voltage=25V to Part FL201
+Added Parameter Voltage=25V to Part FL?
+Added Parameter Voltage=25V to Part H?
+Added Parameter Voltage=25V to Part J?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part Q?
+Added Parameter Voltage=25V to Part RN205
+Added Parameter Voltage=25V to Part SW100
+Added Parameter Voltage=25V to Part T1
+Added Parameter Voltage=25V to Part T1
+Added Parameter Voltage=25V to Part T1
+Added Parameter Voltage=25V to Part T1
+Added Parameter Voltage=25V to Part T?
+Added Parameter Voltage=25V to Part T?
+Added Parameter Voltage=25V to Part T?
+Added Parameter Voltage=25V to Part U100
+Added Parameter Voltage=25V to Part U102
+Added Parameter Voltage=25V to Part U103
+Added Parameter Voltage=25V to Part U201
+Added Parameter Voltage=25V to Part U202
+Added Parameter Voltage=25V to Part U206
+Added Parameter Voltage=25V to Part U207
+Added Parameter Voltage=25V to Part U208
+Added Parameter Voltage=25V to Part U209
+Added Parameter Voltage=25V to Part U210
+Added Parameter Voltage=25V to Part U211
+Added Parameter Voltage=25V to Part U213
+Added Parameter Voltage=25V to Part U214
+Added Parameter Voltage=25V to Part U300
+Added Parameter Voltage=25V to Part U303
+Added Parameter Voltage=25V to Part U304
+Added Parameter Voltage=25V to Part U400
+Added Parameter Voltage=25V to Part U401
+Added Parameter Voltage=25V to Part U403
+Added Parameter Voltage=25V to Part U404
+Added Parameter Voltage=25V to Part U405
+Added Parameter Voltage=25V to Part U407
+Added Parameter Voltage=25V to Part U408
+Added Parameter Voltage=25V to Part U409
+Added Parameter Voltage=25V to Part U410
+Added Parameter Voltage=25V to Part U411
+Added Parameter Voltage=25V to Part U500
+Added Parameter Voltage=25V to Part U501
+Added Parameter Voltage=25V to Part U?
+Added Parameter Voltage=25V to Part U?
+Added Parameter Voltage=25V to Part U?
+Added Parameter Voltage=25V to Part U?
+Added Parameter Voltage=25V to Part U?
+Added Parameter Voltage=25V to Part U?
+Added Parameter Voltage=25V to Part X?
+Added Parameter Voltage=25V to Part X?
+Added Parameter Voltage=25V to Part X?
+Added Parameter Width=500µm to Part D7
+Added Parameter Width=500µm to Part D105
+Added Parameter Width=500µm to Part D108
+Added Parameter Width=500µm to Part FL201
+Added Parameter Width=500µm to Part FL?
+Added Parameter Width=500µm to Part H?
+Added Parameter Width=500µm to Part J?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part Q?
+Added Parameter Width=500µm to Part RN205
+Added Parameter Width=500µm to Part SW100
+Added Parameter Width=500µm to Part T1
+Added Parameter Width=500µm to Part T1
+Added Parameter Width=500µm to Part T1
+Added Parameter Width=500µm to Part T1
+Added Parameter Width=500µm to Part T?
+Added Parameter Width=500µm to Part T?
+Added Parameter Width=500µm to Part T?
+Added Parameter Width=500µm to Part U100
+Added Parameter Width=500µm to Part U102
+Added Parameter Width=500µm to Part U103
+Added Parameter Width=500µm to Part U201
+Added Parameter Width=500µm to Part U202
+Added Parameter Width=500µm to Part U206
+Added Parameter Width=500µm to Part U207
+Added Parameter Width=500µm to Part U208
+Added Parameter Width=500µm to Part U209
+Added Parameter Width=500µm to Part U210
+Added Parameter Width=500µm to Part U211
+Added Parameter Width=500µm to Part U213
+Added Parameter Width=500µm to Part U214
+Added Parameter Width=500µm to Part U300
+Added Parameter Width=500µm to Part U303
+Added Parameter Width=500µm to Part U304
+Added Parameter Width=500µm to Part U400
+Added Parameter Width=500µm to Part U401
+Added Parameter Width=500µm to Part U403
+Added Parameter Width=500µm to Part U404
+Added Parameter Width=500µm to Part U405
+Added Parameter Width=500µm to Part U407
+Added Parameter Width=500µm to Part U408
+Added Parameter Width=500µm to Part U409
+Added Parameter Width=500µm to Part U410
+Added Parameter Width=500µm to Part U411
+Added Parameter Width=500µm to Part U500
+Added Parameter Width=500µm to Part U501
+Added Parameter Width=500µm to Part U?
+Added Parameter Width=500µm to Part U?
+Added Parameter Width=500µm to Part U?
+Added Parameter Width=500µm to Part U?
+Added Parameter Width=500µm to Part U?
+Added Parameter Width=500µm to Part U?
+Added Parameter Width=500µm to Part X?
+Added Parameter Width=500µm to Part X?
+Added Parameter Width=500µm to Part X?
+Update Managed Component D7 From CMP-001-00153-1[GSG-DIODE-TVS-BI] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component D105 From CMP-001-00153-1[LED] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component D108 From CMP-001-00153-1[LED] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component FL201 From CMP-001-00153-1[BPF] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component FL? From CMP-001-00153-1[CommonModeChoke] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component H? From CMP-001-00153-1[MountingHole_Pad] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component J? From CMP-001-00153-1[Micro_SD_Card_Det] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[PMOS] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[2PNP] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[2NPN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[2PNP] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[NMOS/PMOS] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[2NPN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-001-00153-1[NMOS/PMOS] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component RN205 From CMP-001-00153-1[100] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component SW100 From CMP-001-00153-1[SWITCH] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T1 From CMP-001-00153-1[RF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T1 From CMP-001-00153-1[RF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T1 From CMP-001-00153-1[RF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T1 From CMP-001-00153-1[RF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T? From CMP-001-00153-1[RF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T? From CMP-001-00153-1[RF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component T? From CMP-001-00153-1[IF_BALUN] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U100 From CMP-001-00153-1[TPS62410] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U102 From CMP-001-00153-1[LDO_2V5] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U103 From CMP-001-00153-1[AP22652] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U201 From CMP-001-00153-1[GT4227] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U202 From CMP-001-00153-1[GT4227] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U206 From CMP-001-00153-1[MXD8546F] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U207 From CMP-001-00153-1[MAX2831] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U208 From CMP-001-00153-1[FM8625H] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U209 From CMP-001-00153-1[SI5351C] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U210 From CMP-001-00153-1[74HC4051] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U211 From CMP-001-00153-1[74LVC1G3157] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U213 From CMP-001-00153-1[74LVC1G3157] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U214 From CMP-001-00153-1[ICE40UP5K] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U300 From CMP-001-00153-1[74LVC1G08] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U303 From CMP-001-00153-1[74LVC1G86] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U304 From CMP-001-00153-1[74LVC1G32] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U400 From CMP-001-00153-1[MXD8638C] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U401 From CMP-001-00153-1[MXD8638C] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U403 From CMP-001-00153-1[AP22652] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U404 From CMP-001-00153-1[BGB741L7ESD] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U405 From CMP-001-00153-1[TRF37C73] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U407 From CMP-001-00153-1[MXD8546F] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U408 From CMP-001-00153-1[FM8625H] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U409 From CMP-001-00153-1[RFFC5072] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U410 From CMP-001-00153-1[BGB741L7ESD] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U411 From CMP-001-00153-1[FM8625H] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U500 From CMP-001-00153-1[PCA9557] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U501 From CMP-001-00153-1[TC7MBL3245CFT] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-001-00153-1[RT9742GGJ5] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-001-00153-1[PE4259] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-001-00153-1[TVS_USB] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-001-00153-1[FM8625H] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-001-00153-1[SX1261/2] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-001-00153-1[SX1261/2] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component X? From CMP-001-00153-1[MCU_XTAL] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component X? From CMP-001-00153-1[TCXO] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc
+Update Managed Component X? From CMP-001-00153-1[TCXO] To CMP-001-00153-1[MN-CAP-CERM-C0G-0402-10pF-50V-5%] in Reference_Layout.SchDoc

@@ -4,7 +4,7 @@
 
 Public examples are indexed from `examples/manifest.toml`.
 
-Total examples: `115`
+Total examples: `116`
 
 ## Generate
 
@@ -147,6 +147,7 @@ uv run python tools\generate_docs.py
 | [`schdoc_add_wire_and_net_label`](../../examples/schdoc_add_wire_and_net_label/README.md)<br>Add wires and net labels to an existing SchDoc | schdoc, mutation | Load a blank schematic, create one detached wire path plus one matching detached net label, add them to the document, and save the modified SchDoc. | schdoc, mutation, wire, net-label, connectivity |
 | [`schdoc_apply_dynamic_template`](../../examples/schdoc_apply_dynamic_template/README.md)<br>Apply a generated title-block template | schdoc, mutation, template | Build generated ANSI B and D SchDot title-block templates, apply them with visual sheet settings, and write project parameters plus variant context to PrjPcb. | schdoc, mutation, template, dynamic-template, title-block, schdot |
 | [`schdoc_apply_template`](../../examples/schdoc_apply_template/README.md)<br>Apply a SchDot template to an existing SchDoc | schdoc, mutation, template | Open a schematic, clear its existing template graphics, apply a SchDot template from shared assets, and save the modified SchDoc. | schdoc, mutation, template, schdot, title-block |
+| [`schdoc_bom`](../../examples/schdoc_bom/README.md)<br>Configurable parameter BOM from a project | schdoc, project, reporting | Walk every SchDoc in a project, pull the component fields named in bom_fields.toml, and write a CSV BOM plus an index of every parameter name the project uses. | schdoc, bom, parameters, csv, report, toml-config |
 | [`schdoc_clean`](../../examples/schdoc_clean/README.md)<br>Clean and normalize project schematics | schdoc, mutation | Open every Hydroscope schematic, iterate through components and sheet-level records, normalize fonts, colors, fills, and line widths, and save cleaned SchDoc copies. | schdoc, mutation, clean, normalize, project |
 | [`schdoc_clear_template`](../../examples/schdoc_clear_template/README.md)<br>Clear template graphics from an existing SchDoc | schdoc, mutation, template | Open a schematic with embedded template graphics, remove the template record and template-owned objects, clear sheet template metadata, and save the modified SchDoc. | schdoc, mutation, template, title-block |
 | [`schdoc_extract_images`](../../examples/schdoc_extract_images/README.md)<br>Extract embedded images from a SchDoc | schdoc, asset-extraction, image | Open a schematic, find embedded IMAGE records, write each embedded payload using a detected native extension, and save a JSON extraction manifest. | schdoc, image, embedded-image, asset-extraction |
@@ -295,3 +296,4 @@ uv run python tools\generate_docs.py
 | [`schdoc_svg`](../../examples/schdoc_svg/README.md)<br>Render project schematics to SVG | schdoc, svg, prjpcb | Open the Hydroscope PrjPcb, pass project parameters into the schematic SVG renderer, and write one SVG per schematic page. | schdoc, svg, rendering, project, parameters |
 | [`schlib_svg`](../../examples/schlib_svg/README.md)<br>Extract and render SchLib symbols to SVG | schdoc, schlib, svg | Extract a combined SchLib from the RT Super C1 schematic, iterate every symbol and symbol part, render each part to SVG, and write a manifest of generated symbol artwork. | schdoc, schlib, svg, rendering, symbol-extraction, multipart |
 | [`intlib_merge`](../../examples/intlib_merge/README.md)<br>Merge multiple IntLib files into one | intlib, schlib, pcblib | Discover all .IntLib files in a directory (optionally recursive), extract their embedded SchLib and PcbLib source streams, merge symbols and footprints, and repack into a single combined IntLib. | intlib, schlib, pcblib, merge, library-management |
+| [`schdoc_bom`](../../examples/schdoc_bom/README.md)<br>Configurable parameter BOM from a project | schdoc, project, reporting | Walk every SchDoc in a project, pull the component fields named in bom_fields.toml, and write a CSV BOM plus an index of every parameter name the project uses. | schdoc, bom, parameters, csv, report, toml-config |

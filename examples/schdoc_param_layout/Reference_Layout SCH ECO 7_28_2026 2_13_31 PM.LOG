@@ -1,0 +1,118 @@
+Removed Parameter Composition: from Part L?
+Removed Parameter DC Current: from Part L?
+Removed Parameter Inductance Tolerance: from Part L?
+Removed Parameter Manufacturer Lifecycle Status:OBSOLETE from Part D?
+Removed Parameter Max DC Current: from Part L?
+Removed Parameter Military Standard: from Part L?
+Removed Parameter PartNumber:TPS55340QRTERQ1 from Part U?
+Removed Parameter Resistance:4.55Ω from Part L?
+Removed Parameter Resistance:19.5mΩ from Part ?
+Removed Parameter Resistance:50mΩ from Part L?
+Removed Parameter Self Resonant Frequency: from Part L?
+Change Value of Parameter Case/Package in Part U? Old=DFN New=6-DFN (3x3)
+Change Value of Parameter Case/Package in Part U? Old=DFN New=6-DFN (3x3)
+Change Value of Parameter Case/Package in Part U? Old=LFQFP New=64-LQFP (10x10)
+Change Value of Parameter Case/Package in Part U? Old=LFQFP New=64-LQFP (10x10)
+Change Value of Parameter Case/Package in Part D? Old=SOD New=DO-221AC
+Change Value of Parameter Case/Package in Part D? Old=SOD-123-2 New=SOD-123
+Change Value of Parameter Case/Package in Part D105 Old=SMD/SMT New=SOD-323HE
+Change Value of Parameter Case/Package in Part Q100 Old=D2PAK New=TO-263-3, D2PAK
+Change Value of Parameter Case/Package in Part Q101 Old=D2PAK New=TO-263-3, D2PAK
+Change Value of Parameter Case/Package in Part Q? Old=D2PAK New=TO-263-3, D2PAK
+Change Value of Parameter Case/Package in Part Q? Old=D2PAK New=TO-263-3, D2PAK
+Change Value of Parameter Case/Package in Part Q? Old=D2PAK New=TO-263-3, D2PAK
+Change Value of Parameter Case/Package in Part Q? Old=D2PAK New=TO-263-3, D2PAK
+Change Value of Parameter Inductance in Part L419 Old=100µH New=DNP
+Change Value of Parameter PartNumber in Part FB? Old=PartNumber New=74279226101
+Change Value of Parameter PartNumber in Part L? Old= New=ACP3225-102-2P-T000
+Added Parameter Case/Package=8-PowerSOIC (3.90mm) to Part U102
+Added Parameter Case/Package=16-WQFN (3x3) to Part U?
+Added Parameter Case/Package=DO-214AC to Part D?
+Added Parameter Case/Package=SOD-323HE to Part D?
+Added Parameter Case/Package=SOD-323HE to Part D?
+Added Parameter Case/Package=SOD-323HE to Part D?
+Added Parameter Case/Package=SOD-323HE to Part D?
+Added Parameter Contact Resistance=90mΩ to Part CN?
+Added Parameter Current Rating=300mA to Part CN?
+Added Parameter Gender=Female to Part CN?
+Added Parameter Impedance=12Ω to Part D?
+Added Parameter Impedance=12Ω to Part D?
+Added Parameter Impedance=12Ω to Part D?
+Added Parameter Impedance=12Ω to Part D?
+Added Parameter Inductance=100µH to Part L?
+Added Parameter Insulation Color=Black to Part CN?
+Added Parameter Insulation Resistance=50MΩ to Part CN?
+Added Parameter Max Operating Temperature=125°C to Part CN?
+Added Parameter Max Operating Temperature=150°C to Part D?
+Added Parameter Max Operating Temperature=150°C to Part D?
+Added Parameter Max Operating Temperature=150°C to Part D?
+Added Parameter Max Operating Temperature=150°C to Part D?
+Added Parameter Max Power Dissipation=500mW to Part D?
+Added Parameter Max Power Dissipation=500mW to Part D?
+Added Parameter Max Power Dissipation=500mW to Part D?
+Added Parameter Max Power Dissipation=500mW to Part D?
+Added Parameter Min Operating Temperature=-40°C to Part CN?
+Added Parameter Mounting Technology=Surface Mount to Part D?
+Added Parameter Mounting Technology=Surface Mount to Part D?
+Added Parameter Mounting Technology=Surface Mount to Part D?
+Added Parameter Mounting Technology=Surface Mount to Part D?
+Added Parameter Number of Positions=100 to Part CN?
+Added Parameter Number of Rows=2 to Part CN?
+Added Parameter Operating Force=900mN to Part CN?
+Added Parameter Orientation=Straight to Part CN?
+Added Parameter PartNumber=0164227-1001A1RLF to Part CN?
+Added Parameter Pins=2 to Part D?
+Added Parameter Pins=2 to Part D?
+Added Parameter Pins=2 to Part D?
+Added Parameter Pins=2 to Part D?
+Added Parameter Pitch=406.4µm to Part CN?
+Added Parameter Reference Voltage=12V to Part D?
+Added Parameter Reference Voltage=12V to Part D?
+Added Parameter Reference Voltage=12V to Part D?
+Added Parameter Reference Voltage=12V to Part D?
+Added Parameter Row Spacing=2.64mm to Part CN?
+Added Parameter Terminal Pitch=400µm to Part CN?
+Added Parameter Voltage Tolerance=2.51% to Part D?
+Added Parameter Voltage Tolerance=2.51% to Part D?
+Added Parameter Voltage Tolerance=2.51% to Part D?
+Added Parameter Voltage Tolerance=2.51% to Part D?
+Added Parameter Zener Current=10mA to Part D?
+Added Parameter Zener Current=10mA to Part D?
+Added Parameter Zener Current=10mA to Part D?
+Added Parameter Zener Current=10mA to Part D?
+Update Managed Component ? From CMP-006-00034-2[MN-IND-4.7µH-744311470] To CMP-006-00034-2[MN-IND-4.7µH-744311470] in Reference_Layout.SchDoc
+Update Managed Component CN? From CMP-002-00087-4[MN-CON-SMA-142-0701-841] To CMP-002-00087-4[MN-CON-SMA-142-0701-841] in Reference_Layout.SchDoc
+Update Managed Component CN? From CMP-001-0000-7[MN-SOM-RPI-CM5] To CMP-001-0000-7[MN-SOM-RPI-CM5] in Reference_Layout.SchDoc
+Update Managed Component D105 From CMP-039-000002-9[MN-DIO-ZENER-12V] To CMP-039-000002-9[MN-DIO-ZENER-12V] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-039-000002-9[MN-DIO-ZENER-12V] To CMP-039-000002-9[MN-DIO-ZENER-12V] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-039-000002-9[MN-DIO-ZENER-12V] To CMP-039-000002-9[MN-DIO-ZENER-12V] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-039-000002-9[MN-DIO-ZENER-12V] To CMP-039-000002-9[MN-DIO-ZENER-12V] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-039-000002-9[MN-DIO-ZENER-12V] To CMP-039-000002-9[MN-DIO-ZENER-12V] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-004-00036-3[MN-DIO-MMSD4148T3G] To CMP-004-00036-3[MN-DIO-MMSD4148T3G] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-004-00035-7[MN-DIO-SS14FL-TP] To CMP-004-00035-7[MN-DIO-SCHOTTKY-SS14FL-TP] in Reference_Layout.SchDoc
+Update Managed Component D? From CMP-004-00034-4[MN-DIO-TVS-SMAJ12CA] To CMP-004-00034-4[MN-DIO-TVS-SMAJ12CA] in Reference_Layout.SchDoc
+Update Managed Component FB? From CMP-006-00032-3[MN-IND-FB-74279226101] To CMP-006-00032-3[MN-IND-FB-74279226101] in Reference_Layout.SchDoc
+Update Managed Component J? From CMP-002-00089-5[MN-CON-USB-USB4105-GF-A] To CMP-002-00089-5[MN-CON-USB-USB4105-GF-A] in Reference_Layout.SchDoc
+Update Managed Component L419 From CMP-006-00030-6[MN-IND-DNP] To CMP-006-00030-6[MN-IND-DNP-0805] in Reference_Layout.SchDoc
+Update Managed Component L419 From CMP-006-00030-6[MN-IND-DNP] To CMP-006-00030-6[MN-IND-DNP-0805] in Reference_Layout.SchDoc
+Update Managed Component L? From CMP-006-00031-3[MN-IND-ACP3225-102-2P-T000] To CMP-006-00031-3[MN-IND-ACP3225-102-2P-T000] in Reference_Layout.SchDoc
+Update Managed Component L? From CMP-006-00029-7[MN-IND-100µH-140mA-4.55Ω-Shielded] To CMP-006-00029-7[MN-IND-100µH-0805] in Reference_Layout.SchDoc
+Update Managed Component MH? From CMP-032-000002-3[MN-PCB-MH-M3-PLATED] To CMP-032-000002-3[MN-PCB-MH-M3-PLATED] in Reference_Layout.SchDoc
+Update Managed Component Q100 From CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] To CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] in Reference_Layout.SchDoc
+Update Managed Component Q101 From CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] To CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] To CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] To CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] To CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] in Reference_Layout.SchDoc
+Update Managed Component Q? From CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] To CMP-044-000000-7[MN-TRN-MOSFET-P_CH-100V-120A-SQM120P10_10M1LGE3] in Reference_Layout.SchDoc
+Update Managed Component TP? From CMP-071-000000-5[TestPoint] To CMP-071-000000-5[MN-TPT-1MM-PAD] in Reference_Layout.SchDoc
+Update Managed Component TP? From CMP-071-000000-5[TestPoint] To CMP-071-000000-5[MN-TPT-1MM-PAD] in Reference_Layout.SchDoc
+Update Managed Component TP? From CMP-071-000000-5[TestPoint] To CMP-071-000000-5[MN-TPT-1MM-PAD] in Reference_Layout.SchDoc
+Update Managed Component TP? From CMP-071-000000-5[TestPoint] To CMP-071-000000-5[MN-TPT-1MM-PAD] in Reference_Layout.SchDoc
+Update Managed Component U102 From CMP-019-00055-6[MN-IC-PWR-TPS56428DDAR] To CMP-019-00055-6[MN-IC-PWR-TPS56428DDAR] in Reference_Layout.SchDoc
+Update Managed Component U505 From CMP-016-00013-3[MN-IC-LOGIC-SN74LVC1G04DBVR] To CMP-016-00013-3[MN-IC-LOGIC-SN74LVC1G04DBVR] in Reference_Layout.SchDoc
+Update Managed Component U507 From CMP-016-00012-5[MN-IC-LOGIC-SN74LVC1G32DBVR] To CMP-016-00012-5[MN-IC-LOGIC-SN74LVC1G32DBVR] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-019-00056-3[MN-IC-PWR-LDL112PV33R] To CMP-019-00056-3[MN-IC-PWR-LDL112PV33R] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-019-00056-3[MN-IC-PWR-LDL112PV33R] To CMP-019-00056-3[MN-IC-PWR-LDL112PV33R] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-019-00053-5[MN-IC-PWR-TPS55340QRTERQ1] To CMP-019-00053-5[MN-IC-PWR-TPS55340QRTERQ1] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-020-00024-4[MN-IC-MCU-STM32G071RBT6] To CMP-020-00024-4[MN-IC-MCU-STM32G071RBT6] in Reference_Layout.SchDoc
+Update Managed Component U? From CMP-020-00024-4[MN-IC-MCU-STM32G071RBT6] To CMP-020-00024-4[MN-IC-MCU-STM32G071RBT6] in Reference_Layout.SchDoc

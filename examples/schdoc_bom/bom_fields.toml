@@ -1,0 +1,61 @@
+# bom_fields.toml — which fields schdoc_bom.py pulls out of a project, and in what order.
+#
+# Edit this file to change the BOM. Every entry in `columns` becomes one CSV
+# column, written left to right in the order listed here.
+#
+#   name       the CSV header text (required)
+#   source     where the value comes from (optional, default "parameter")
+#   parameter  the component parameter to read when source = "parameter"
+#              (optional, defaults to `name`)
+#
+# Built-in sources — values the schematic knows about that are not parameters:
+#
+#   document              file name of the SchDoc the part is placed on
+#   document_path         path of the SchDoc, relative to the project
+#   designator            reference designator (R1, C12, U3 ...)
+#   comment               the Comment field
+#   description           the component description
+#   lib_reference         library symbol name
+#   footprint             current footprint name
+#   library_path          source library path
+#   source_library_name   source library name
+#   design_item_id        Design Item ID (managed-part item, e.g. CMP-009-00190-9)
+#   unique_id             per-placement unique ID
+#   component_kind        standard / graphical / standard_no_bom / ...
+#   part_designator       designator with the multi-part suffix, e.g. U3A
+#   part_id               which part of a multi-part component (1-based)
+#   part_count            number of parts in the symbol
+#
+# Anything not in that list is a component parameter, matched by name
+# (case-insensitively). A parameter a component does not carry comes out blank.
+# Run the script once and read output/available_parameters.csv to see every
+# parameter name that actually exists in your project.
+
+columns = [
+  { name = "Document",    source = "document"   },
+  { name = "Identifier",  source = "designator" },
+  { name = "Capacitance" },
+  { name = "Inductance"  },
+  { name = "Resistance"  },
+  { name = "Value"       },
+  { name = "PartNumber"  },
+]
+
+
+[options]
+
+# Skip components whose ComponentKind excludes them from the BOM
+# (graphical, standard_no_bom, net_tie_no_bom).
+include_non_bom_components = false
+
+# Collapse the separate placements of a multi-part symbol (a quad op-amp
+# placed as U1A..U1D) into a single row. Documents are joined with "; " so
+# no sheet is lost. Set false to get one row per placement.
+merge_multi_part_components = true
+
+# Column names to sort by, outermost first. Values sort naturally, so R2
+# comes before R10. An unknown name here is ignored.
+sort_by = ["Document", "Identifier"]
+
+# What to write for a parameter the component does not carry.
+blank = ""

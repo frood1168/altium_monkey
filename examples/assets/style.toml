@@ -56,7 +56,7 @@ bold = false
 area_color = "#FFFF96"
 
 [text_string]
-font_name = "Times New Roman"
+font_name = "Consolas"
 font_size = 11
 bold = false
 
@@ -107,7 +107,7 @@ arrow_kind = "BLOCK_TRIANGLE"
 font_name = "Consolas"
 font_size = 10
 bold = true
-color = "#000080"
+color = "#000000"
 # Conflicts found:
 # bold = false
 

@@ -2070,3 +2070,27 @@ outputs = [
 ]
 requires_extra = []
 tags = ["intlib", "schlib", "pcblib", "merge", "library-management"]
+
+[[examples]]
+id = "schdoc_bom"
+title = "Configurable parameter BOM from a project"
+summary = "Walk every SchDoc in a project, pull the component fields named in bom_fields.toml, and write a CSV BOM plus an index of every parameter name the project uses."
+areas = ["schdoc", "project", "reporting"]
+status = "ready"
+entrypoint = "schdoc_bom/schdoc_bom.py"
+doc = "schdoc_bom/README.md"
+inputs = []
+assets = [
+  "assets/projects/hydroscope/Hydroscope.PrjPcb",
+  "assets/projects/hydroscope/CPU.SchDoc",
+  "assets/projects/hydroscope/POWER_SUPPLY.SchDoc",
+  "assets/projects/hydroscope/TOP_LEVEL.SchDoc",
+  "assets/projects/hydroscope/US_IF.SchDoc",
+  "schdoc_bom/bom_fields.toml",
+]
+outputs = [
+  "schdoc_bom/output/bom.csv",
+  "schdoc_bom/output/available_parameters.csv",
+]
+requires_extra = []
+tags = ["schdoc", "bom", "parameters", "csv", "report", "toml-config"]
