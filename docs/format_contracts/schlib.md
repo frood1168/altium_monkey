@@ -15,6 +15,10 @@
 
 SchLib follows the same `ObjectCollection` ownership rules as SchDoc at the
 symbol level. `AltiumSchLib` owns symbols, and each symbol owns its records.
+`AltiumSchLib.symbols`, `AltiumSymbol.objects`, and the symbol's typed accessors
+are read-only live query views. Do not append to or replace those views; use
+`AltiumSchLib.add_symbol()` / `remove_symbol()` and
+`AltiumSymbol.add_object()` / `remove_object()` for structural changes.
 Typed views are live filtered views, not independent mutable lists.
 
 Use symbol-owned mutation APIs such as `add_object(...)` for pins, component
@@ -51,6 +55,17 @@ newly authored libraries and preserves the previous output.
 `SchSvgRenderOptions`. Normal output includes a root `viewBox`.
 
 See [SVG](svg.md) for the shared rendering contract.
+
+## Auxiliary Stream Compatibility
+
+SchLib reads `PinTextData` and embedded-image Storage using Altium-compatible,
+bounded declared-prefix semantics. This accepts evidenced legacy header and
+row-name spellings without treating malformed selected data as valid. Clean
+PinTextData aliases apply in source order and a later default row clears prior
+custom state. Storage validates and budgets every selected row, then retains
+the first case-insensitive name. Clean PinTextData saves preserve source bytes;
+an explicit semantic synchronization
+writes the canonical current representation.
 
 ## Test Gates
 

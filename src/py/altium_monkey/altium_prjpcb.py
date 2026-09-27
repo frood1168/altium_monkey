@@ -24,10 +24,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+from .altium_text_semantics import altium_name_key, trim_altium_whitespace
 from .altium_api_markers import public_api
 from .altium_configparser_helpers import preserve_option_case as _preserve_option_case
+from ._logical_source_identity import (
+    _logical_source_basename,
+    _logical_source_identity_key,
+    _normalize_project_document_identity as _normalize_logical_project_identity,
+)
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +43,9 @@ if TYPE_CHECKING:
 
 DocumentOption = tuple[str, str]
 _PRIMARY_TEXT_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "cp1252")
+_ASCII_LOWER_TRANSLATION = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"
+)
 _LOSSY_TEXT_FALLBACK = "latin-1"
 
 
@@ -68,11 +77,14 @@ def _parse_variant_key_values(value: str) -> dict[str, str]:
     Parse Altium's pipe-separated project variant field format.
     """
     result: dict[str, str] = {}
+    field_names: dict[str, str] = {}
     for pair in str(value or "").split("|"):
         if "=" not in pair:
             continue
         key, parsed_value = pair.split("=", 1)
-        result[key] = parsed_value
+        lookup_key = altium_name_key(key)
+        selected_key = field_names.setdefault(lookup_key, key)
+        result[selected_key] = parsed_value
     return result
 
 
@@ -83,17 +95,488 @@ def _build_parameter_override_map(
     Group parsed ParamVariation rows as designator -> parameter name -> value.
     """
     overrides: dict[str, dict[str, str]] = {}
+    designator_names: dict[str, str] = {}
+    parameter_names: dict[str, dict[str, str]] = {}
     for row in param_variations:
         designator = str(
-            row.get("ParamDesignator") or row.get("Designator") or ""
+            _variant_row_value(row, "ParamDesignator")
+            or _variant_row_value(row, "Designator")
+            or ""
         ).strip()
-        parameter_name = str(row.get("ParameterName") or "").strip()
+        parameter_name = str(_variant_row_value(row, "ParameterName") or "").strip()
         if not designator or not parameter_name:
             continue
-        overrides.setdefault(designator, {})[parameter_name] = str(
-            row.get("VariantValue", "")
+        designator_key = altium_name_key(designator)
+        selected_designator = designator_names.setdefault(designator_key, designator)
+        selected_parameters = overrides.setdefault(selected_designator, {})
+        selected_names = parameter_names.setdefault(designator_key, {})
+        parameter_key = altium_name_key(parameter_name)
+        selected_parameter = selected_names.setdefault(parameter_key, parameter_name)
+        selected_parameters[selected_parameter] = str(
+            _variant_row_value(row, "VariantValue") or ""
         )
     return overrides
+
+
+def _variant_row_value(row: Mapping[str, str], name: str) -> str | None:
+    lookup_key = altium_name_key(name)
+    for key, value in reversed(tuple(row.items())):
+        if altium_name_key(key) == lookup_key:
+            return value
+    return None
+
+
+def _managed_variation_row(
+    raw: str, *, overwrite_pcb_footprint: bool = True
+) -> dict[str, object] | None:
+    fields = raw.split("|")
+    required = _managed_variation_required_fields(fields)
+    if required is None:
+        return None
+    parameter_designator, unique_id, raw_kind, alternate = required
+    designator = parameter_designator
+    if not trim_altium_whitespace(unique_id):
+        return None
+    kind = _managed_variation_kind(raw_kind)
+    raw_alternate_part = alternate if kind == "2" else ""
+    alternate_part = raw_alternate_part
+    alternate_library_link = (
+        _managed_alternate_library_link(
+            fields, overwrite_pcb_footprint=overwrite_pcb_footprint
+        )
+        if kind == "2"
+        else None
+    )
+    if kind == "2" and not _managed_alternate_link_is_valid(fields):
+        kind = "0"
+    return {
+        "Designator": designator,
+        "UniqueId": unique_id,
+        "Kind": kind,
+        "AlternatePart": alternate_part,
+        "_parameters": {},
+        "_parameter_designator": parameter_designator,
+        "_alternate_library_link": alternate_library_link,
+    }
+
+
+def _managed_alternate_library_link(
+    fields: list[str], *, overwrite_pcb_footprint: bool
+) -> dict[str, object]:
+    """Retain the exact link object created for an authored alternate row."""
+    values: dict[str, object] = {
+        "LibIdentifierKind": "NameWithType",
+        "LibraryIdentifier": "",
+        "SymbolReference": "",
+        "DesignItemID": "",
+        "UseLibraryName": False,
+        "SourceLibraryName": "",
+        "UseDBTableName": False,
+        "DatabaseTableName": "",
+        "VaultGUID": "",
+        "ItemGUID": "",
+        "RevisionGUID": "",
+        "Footprint": "",
+        "IsSameFootprint": False,
+    }
+    boolean_fields = {"UseLibraryName", "UseDBTableName", "IsSameFootprint"}
+    for field in fields[4:]:
+        parsed = _managed_field_value(field, "AltLibLink_")
+        if parsed is None:
+            continue
+        name, separator, value = parsed.partition("=")
+        if not separator or name not in values:
+            continue
+        if name == "LibIdentifierKind":
+            values[name] = _managed_library_identifier_kind(value)
+        elif name in boolean_fields:
+            parsed = _parse_altium_bool(value, default=False)
+            values[name] = (
+                parsed or not overwrite_pcb_footprint
+                if name == "IsSameFootprint"
+                else parsed
+            )
+        else:
+            values[name] = value if trim_altium_whitespace(value) else ""
+    return values
+
+
+def _managed_library_identifier_kind(value: str) -> str:
+    kinds = {
+        altium_name_key(label): name
+        for label, name in (
+            ("Any", "Any"),
+            ("Library Name Only", "NameNoType"),
+            ("Library Name And Type", "NameWithType"),
+            ("Library Full Path", "FullPath"),
+            ("Vault Name", "VaultName"),
+        )
+    }
+    return kinds.get(altium_name_key(value), "NameWithType")
+
+
+def _managed_alternate_link_is_valid(fields: list[str]) -> bool:
+    identifiers = dict.fromkeys(
+        ("LibraryIdentifier", "DesignItemID", "VaultGUID", "ItemGUID"), False
+    )
+    for index in range(4, len(fields)):
+        field = _managed_field_value(fields[index], "AltLibLink_")
+        if field is None:
+            continue
+        name, separator, value = field.partition("=")
+        # Managed prefix matching ignores case; its field-name switch does not.
+        if separator and name in identifiers:
+            identifiers[name] = bool(trim_altium_whitespace(value))
+    return (identifiers["LibraryIdentifier"] and identifiers["DesignItemID"]) or (
+        identifiers["VaultGUID"] and identifiers["ItemGUID"]
+    )
+
+
+def _managed_variation_required_fields(
+    fields: list[str],
+) -> tuple[str, str, str, str] | None:
+    if len(fields) < 4:
+        return None
+    parameter_designator = _managed_field_value(fields[0], "Designator=", anywhere=True)
+    unique_id = _managed_field_value(fields[1], "UniqueId=")
+    raw_kind = _managed_field_value(fields[2], "Kind=")
+    alternate = _managed_field_value(fields[3], "AlternatePart=")
+    values = (parameter_designator, unique_id, raw_kind, alternate)
+    if any(value is None for value in values):
+        return None
+    return cast(tuple[str, str, str, str], values)
+
+
+def _managed_variation_kind(raw: str) -> str:
+    clean = raw.strip()
+    if not re.fullmatch(r"[+-]?[0-9]+", clean):
+        return "0"
+    try:
+        parsed = int(clean, 10)
+    except ValueError:
+        return "0"
+    if not -(2**31) <= parsed < 2**31:
+        return "0"
+    return str(parsed) if parsed in {0, 1, 2} else "0"
+
+
+def _managed_field_value(
+    value: str,
+    marker: str,
+    *,
+    anywhere: bool = False,
+) -> str | None:
+    normalized = altium_name_key(value)
+    normalized_marker = altium_name_key(marker)
+    index = normalized.find(normalized_marker) if anywhere else 0
+    if index < 0 or not normalized[index:].startswith(normalized_marker):
+        return None
+    return value[index + len(marker) :]
+
+
+def _managed_field_starts_with(value: str, marker: str) -> bool:
+    return altium_name_key(value).startswith(altium_name_key(marker))
+
+
+def _managed_variation_parameter(raw: str) -> tuple[str, str] | None:
+    fields = raw.split("|")
+    if len(fields) < 2:
+        return None
+    parameter_marker = "ParameterName="
+    parameter_index = altium_name_key(fields[0]).find(altium_name_key(parameter_marker))
+    if parameter_index < 0 or not _managed_field_starts_with(
+        fields[1], "VariantValue="
+    ):
+        return None
+    name = fields[0][parameter_index + len(parameter_marker) :]
+    value = fields[1][len("VariantValue=") :]
+    return name, value if trim_altium_whitespace(value) else ""
+
+
+def _managed_variations_from_entries(
+    entries: list[tuple[str, str]],
+    *,
+    overwrite_pcb_footprint: bool = True,
+) -> list[dict[str, object]]:
+    variations: list[dict[str, object]] = []
+    for index, (key, raw) in enumerate(entries):
+        if not _numbered_key(key, "Variation"):
+            continue
+        variation = _managed_variation_row(
+            raw, overwrite_pcb_footprint=overwrite_pcb_footprint
+        )
+        if variation is None:
+            continue
+        _attach_managed_variation_parameters(entries, index + 1, variation)
+        variations.append(variation)
+    return variations
+
+
+def _managed_variations_from_lines(
+    lines: list[str], *, overwrite_pcb_footprint: bool = True
+) -> list[dict[str, object]]:
+    variations: list[dict[str, object]] = []
+    current_variation: dict[str, object] | None = None
+    for index, line in enumerate(lines):
+        is_boundary, parsed_variation = _managed_variation_line(
+            line, overwrite_pcb_footprint=overwrite_pcb_footprint
+        )
+        if is_boundary:
+            current_variation = parsed_variation
+            if parsed_variation is not None:
+                variations.append(parsed_variation)
+            continue
+        _attach_managed_line_parameter(lines, index, current_variation)
+    return variations
+
+
+def _managed_variation_line(
+    line: str,
+    *,
+    overwrite_pcb_footprint: bool = True,
+) -> tuple[bool, dict[str, object] | None]:
+    if not _managed_field_starts_with(line, "Variation"):
+        return False, None
+    key, separator, raw = line.partition("=")
+    if not separator or not _numbered_key(key, "Variation"):
+        return True, None
+    return True, _managed_variation_row(
+        raw, overwrite_pcb_footprint=overwrite_pcb_footprint
+    )
+
+
+def _attach_managed_line_parameter(
+    lines: list[str],
+    index: int,
+    variation: dict[str, object] | None,
+) -> None:
+    if variation is None or index + 1 >= len(lines):
+        return
+    key, separator, raw = lines[index].partition("=")
+    if not separator or not _numbered_key(key, "ParamVariation"):
+        return
+    designator = str(variation["_parameter_designator"])
+    if not altium_name_key(lines[index + 1]).endswith(altium_name_key(designator)):
+        return
+    parsed = _managed_variation_parameter(raw)
+    if parsed is not None:
+        _set_managed_variation_parameter(variation, *parsed)
+
+
+def _set_managed_variation_parameter(
+    variation: dict[str, object],
+    name: str,
+    value: str,
+) -> None:
+    parameters = variation["_parameters"]
+    if not isinstance(parameters, dict):
+        return
+    lookup_key = altium_name_key(name)
+    selected_name = next(
+        (
+            str(candidate)
+            for candidate in parameters
+            if altium_name_key(str(candidate)) == lookup_key
+        ),
+        name,
+    )
+    parameters[selected_name] = value
+
+
+def _attach_managed_variation_parameters(
+    entries: list[tuple[str, str]],
+    start: int,
+    variation: dict[str, object],
+) -> None:
+    designator = str(variation["_parameter_designator"])
+    parameters = variation["_parameters"]
+    if not isinstance(parameters, dict):
+        return
+    parameter_names: dict[str, str] = {}
+    for index in range(start, len(entries) - 1):
+        key, raw = entries[index]
+        if altium_name_key(key).startswith("VARIATION"):
+            break
+        if not _numbered_key(key, "ParamVariation"):
+            continue
+        next_key, next_value = entries[index + 1]
+        next_line = f"{next_key}={next_value}"
+        if not altium_name_key(next_line).endswith(altium_name_key(designator)):
+            continue
+        parsed = _managed_variation_parameter(raw)
+        if parsed is not None:
+            name, value = parsed
+            lookup_key = altium_name_key(name)
+            selected_name = parameter_names.setdefault(lookup_key, name)
+            parameters[selected_name] = value
+
+
+def _numbered_key(value: str, prefix: str) -> bool:
+    normalized = altium_name_key(value)
+    marker = altium_name_key(prefix)
+    suffix = normalized[len(marker) :]
+    return (
+        normalized.startswith(marker)
+        and bool(suffix)
+        and ord(suffix[0]) <= 0xFFFF
+        and suffix[0].isdecimal()
+    )
+
+
+def _managed_variant_source_lines(
+    source_lines: list[str],
+    variant_name: str,
+) -> list[str] | None:
+    target = altium_name_key(variant_name)
+    for index, line in enumerate(source_lines):
+        if not _managed_field_starts_with(line, "[ProjectVariant"):
+            continue
+        header = _managed_variant_header(source_lines, index)
+        if header is None:
+            continue
+        description, description_index = header
+        if altium_name_key(description) != target:
+            continue
+        end = _managed_variant_region_end(source_lines, description_index + 1)
+        return source_lines[description_index + 1 : end]
+    return None
+
+
+def _managed_variant_region_end(source_lines: list[str], start: int) -> int:
+    for index in range(start, len(source_lines)):
+        line = source_lines[index]
+        if line.startswith("[") and not _managed_variant_parameter_header(line):
+            return index
+    return len(source_lines)
+
+
+def _managed_variant_parameter_header(line: str) -> bool:
+    return _managed_field_starts_with(line, "[Parameter") and "_" in line
+
+
+def _managed_variant_parameters_from_lines(lines: list[str]) -> dict[str, str]:
+    parameters: dict[str, str] = {}
+    for index, line in enumerate(lines):
+        if not _managed_variant_parameter_header(line) or index + 2 >= len(lines):
+            continue
+        name = _managed_field_value(lines[index + 1], "Name=")
+        value = _managed_field_value(lines[index + 2], "Value=")
+        if name is None or value is None:
+            continue
+        lookup = altium_name_key(name)
+        existing = next(
+            (
+                candidate
+                for candidate in parameters
+                if altium_name_key(candidate) == lookup
+            ),
+            None,
+        )
+        normalized = value if trim_altium_whitespace(value) else ""
+        if existing is None:
+            parameters[name] = normalized
+        else:
+            parameters[existing] = normalized
+    return parameters
+
+
+def _managed_variant_header(
+    source_lines: list[str],
+    header_index: int,
+) -> tuple[str, int] | None:
+    first_index = header_index + 1
+    if first_index >= len(source_lines):
+        return None
+    description_index = first_index
+    if _managed_field_starts_with(source_lines[first_index], "UniqueID="):
+        description_index += 1
+    if description_index >= len(source_lines):
+        return None
+    description = _managed_field_value(
+        source_lines[description_index],
+        "Description=",
+    )
+    if description is None:
+        return None
+    return description, description_index
+
+
+def _managed_entries_description(entries: list[tuple[str, str]]) -> str | None:
+    if not entries:
+        return None
+    description_index = int(
+        altium_name_key(entries[0][0]) == altium_name_key("UniqueID")
+    )
+    if description_index >= len(entries):
+        return None
+    key, description = entries[description_index]
+    if altium_name_key(key) != altium_name_key("Description"):
+        return None
+    return description
+
+
+def _managed_config_value(
+    config: configparser.ConfigParser,
+    section_name: str,
+    option_name: str,
+) -> str | None:
+    section_key = altium_name_key(section_name)
+    option_key = altium_name_key(option_name)
+    selected: str | None = None
+    for section in config.sections():
+        if altium_name_key(section) != section_key:
+            continue
+        entries = _raw_config_section_entries(config, section) or []
+        for key, value in entries:
+            if altium_name_key(key) == option_key:
+                selected = value
+        break
+    return selected
+
+
+def _selected_variant_section(
+    config: configparser.ConfigParser,
+    variant_name: str,
+) -> str | None:
+    target = altium_name_key(variant_name)
+    for section in config.sections():
+        if not _managed_field_starts_with(section, "ProjectVariant"):
+            continue
+        entries = _raw_config_section_entries(config, section)
+        description = (
+            _managed_entries_description(entries) if entries is not None else None
+        )
+        if description is not None and altium_name_key(description) == target:
+            return section
+    return None
+
+
+def _raw_config_section_entries(
+    config: configparser.ConfigParser,
+    section: str,
+) -> list[tuple[str, str]] | None:
+    raw_sections = vars(config).get("_sections")
+    if not isinstance(raw_sections, dict):
+        return None
+    raw_section = raw_sections.get(section)
+    if not isinstance(raw_section, dict):
+        return None
+    return [
+        (str(key), str(value))
+        for key, value in raw_section.items()
+        if key != "__name__" and value is not None
+    ]
+
+
+def _read_nonnegative_variant_count(
+    config: configparser.ConfigParser,
+    section: str,
+    option: str,
+) -> int:
+    count = config.getint(section, option, fallback=0)
+    if count < 0:
+        raise ValueError(f"{section}.{option} must be a nonnegative integer")
+    return count
 
 
 class NetIdentifierScope(IntEnum):
@@ -109,6 +592,23 @@ class NetIdentifierScope(IntEnum):
     HIERARCHICAL = 2  # eFlatten_Hierarchical_GlobalPorts: Sheet entry/port connections
     GLOBAL = 3  # eFlatten_Global: Everything global (default for free documents)
     STRICT_HIERARCHICAL = 4  # eFlatten_Hierarchical_Strict: Strict hierarchical
+
+
+class ChannelRoomNamingStyle(IntEnum):
+    """
+    Multichannel room naming style for Altium projects.
+
+    Mirrors Altium's channel room naming style options. Stored as
+    ChannelRoomNamingStyle in the [Design] section of .PrjPcb files and
+    controls how compiled physical-document room names are suffixed
+    (flat rank suffix vs hierarchical name path, numeric vs alpha rank).
+    """
+
+    FLAT_NUMERIC_WITH_NAMES = 0  # eChannelRoomNamingStyle_FlatNumericWithNames
+    FLAT_ALPHA_WITH_NAMES = 1  # eChannelRoomNamingStyle_FlatAlphaWithNames
+    NUMERIC_NAME_PATH = 2  # eChannelRoomNamingStyle_NumericNamePath
+    ALPHA_NAME_PATH = 3  # eChannelRoomNamingStyle_AlphaNamePath
+    MIXED_NAME_PATH = 4  # eChannelRoomNamingStyle_MixedNamePath
 
 
 def _parse_altium_bool(value: object, *, default: bool = False) -> bool:
@@ -372,6 +872,15 @@ def _normalize_altium_path(path: str, is_directory: bool = False) -> str:
     return normalized
 
 
+def _normalize_project_document_identity(path: str | Path) -> str:
+    """Normalize one nonempty relative project identity without losing subpaths."""
+    try:
+        normalized = _normalize_logical_project_identity(str(path))
+    except ValueError as exc:
+        raise ValueError(f"invalid project document path {str(path)!r}: {exc}") from exc
+    return normalized.replace("/", "\\")
+
+
 def _altium_path_name(path: str | Path) -> str:
     """
     Return the final name from an Altium project path on any host platform.
@@ -379,8 +888,12 @@ def _altium_path_name(path: str | Path) -> str:
     `.PrjPcb` paths use Windows separators even when parsed on macOS/Linux, so
     `Path(...).name` is not sufficient for project-relative paths.
     """
-    normalized = str(path).replace("\\", "/")
-    return normalized.rsplit("/", 1)[-1]
+    return _altium_path_for_host(path).name
+
+
+def _altium_path_for_host(path: str | Path) -> Path:
+    """Convert Altium separators before using a project path on this host."""
+    return Path(str(path).replace("\\", "/"))
 
 
 def _numbered_section_index(section: str, prefix: str) -> int | None:
@@ -548,7 +1061,10 @@ class AltiumPrjPcb:
         self.config = configparser.ConfigParser(interpolation=None)
         self.config.optionxform = _preserve_option_case
         self.documents: list[DocumentEntry] = []
+        self._document_source_sections: dict[int, str] = {}
+        self._duplicate_document_source_sections: set[str] = set()
         self._loaded_encoding: str | None = None
+        self._source_lines: list[str] = []
 
         if filepath is not None:
             self._load_from_file()
@@ -562,6 +1078,7 @@ class AltiumPrjPcb:
             raise FileNotFoundError(f"Project file not found: {filepath}")
         text, encoding = _decode_prjpcb_text(filepath.read_bytes(), filepath)
         self._loaded_encoding = encoding
+        self._source_lines = text.splitlines()
         self.config.read_string(text, source=str(filepath))
         self._extract_documents()
 
@@ -574,6 +1091,9 @@ class AltiumPrjPcb:
         references and must participate in project-level compile loading.
         """
         self.documents = []
+        self._document_source_sections = {}
+        self._duplicate_document_source_sections = set()
+        identities: dict[str, str] = {}
         doc_num = 1
 
         while True:
@@ -584,6 +1104,14 @@ class AltiumPrjPcb:
             doc_path = self.config.get(section, "DocumentPath", fallback="")
             doc_id = self.config.get(section, "DocumentUniqueId", fallback="")
             options = [(key, value) for key, value in self.config.items(section)]
+            normalized = _normalize_project_document_identity(doc_path)
+            identity = _logical_source_identity_key(normalized)
+            first_section = identities.get(identity)
+            if first_section is not None:
+                self._ignore_duplicate_document(section, first_section, normalized)
+                doc_num += 1
+                continue
+            identities[identity] = section
 
             self.documents.append(
                 {
@@ -611,18 +1139,36 @@ class AltiumPrjPcb:
             doc_path = self.config.get(section, "DocumentPath", fallback="")
             if not doc_path:
                 continue
+            normalized = _normalize_project_document_identity(doc_path)
+            identity = _logical_source_identity_key(normalized)
+            first_section = identities.get(identity)
+            if first_section is not None:
+                self._ignore_duplicate_document(section, first_section, normalized)
+                continue
+            identities[identity] = section
             options = [(key, value) for key, value in self.config.items(section)]
-            self.documents.append(
-                {
-                    "path": doc_path,
-                    "unique_id": self.config.get(
-                        section,
-                        "DocumentUniqueId",
-                        fallback="",
-                    ),
-                    "options": options,
-                }
-            )
+            document: DocumentEntry = {
+                "path": doc_path,
+                "unique_id": self.config.get(
+                    section,
+                    "DocumentUniqueId",
+                    fallback="",
+                ),
+                "options": options,
+            }
+            self.documents.append(document)
+            self._document_source_sections[id(document)] = section
+
+    def _ignore_duplicate_document(
+        self, section: str, first_section: str, normalized_path: str
+    ) -> None:
+        self._duplicate_document_source_sections.add(section)
+        log.warning(
+            "Ignoring duplicate PrjPcb document path %r in [%s]; using project member [%s]",
+            normalized_path,
+            section,
+            first_section,
+        )
 
     def add_document(self, path: str | Path, unique_id: str | None = None) -> None:
         """
@@ -633,25 +1179,26 @@ class AltiumPrjPcb:
                   Use backslashes for Windows compatibility.
             unique_id: Optional unique ID (generated if not provided)
         """
-        path_str = str(Path(path).name)  # Use just the filename
-
-        # Normalize path to Windows format (backslashes)
-        path_str = _normalize_altium_path(path_str, is_directory=False)
+        path_str = _normalize_project_document_identity(path)
+        identity = _logical_source_identity_key(path_str)
+        for document in self.documents:
+            existing = _normalize_project_document_identity(document["path"])
+            if _logical_source_identity_key(existing) == identity:
+                raise ValueError(f"duplicate project document path: {path_str}")
 
         if unique_id is None:
             # Generate a unique ID similar to Altium's format (8 uppercase chars)
             unique_id = str(uuid.uuid4()).replace("-", "").upper()[:8]
 
-        self.documents.append(
-            {
-                "path": path_str,
-                "unique_id": unique_id,
-                "options": [
-                    ("DocumentPath", path_str),
-                    ("DocumentUniqueId", unique_id),
-                ],
-            }
-        )
+        document: DocumentEntry = {
+            "path": path_str,
+            "unique_id": unique_id,
+            "options": [
+                ("DocumentPath", path_str),
+                ("DocumentUniqueId", unique_id),
+            ],
+        }
+        self.documents.append(document)
 
     def remove_all_documents(self) -> None:
         """
@@ -668,6 +1215,8 @@ class AltiumPrjPcb:
             self.config.remove_section(section)
             doc_num += 1
 
+        self._remove_duplicate_document_sections()
+
     def set_documents_from_directory(
         self, directory: Path, pattern: str = "*.SchDoc"
     ) -> None:
@@ -676,15 +1225,61 @@ class AltiumPrjPcb:
 
         Args:
             directory: Directory to scan
-            pattern: Glob pattern for files to include
+            pattern: Path.glob pattern for files to include
+
+        Matching directories are ignored. Results use a deterministic ASCII-
+        lowercase filename order with exact spelling as the tie-breaker. The
+        replacement is atomic and retains managed DeviceSheet sections.
         """
-        self.remove_all_documents()
-
         directory = Path(directory)
-        files = sorted(directory.glob(pattern), key=lambda p: p.name.lower())
-
+        files = sorted(
+            (path for path in directory.glob(pattern) if path.is_file()),
+            key=lambda path: (
+                path.name.translate(_ASCII_LOWER_TRANSLATION),
+                path.name,
+            ),
+        )
+        retained_devices = [
+            document
+            for document in self.documents
+            if self._document_source_sections.get(id(document), "")
+            .lower()
+            .startswith("devicesheet")
+        ]
+        identities = {
+            _logical_source_identity_key(
+                _normalize_project_document_identity(document["path"])
+            )
+            for document in retained_devices
+        }
+        replacements: list[DocumentEntry] = []
         for file in files:
-            self.add_document(file.name)
+            path = _normalize_project_document_identity(file.name)
+            identity = _logical_source_identity_key(path)
+            if identity in identities:
+                raise ValueError(f"duplicate project document path: {path}")
+            identities.add(identity)
+            unique_id = uuid.uuid4().hex.upper()[:8]
+            replacements.append(
+                {
+                    "path": path,
+                    "unique_id": unique_id,
+                    "options": [
+                        ("DocumentPath", path),
+                        ("DocumentUniqueId", unique_id),
+                    ],
+                }
+            )
+
+        device_sections = {
+            id(document): self._document_source_sections[id(document)]
+            for document in retained_devices
+        }
+        doc_num = 1
+        while self.config.remove_section(f"Document{doc_num}"):
+            doc_num += 1
+        self.documents = [*replacements, *retained_devices]
+        self._document_source_sections = device_sections
 
     def save(self, filepath: Path | str) -> None:
         """
@@ -712,8 +1307,17 @@ class AltiumPrjPcb:
             self.config.remove_section(section)
             doc_num += 1
 
+        self._remove_duplicate_document_sections()
+
         # Add document sections
-        for idx, doc in enumerate(self.documents, start=1):
+        writable_documents = (
+            document
+            for document in self.documents
+            if not self._document_source_sections.get(id(document), "")
+            .lower()
+            .startswith("devicesheet")
+        )
+        for idx, doc in enumerate(writable_documents, start=1):
             section = f"Document{idx}"
             self.config.add_section(section)
 
@@ -748,6 +1352,11 @@ class AltiumPrjPcb:
         # Write to file with UTF-8 BOM (Altium standard)
         with open(filepath, "w", encoding="utf-8-sig") as f:
             self.config.write(f, space_around_delimiters=False)
+
+    def _remove_duplicate_document_sections(self) -> None:
+        for section in self._duplicate_document_source_sections:
+            self.config.remove_section(section)
+        self._duplicate_document_source_sections.clear()
 
     @classmethod
     def create_minimal(cls, name: str = "project") -> AltiumPrjPcb:
@@ -817,8 +1426,13 @@ class AltiumPrjPcb:
         Set multiple project-level parameters.
 
         Existing parameters are updated case-insensitively; new parameters are
-        appended as additional numbered `[ParameterN]` sections.
+        appended as additional numbered `[ParameterN]` sections. All names are
+        validated before mutation so an invalid later row cannot leave a
+        partially updated project.
         """
+        for name in parameters:
+            if not name.strip():
+                raise ValueError("project parameter name must not be blank")
         for name, value in parameters.items():
             self.set_parameter(name, value)
 
@@ -998,12 +1612,16 @@ class AltiumPrjPcb:
             description = self.config.get(section, "Description", fallback="Unknown")
 
             variations = []
-            variation_count = self.config.getint(section, "VariationCount", fallback=0)
+            variation_count = _read_nonnegative_variant_count(
+                self.config, section, "VariationCount"
+            )
             parameters = []
-            parameter_count = self.config.getint(section, "ParameterCount", fallback=0)
+            parameter_count = _read_nonnegative_variant_count(
+                self.config, section, "ParameterCount"
+            )
             param_variations = []
-            param_variation_count = self.config.getint(
-                section, "ParamVariationCount", fallback=0
+            param_variation_count = _read_nonnegative_variant_count(
+                self.config, section, "ParamVariationCount"
             )
 
             # Get variations
@@ -1043,6 +1661,14 @@ class AltiumPrjPcb:
                 "allow_fabrication": self.config.getboolean(
                     section, "AllowFabrication", fallback=False
                 ),
+                "overwrite_schematic_symbol": _parse_altium_bool(
+                    self.config.get(
+                        section,
+                        "OverwriteSchematicSymbol",
+                        fallback="True",
+                    ),
+                    default=True,
+                ),
                 "variation_count": variation_count,
                 "variations": variations,
                 "parameter_count": parameter_count,
@@ -1055,11 +1681,84 @@ class AltiumPrjPcb:
             # Build DNP list (Kind=1 means Not Fitted)
             dnp_list = []
             for v in variations:
-                if v.get("Kind") == "1":
-                    dnp_list.append(v.get("Designator", ""))
+                if _variant_row_value(v, "Kind") == "1":
+                    dnp_list.append(_variant_row_value(v, "Designator") or "")
             variants[description]["DNP"] = dnp_list
 
         return variants
+
+    def _managed_variant_data(self, variant_name: str) -> dict[str, object] | None:
+        """Return the AD26 compiler projection for one named project variant."""
+        source_lines = _managed_variant_source_lines(self._source_lines, variant_name)
+        if source_lines is not None:
+            overwrite = next(
+                (
+                    value
+                    for line in reversed(source_lines)
+                    if (
+                        value := _managed_field_value(line, "OverwriteSchematicSymbol=")
+                    )
+                    is not None
+                ),
+                "True",
+            )
+            overwrite_pcb = next(
+                (
+                    value
+                    for line in reversed(source_lines[:2])
+                    if (value := _managed_field_value(line, "OverwritePCBFootprint="))
+                    is not None
+                ),
+                "True",
+            )
+            overwrite_pcb_footprint = _parse_altium_bool(overwrite_pcb, default=True)
+            return {
+                "variations": _managed_variations_from_lines(
+                    source_lines,
+                    overwrite_pcb_footprint=overwrite_pcb_footprint,
+                ),
+                "overwrite_schematic_symbol": _parse_altium_bool(
+                    overwrite, default=True
+                ),
+                "overwrite_pcb_footprint": overwrite_pcb_footprint,
+                "parameters": _managed_variant_parameters_from_lines(source_lines),
+            }
+        selected_section = _selected_variant_section(self.config, variant_name)
+        if selected_section is None:
+            return None
+        entries = _raw_config_section_entries(self.config, selected_section)
+        if entries is None:
+            return None
+        overwrite = _managed_config_value(
+            self.config, selected_section, "OverwriteSchematicSymbol"
+        )
+        overwrite_pcb_footprint = _parse_altium_bool(
+            _managed_config_value(
+                self.config, selected_section, "OverwritePCBFootprint"
+            ),
+            default=True,
+        )
+        return {
+            "variations": _managed_variations_from_entries(
+                entries,
+                overwrite_pcb_footprint=overwrite_pcb_footprint,
+            ),
+            "overwrite_schematic_symbol": _parse_altium_bool(overwrite, default=True),
+            "overwrite_pcb_footprint": overwrite_pcb_footprint,
+            "parameters": {},
+        }
+
+    def _managed_current_variant(self) -> str | None:
+        """Return the AD26 compiler current-variant spelling."""
+        selected: str | None = None
+        for line in self._source_lines:
+            value = _managed_field_value(line, "CurrentVariant=")
+            if value is not None:
+                selected = value
+        if selected is not None:
+            return selected or None
+        fallback = _managed_config_value(self.config, "Design", "CurrentVariant")
+        return fallback or None
 
     def get_parameter(self, name: str) -> str | None:
         """
@@ -1121,15 +1820,23 @@ class AltiumPrjPcb:
         Returns:
             List of absolute Path objects for active SchDocs in project order.
         """
+        filepath = self.filepath
+        if filepath is None:
+            raise ValueError("Cannot get SchDoc paths: project has no filepath context")
+
         all_paths = self.get_schdoc_paths()
         if not all_paths:
             return []
 
-        path_by_name = {path.name.lower(): path for path in all_paths}
+        path_by_project_path = {
+            str(path).replace("\\", "/").casefold(): path for path in all_paths
+        }
+        project_dir = filepath.parent
         active_paths: list[Path] = []
         for document in self.documents:
             doc_path = str(document.get("path", ""))
-            if Path(doc_path).suffix.lower() != ".schdoc":
+            host_path = _altium_path_for_host(doc_path)
+            if host_path.suffix.lower() != ".schdoc":
                 continue
 
             option_keys = {key for key, _ in document["options"]}
@@ -1137,7 +1844,9 @@ class AltiumPrjPcb:
             if not extra_keys:
                 continue
 
-            full_path = path_by_name.get(Path(doc_path).name.lower())
+            resolved_path = (project_dir / host_path).resolve()
+            path_key = str(resolved_path).replace("\\", "/").casefold()
+            full_path = path_by_project_path.get(path_key)
             if full_path is not None:
                 active_paths.append(full_path)
 
@@ -1156,7 +1865,7 @@ class AltiumPrjPcb:
             return None, ()
 
         top_level: str | None = None
-        names: list[str] = []
+        identities: list[str] = []
         seen: set[str] = set()
         for line in lines:
             fields: dict[str, str] = {}
@@ -1168,21 +1877,27 @@ class AltiumPrjPcb:
 
             record = fields.get("record", "").lower()
             if record == "topleveldocument":
-                top_level_name = Path(
-                    fields.get("filename", "").replace("\\", "/")
-                ).name
-                if top_level_name:
-                    top_level = top_level_name
+                raw_top = fields.get("filename", "")
+                if raw_top:
+                    try:
+                        normalized_top = _normalize_logical_project_identity(raw_top)
+                    except ValueError:
+                        normalized_top = ""
+                    if normalized_top:
+                        top_level = _logical_source_basename(normalized_top)
             for key in ("sourcedocument", "filename"):
                 value = fields.get(key, "")
                 if not value.lower().endswith(".schdoc"):
                     continue
-                name = Path(value.replace("\\", "/")).name
-                normalized = name.lower()
-                if name and normalized not in seen:
-                    seen.add(normalized)
-                    names.append(name)
-        return top_level, tuple(names)
+                try:
+                    normalized = _normalize_logical_project_identity(value)
+                except ValueError:
+                    continue
+                identity = _logical_source_identity_key(normalized)
+                if identity not in seen:
+                    seen.add(identity)
+                    identities.append(normalized)
+        return top_level, tuple(identities)
 
     def get_saved_structure_top_level_schdoc_name(self) -> str | None:
         """Get the saved `.PrjPcbStructure` top-level SchDoc file name."""
@@ -1199,15 +1914,42 @@ class AltiumPrjPcb:
         _top_level, names = self._saved_structure_schdoc_names()
         if not names:
             return []
-        path_by_name = {
-            path.name.lower(): path
-            for path in self.get_schdoc_paths()
-        }
-        return [
-            path_by_name[name.lower()]
-            for name in names
-            if name.lower() in path_by_name
-        ]
+        filepath = self.filepath
+        if filepath is None:
+            return []
+        exact: dict[str, Path] = {}
+        by_name: dict[str, list[Path]] = {}
+        for document in self.documents:
+            raw = str(document.get("path", ""))
+            try:
+                normalized = _normalize_logical_project_identity(raw)
+            except ValueError:
+                continue
+            if not normalized.lower().endswith(".schdoc"):
+                continue
+            path = (filepath.parent / _altium_path_for_host(raw)).resolve()
+            if not path.exists():
+                continue
+            exact[_logical_source_identity_key(normalized)] = path
+            name_key = _logical_source_identity_key(
+                _logical_source_basename(normalized)
+            )
+            by_name.setdefault(name_key, []).append(path)
+
+        resolved: list[Path] = []
+        for identity in names:
+            match = exact.get(_logical_source_identity_key(identity))
+            if match is None:
+                candidates = by_name.get(
+                    _logical_source_identity_key(_logical_source_basename(identity)), []
+                )
+                if len(candidates) == 1:
+                    match = candidates[0]
+                elif len(candidates) > 1:
+                    raise ValueError(f"ambiguous saved schematic basename: {identity}")
+            if match is not None:
+                resolved.append(match)
+        return resolved
 
     def get_pcbdoc_paths(self) -> list[Path]:
         """
@@ -1257,7 +1999,7 @@ class AltiumPrjPcb:
             doc_path = doc["path"]
             if not doc_path.lower().endswith(ext):
                 continue
-            full_path = (project_dir / doc_path).resolve()
+            full_path = (project_dir / _altium_path_for_host(doc_path)).resolve()
             if full_path.exists():
                 matched_paths.append(full_path)
         return matched_paths
@@ -1387,14 +2129,25 @@ class AltiumPrjPcb:
                 )
             return document
 
-        requested = _normalize_altium_path(str(document), is_directory=False).lower()
-        requested_name = _altium_path_name(document).lower()
+        requested = _normalize_project_document_identity(document)
+        requested_key = _logical_source_identity_key(requested)
+        requested_name = _logical_source_identity_key(_altium_path_name(requested))
+        basename_matches: list[int] = []
         for index, entry in enumerate(self.documents):
-            entry_path = str(entry.get("path", ""))
-            if entry_path.lower() == requested:
+            entry_path = _normalize_project_document_identity(
+                str(entry.get("path", ""))
+            )
+            if _logical_source_identity_key(entry_path) == requested_key:
                 return index
-            if _altium_path_name(entry_path).lower() == requested_name:
-                return index
+            if (
+                _logical_source_identity_key(_altium_path_name(entry_path))
+                == requested_name
+            ):
+                basename_matches.append(index)
+        if len(basename_matches) == 1:
+            return basename_matches[0]
+        if len(basename_matches) > 1:
+            raise KeyError(f"Ambiguous project document name: {document}")
         raise KeyError(f"Project document not found: {document}")
 
     def get_document_class_generation_options(

@@ -45,18 +45,23 @@ wire, label, port, sheet-entry, harness, and power-port records use their own
 record UniqueIDs when available. Some synthetic or helper geometry may not have
 a stable source-owned id and should not be treated as semantic identity.
 
-Schematic SVG does not currently embed a document-level JSON metadata payload.
-The relationship sidecar is the `AltiumDesign.to_json(...)` and
-`Netlist.to_json(...)` payload:
+Logical-sheet SVG does not embed a document-level JSON metadata payload. The
+project-level `AltiumDesign.to_physical_svg(page_occurrence_ref)` boundary does
+embed graph scope as attributes: the root carries
+`data-page-occurrence-ref` and `data-artifact-key="sch.dwg_scene"`; a retained
+record group selected by a graphical link additionally carries
+`data-element-id`, `data-graph-target-type`, and `data-graph-target-ref`.
+The authoritative relationship sidecar remains the
+`AltiumDesign.to_json(...)` and `Netlist.to_json(...)` payload:
 
 - `components[].svg_id` points to the component SVG group id, normally the
   component record UniqueID.
 - optional `indexes.svg_to_component` maps component SVG ids back to
   designators when indexes are requested.
 - for repeated sheets and instantiated channels,
-  `indexes.svg_to_components`, `indexes.physical_svg_to_components`, and
-  `physical_pages[]` disambiguate one logical component SVG id into the
-  resolved physical component instances on each physical page.
+  `compiled_schematic_graph.graphical_artifact_links[]` disambiguates a
+  logical element id with its canonical `page_occurrence_ref` and semantic
+  target.
 - `nets[].graphical` groups related schematic SVG ids by record type:
   `wires`, `junctions`, `labels`, `power_ports`, `ports`, `sheet_entries`, and
   `pins`.
@@ -72,16 +77,18 @@ or netlist JSON as the semantic lookup table. Do not infer electrical meaning
 from rendered text strings or group nesting alone.
 
 In repeated/channel projects, a schematic SVG still renders the logical source
-sheet. The physical review identity is the pair of the physical page id from
-`AltiumDesign.to_json()["physical_pages"]` and the source record SVG id. A
-consumer that renders or annotates an instantiated page should select the
-physical page first, then apply the page's resolved components and nets over
-the logical SVG drawing.
+sheet. The physical review selector is the tuple of canonical page occurrence
+ref, artifact key `sch.dwg_scene`, and source record element id from
+`AltiumDesign.to_json()["compiled_schematic_graph"]`. A consumer that renders
+or annotates an instantiated page should select the page occurrence first,
+then resolve its scoped graphical links to component, terminal, local-net,
+hierarchy-occurrence, or page targets.
 
-`AltiumDesign.to_physical_svg(physical_page_id)` is the project-level API for
+`AltiumDesign.to_physical_svg(page_occurrence_ref)` is the project-level API for
 that physical-page rendering. It renders the selected logical SchDoc geometry
 with compiled physical designator text before IR/SVG emission, and the SVG root
-uses the physical page id as `data-doc-id`. `AltiumDesign.to_physical_ir()` is
+uses the canonical page occurrence id as both `data-doc-id` and
+`data-page-occurrence-ref`. `AltiumDesign.to_physical_ir()` is
 the corresponding IR boundary for consumers that need geometry JSON instead of
 SVG.
 
@@ -96,8 +103,14 @@ Installed system fonts are preferred, and callers can add search roots through
 bundled open-source fonts when unavailable: Arimo for Arial and Microsoft Sans
 Serif-style families, Tinos for Times New Roman-style families, and Cousine for
 Courier New or monospace families. When bundled fallback fonts are used,
-schematic SVG embeds those font faces so browser layout follows the same
-metrics used by the renderer.
+font resolution and measurement use those faces in all modes. SVG attachment is
+separate: the compact default emits no font payload, while
+`SchSvgRenderOptions(embed_bundled_fallback_fonts=True)` embeds only the exact
+package-owned fallback faces required by painted `<text>` elements. Installed,
+configured, alias, explicit-path, test, and general-search fonts are never
+attached. Polygon text has no browser-font dependency and does not attach a
+face. The renderer writes no font sidecars. Compact output can render
+differently on a viewer that does not have the selected fallback family.
 
 ## PCB SVG
 
@@ -410,7 +423,7 @@ Overlay groups are emitted after normal layer geometry when
 obscure review labels. With `pad_designator_overlay_z_order="layer"`,
 pad-designator groups stay inside the owning layer output.
 
-Generated corpus review HTML may promote overlay groups into viewer-owned
+Generated review HTML may promote overlay groups into viewer-owned
 overlay layers so reviewers can toggle labels and datum markers independently
 from fabrication layers. That promotion is a review UI behavior; the raw SVG
 contract remains the class and `data-*` metadata documented above.
@@ -493,5 +506,5 @@ contract here documents how that payload relates to the rendered SVG elements.
 ## Test Gates
 
 The SVG contract is protected by targeted unit tests, public example tests,
-corpus SVG lanes, and release signoff checks. The signoff gate also checks that
-these contract docs are synchronized into the released docs.
+representative SVG comparisons, and release validation. The release checks also
+verify that these contract docs are synchronized into the published docs.

@@ -4,7 +4,7 @@
 
 Public examples are indexed from `examples/manifest.toml`.
 
-Total examples: `109`
+Total examples: `110`
 
 ## Generate
 
@@ -44,6 +44,7 @@ uv run python tools\generate_docs.py
 
 | Example | Areas | Summary | Tags |
 | --- | --- | --- | --- |
+| [`intlib_create_from_libraries`](../../examples/intlib_create_from_libraries/README.md)<br>Create multi-source and aggregate IntLibs | intlib, schlib, pcblib | Build the same realistic seven-component IC, protection, and resistor subset from ordered source libraries and from merged aggregate libraries, then verify graph equivalence, exact embedded sources, warnings, and deterministic output. | intlib, library, generation, multi-source, aggregate, schlib |
 | [`intlib_extract_sources`](../../examples/intlib_extract_sources/README.md)<br>Extract source libraries from an IntLib | intlib, schlib, pcblib | Open an Altium integrated library, extract its embedded SchLib and PcbLib source files, and write an extraction manifest. | intlib, library, source-extraction, schlib, pcblib |
 
 ### `outjob`
@@ -172,7 +173,7 @@ uv run python tools\generate_docs.py
 | --- | --- | --- | --- |
 | [`hello_schlib`](../../examples/hello_schlib/README.md)<br>Create a SchLib hello example | schlib | Create a simple 4-pin IC symbol in a SchLib to demonstrate the basic mechanics of programmatic symbol generation. | hello-world, generation, library, symbol |
 | [`schlib_find_symbol`](../../examples/schlib_find_symbol/README.md)<br>Find symbols across SchLib files | schlib | Scan a folder of SchLib files, build a library-to-symbol index, print all discovered symbols, and demonstrate fuzzy symbol search. | schlib, symbol, search, index, fuzzy-match |
-| [`schlib_merge`](../../examples/schlib_merge/README.md)<br>Merge SchLib files | schlib | Scan a folder of SchLib files, merge all symbols into one combined SchLib, and write a merge manifest. | schlib, symbol, merge, library |
+| [`schlib_merge`](../../examples/schlib_merge/README.md)<br>Merge SchLib files | schlib | Scan a folder of SchLib files, merge fully parseable symbols, and report any skipped legacy libraries in the manifest. | schlib, symbol, merge, library |
 | [`schlib_split`](../../examples/schlib_split/README.md)<br>Split a multi-symbol SchLib | schlib | Load an existing SchLib and split it into one SchLib file per symbol. | schlib, symbol, split |
 
 ## Complete List
@@ -281,8 +282,9 @@ uv run python tools\generate_docs.py
 | [`schdoc_extract_schlib`](../../examples/schdoc_extract_schlib/README.md)<br>Extract SchLibs from a SchDoc | schdoc, schlib, asset-extraction | Extract placed component symbols from a schematic as a combined SchLib, split DBLib-ready SchLibs with metadata/model records stripped, and split SchLibs with parameters and implementations preserved. | schdoc, schlib, component, symbol-extraction, dblib |
 | [`schlib_find_symbol`](../../examples/schlib_find_symbol/README.md)<br>Find symbols across SchLib files | schlib | Scan a folder of SchLib files, build a library-to-symbol index, print all discovered symbols, and demonstrate fuzzy symbol search. | schlib, symbol, search, index, fuzzy-match |
 | [`schlib_split`](../../examples/schlib_split/README.md)<br>Split a multi-symbol SchLib | schlib | Load an existing SchLib and split it into one SchLib file per symbol. | schlib, symbol, split |
-| [`schlib_merge`](../../examples/schlib_merge/README.md)<br>Merge SchLib files | schlib | Scan a folder of SchLib files, merge all symbols into one combined SchLib, and write a merge manifest. | schlib, symbol, merge, library |
+| [`schlib_merge`](../../examples/schlib_merge/README.md)<br>Merge SchLib files | schlib | Scan a folder of SchLib files, merge fully parseable symbols, and report any skipped legacy libraries in the manifest. | schlib, symbol, merge, library |
 | [`intlib_extract_sources`](../../examples/intlib_extract_sources/README.md)<br>Extract source libraries from an IntLib | intlib, schlib, pcblib | Open an Altium integrated library, extract its embedded SchLib and PcbLib source files, and write an extraction manifest. | intlib, library, source-extraction, schlib, pcblib |
+| [`intlib_create_from_libraries`](../../examples/intlib_create_from_libraries/README.md)<br>Create multi-source and aggregate IntLibs | intlib, schlib, pcblib | Build the same realistic seven-component IC, protection, and resistor subset from ordered source libraries and from merged aggregate libraries, then verify graph equivalence, exact embedded sources, warnings, and deterministic output. | intlib, library, generation, multi-source, aggregate, schlib |
 | [`embedded_asset_inventory`](../../examples/embedded_asset_inventory/README.md)<br>Inventory embedded PCB assets | asset-extraction, pcbdoc, pcblib | Load PcbDoc and PcbLib fixtures, write focused embedded-asset inventories, and extract one selected model/font payload by direct embedded asset index. | inventory, embedded-asset, model, font, opaque, json |
 | [`extractable_asset_inventory`](../../examples/extractable_asset_inventory/README.md)<br>Inventory and extract selected assets | asset-extraction, schdoc, schlib, pcbdoc, pcblib | Load SchDoc, SchLib, PcbDoc, and PcbLib fixtures, write typed extractable-asset inventories, and extract one selected symbol, footprint, and embedded model by AltiumAssetRef. | inventory, extract, asset-ref, symbol, footprint, embedded-model |
 | [`schdoc_clean`](../../examples/schdoc_clean/README.md)<br>Clean and normalize project schematics | schdoc, mutation | Open every Hydroscope schematic, iterate through components and sheet-level records, normalize fonts, colors, fills, and line widths, and save cleaned SchDoc copies. | schdoc, mutation, clean, normalize, project |

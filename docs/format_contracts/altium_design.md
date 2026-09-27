@@ -17,10 +17,68 @@
 
 ## Schema Contracts
 
-JSON payloads include explicit schema ids such as `altium_monkey.design.a1` and
-`altium_monkey.netlist.a0`. Breaking JSON payload changes require a new schema
-id. Additive fields may appear within the current schema when existing fields
-keep their meaning.
+JSON payloads include explicit schema ids such as `altium_monkey.design.b0` and
+`altium_monkey.netlist.b0`. Every payload-shape change requires a new schema ID:
+breaking changes advance the leading major letter, while additive changes that
+preserve existing field meaning advance the trailing minor number. Consumers
+should match supported schema IDs exactly unless they implement an explicit
+migration or compatibility range.
+
+Design b0 requires `compiled_schematic_graph` with schema
+`altium_monkey.compiled_schematic_graph.a0`. It intentionally removes the
+Design a2 `physical_pages` projection rather than reusing its schema id.
+Its embedded `nets` retain the established Design b0 `source_sheets` shape;
+they are not standalone Netlist b0 rows, which use structured `source_pages`
+and stable component identities.
+
+`AltiumDesign.to_bom_payload()` emits the versioned
+`altium_monkey.schematic_bom.a0` transport. `AltiumDesign.to_bom()` remains the
+list-returning compatibility API.
+
+## BOM authority
+
+`AltiumDesign.to_bom()` remains a compiled-schematic projection by default.
+It compiles the logical design directly and does not build an intermediate
+netlist. This mode includes logical component occurrences and evaluated
+schematic parameters.
+
+Pass `use_pcb_data=True` for a no-compile manufacturing view of physical parts
+placed on the PcbDoc. That mode uses Texts6 physical designators, footprint and
+description fields from the component record, source library references, and
+the PcbDoc `PrimitiveParameters/Data` cache. PCB `ComponentKind` excludes
+`GRAPHICAL`, `NET_TIE_NO_BOM`, and `STANDARD_NO_BOM` components. Project
+variant DNP rows and cached parameter overrides are still applied.
+
+PCB mode assumes that the board is synchronized. It can omit schematic-only or
+unplaced parts, cannot provide a schematic source-sheet filename, and may
+expose cached parameters that differ from evaluated schematic parameters. It
+does not join or compare the schematic and is available from an
+`AltiumProjectLoadMode.METADATA_ONLY` project. The versioned
+`to_bom_payload()` contract remains schematic-only.
+
+## Pick-and-place authority
+
+`AltiumDesign.to_pnp()` is a PCB projection by default. Placement, rotation,
+layer, footprint, physical designator, description, and parameters come from
+the PcbDoc; `exclude_no_bom=True` also applies the PCB component kind. In
+particular, physical designators and the display-value `comment` use their
+component-owned Texts6 records, while other metadata uses the PcbDoc
+`PrimitiveParameters/Data` cache. The returned parameter map includes a
+canonical `Comment` entry copied from the same Texts6 comment. If an older
+board has no owned comment record, `value`/`Value` and then
+`comment`/`Comment` provide the fallback.
+
+This default assumes the PcbDoc is the synchronized manufacturing authority.
+It does not compile or join the schematic, and it is therefore available from
+an `AltiumProjectLoadMode.METADATA_ONLY` project. Project variant DNP filtering
+still comes from the PrjPcb.
+
+Pass `use_schematic_metadata=True` to retain the earlier behavior: compile the
+schematic netlist, join by physical designator, and use matching schematic
+value, description, parameters, and component kind. Placement facts remain
+PCB-owned in both modes. The opt-in is useful when a caller explicitly needs
+logical metadata or wants to compare a synchronized PCB with the schematic;
+it is not the default PnP cost model.
 
 ## Netlist Connectivity
 
@@ -45,49 +103,31 @@ Netlist records carry `nets[].graphical` and `nets[].endpoints` for schematic
 highlighting and semantic trace workflows.
 
 For designs with repeated sheets or instantiated channels, `svg_id` alone is a
-logical source identity and is not enough to identify one physical component.
-The design payload therefore also carries `physical_pages`, a user-facing index
-over the compiled physical schematic pages. Each physical page row includes:
+logical drawing identifier and is not enough to identify one realized object.
+Design b0 carries the authoritative `compiled_schematic_graph` instead of a
+repeated `physical_pages` projection. Its ten collections describe unit/page
+definitions and occurrences, hierarchy, component bodies, page-local scalar
+nets, terminals, hierarchy terminal bindings, and graphical artifact links.
 
-- `id`: the physical sheet identity;
-- `source_sheet` and `source_path`: the logical SchDoc rendered by SVG;
-- `is_top_level`: true for the root physical schematic page;
-- channel fields such as `physical_instance_path`, `channel_index`,
-  `channel_prefix`, `channel_alpha`, and `room_name`;
-- `parent_sheet_symbol`: compact metadata for the physical sheet-symbol
-  placement that instantiated this page, or null for the top-level page;
-- `components`: resolved component rows on that physical page, including
-  `designator`, `logical_designator`, `physical_designator`,
-  `source_unique_id`, `source_unique_id_path`, `svg_id`, `dnp`, and `fitted`;
-- `nets`: compiled-flat net rows observed on that physical page, including
-  the winning `name`, `aliases`, `name_sources`, page-local terminals, and
-  graphical object ids grouped by role.
-
-The physical review identity for a schematic component is:
+The drawing lookup key is:
 
 ```text
-physical_page.id + component.svg_id
+page_occurrence_ref + artifact_key + element_id
 ```
 
-When indexes are requested, repeated/channel-aware consumers should prefer:
+Current schematic SVG/IR uses `artifact_key == "sch.dwg_scene"`. A
+`graphical_artifact_links[]` row resolves that scoped selector to a semantic
+graph object through `target_type` and `target_ref`. Consumers should not infer
+connectivity from graphical nesting or from a bare element id.
 
-- `indexes.svg_to_components`: logical SVG id to all resolved physical
-  component designators;
-- `indexes.physical_svg_to_components`: `physical_page_id|svg_id` to resolved
-  component designators;
-- `indexes.component_to_physical_page`: resolved component designator to
-  physical page id;
-- `indexes.physical_page_to_components`: physical page id to resolved
-  component designators;
-- `indexes.physical_page_to_nets`: physical page id to net names.
+`physical_page_metadata[]` is keyed by the same canonical
+`page_occurrence_ref`. It carries only Altium presentation facts:
+`physical_instance_path`, channel index/prefix/alpha, room names, and document
+number. It does not repeat components or nets.
 
-`indexes.svg_to_component` remains as the existing scalar lookup
-for unambiguous logical SVG ids. For repeated/channel designs, ambiguous SVG
-ids are intentionally omitted from that scalar map so consumers do not silently
-pick one physical instance.
-
-For non-channel and non-repeated designs, this physical-page layer decays to
-the historical one-to-one logical SVG/component mapping.
+When indexes are requested, `svg_to_component`, `svg_to_components`,
+`component_to_nets`, and `net_to_components` remain compatibility conveniences.
+The retired physical-page indexes are not part of Design b0.
 
 ## Net Name Provenance
 
@@ -111,7 +151,7 @@ cache alternate-name lists.
 `.PrjPcb`, when one is set. `variants[]` lists available project variants and
 marks the active row with `is_current`.
 
-Top-level `components[]` rows and `physical_pages[].components[]` rows include:
+Top-level `components[]` rows include:
 
 - `dnp`: true when the component's resolved physical designator is marked
   not-fitted in the active project variant;
@@ -142,9 +182,9 @@ document, component, symbol, or net.
 
 Project-level physical rendering is explicit:
 
-- `AltiumDesign.to_physical_ir(physical_page_id)` returns schematic geometry IR
+- `AltiumDesign.to_physical_ir(page_occurrence_ref)` returns schematic geometry IR
   for one compiled physical page.
-- `AltiumDesign.to_physical_svg(physical_page_id)` renders that physical IR to
+- `AltiumDesign.to_physical_svg(page_occurrence_ref)` renders that physical IR to
   SVG.
 
 Both APIs use the logical SchDoc geometry for the selected page, but component
@@ -155,7 +195,8 @@ contains `R1.1`, `R1A`, or another project-configured resolved designator.
 
 The default `AltiumSchDoc.to_ir()` and `AltiumSchDoc.to_svg()` APIs remain
 logical-sheet renderers. Consumers that review compiled projects should select
-the intended `physical_pages[].id` and use the physical rendering APIs.
+the intended `compiled_schematic_graph.page_occurrences[].id` and use the
+physical rendering APIs.
 
 Variant-specific graphical suppression, such as hiding or dimming DNP
 components, is a consumer policy layered over the physical rendering path. The
@@ -171,5 +212,6 @@ separate consumer concern.
 
 ## Test Gates
 
-The AltiumDesign contract is covered by design loading, netlist, JSON schema,
-SVG, public examples, and release signoff.
+The AltiumDesign contract is covered by design loading, graph validation,
+identity stability, Python/native parity, netlist, JSON schema, SVG, public
+examples, and release signoff.

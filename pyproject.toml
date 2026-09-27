@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -9,15 +9,17 @@ description = "A toolkit for manipulating Altium files"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.15"
 authors = [
     { name = "Eli Hughes", email = "ehughes@wavenumber.net" },
 ]
 dependencies = [
-    "pillow==11.2.1",
+    "jsonschema-rs>=0.48.1,<0.49",
+    "msgspec==0.21.1",
+    "pillow==12.3.0",
     "freetype-py",
     "uharfbuzz",
-    "wn-geometer==2026.6.10",
+    "wn-geometer==2026.9.19",
     "lxml==6.0.2",
     "lz4>=4.4.5",
 ]
@@ -25,12 +27,14 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
-    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 [project.optional-dependencies]
 examples = [
     "cadquery",
+    "casadi<3.8; sys_platform == 'win32' and python_version >= '3.14'",
 ]
 release = [
     "build>=1.2",
@@ -38,7 +42,6 @@ release = [
     "twine>=5.0",
 ]
 test = [
-    "cadquery",
     "jsonschema>=4.20",
     "pytest>=8.0",
 ]
@@ -59,3 +62,8 @@ packages = ["src/py/altium_monkey"]
 
 [tool.hatch.version]
 path = "src/py/altium_monkey/_version.py"
+
+[tool.pytest.ini_options]
+markers = [
+    "optional_example: example execution that requires the separately installed examples extra",
+]

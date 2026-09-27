@@ -31,6 +31,27 @@ MANIFEST_PATH = EXAMPLES_ROOT / "manifest.toml"
 PCB_LAYER_API_AUDIT_PATH = EXAMPLES_ROOT / "pcb_layer_api_audit.toml"
 CONTRACTS_ROOT = PUBLIC_ROOT / "docs" / "schemas" / "altium_monkey"
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]+\]\((?P<target>[^)]+)\)")
+EXPECTED_REQUIRES_PYTHON = ">=3.12,<3.15"
+EXPECTED_RUNTIME_DEPENDENCIES = {
+    "freetype-py",
+    "jsonschema-rs",
+    "lxml",
+    "lz4",
+    "msgspec",
+    "pillow",
+    "uharfbuzz",
+    "wn-geometer",
+}
+REMOVED_DIRECT_DEPENDENCIES = {
+    "cascadio",
+    "colorama",
+    "easyeda-monkey",
+    "json-with-comments",
+    "mapbox-earcut",
+    "openpyxl",
+    "rtree",
+    "trimesh",
+}
 
 
 def _load_examples() -> list[dict[str, object]]:
@@ -45,6 +66,31 @@ def _as_str_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
+
+
+def _example_test_cases() -> list[object]:
+    cases: list[object] = []
+    for example in _load_examples():
+        identifier = str(example.get("id", "<unknown>"))
+        requires_extra = _as_str_list(example.get("requires_extra"))
+        if "examples" in requires_extra:
+            cases.append(
+                pytest.param(example, id=identifier, marks=pytest.mark.optional_example)
+            )
+        else:
+            cases.append(pytest.param(example, id=identifier))
+    return cases
+
+
+def _requirement_name(requirement: str) -> str:
+    match = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", requirement)
+    if match is None:
+        raise AssertionError(f"invalid dependency requirement: {requirement!r}")
+    return re.sub(r"[-_.]+", "-", match.group(0)).lower()
+
+
+def _dependency_names(requirements: object) -> set[str]:
+    return {_requirement_name(value) for value in _as_str_list(requirements)}
 
 
 def _extractable_asset_schema_validator() -> Draft202012Validator:
@@ -65,9 +111,25 @@ def _embedded_asset_schema_validator() -> Draft202012Validator:
     return Draft202012Validator(schema)
 
 
-def _design_a2_schema_validator() -> Draft202012Validator:
+def _design_b0_schema_validator() -> Draft202012Validator:
     schema = json.loads(
-        (CONTRACTS_ROOT / "design_a2.schema.json").read_text(encoding="utf-8")
+        (CONTRACTS_ROOT / "design_b0.schema.json").read_text(encoding="utf-8")
+    )
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _netlist_b0_schema_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (CONTRACTS_ROOT / "netlist_b0.schema.json").read_text(encoding="utf-8")
+    )
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+def _schematic_bom_a0_schema_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (CONTRACTS_ROOT / "schematic_bom_a0.schema.json").read_text(encoding="utf-8")
     )
     Draft202012Validator.check_schema(schema)
     return Draft202012Validator(schema)
@@ -91,10 +153,18 @@ def test_schema_contract_docs_list_public_schema_ids() -> None:
     docs_text = docs_path.read_text(encoding="utf-8")
 
     for schema_id in (
+        "altium_monkey.design.b0",
+        "altium_monkey.compiled_schematic_graph.a0",
+        "altium_monkey.schematic_hierarchy.a1",
+        "altium_monkey.sch.compiled_design_model.b0",
         "altium_monkey.design.a2",
         "altium_monkey.design.a1",
         "altium_monkey.design.a0",
         "altium_monkey.netlist.a0",
+        "altium_monkey.netlist.b0",
+        "altium_monkey.schematic_bom.a0",
+        "altium_monkey.schdoc.interop.a0",
+        "altium_monkey.schlib.interop.a0",
         "altium_monkey.pcb.svg.enrichment.a0",
         "altium_monkey.pcb.embedded_assets.a0",
         "altium_monkey.extractable_assets.a0",
@@ -109,11 +179,24 @@ def test_schema_contract_docs_list_public_schema_ids() -> None:
     assert "Moving from `a` to `b`" in docs_text
     assert "Moving from `a0` to `a1`" in docs_text
     assert "Moving from `a1` to `a2`" in docs_text
+    assert "Moving from `a2` to `b0`" in docs_text
     assert "docs/schemas/altium_monkey" in docs_text
+    assert "design_b0.schema.json" in docs_text
+    assert "compiled_schematic_graph_a0.schema.json" in docs_text
+    assert "schematic_hierarchy_a1.schema.json" in docs_text
+    assert "compiled_design_model_b0.schema.json" in docs_text
     assert "design_a2.schema.json" in docs_text
     assert "design_a1.schema.json" in docs_text
     assert "design_a0.schema.json" in docs_text
     assert "netlist_a0.schema.json" in docs_text
+    assert "netlist_b0.schema.json" in docs_text
+    assert "schematic_bom_a0.schema.json" in docs_text
+    assert "schdoc_interop_a0.schema.json" in docs_text
+    assert "schlib_interop_a0.schema.json" in docs_text
+    assert "typespec/main.tsp" in docs_text
+    assert "SchematicBomPayload" in docs_text
+    assert "SchematicContractLimits" in docs_text
+    assert "SchematicContractError" in docs_text
     assert "pcb_svg_enrichment_a0.schema.json" in docs_text
     assert "embedded_assets_a0.schema.json" in docs_text
     assert "extractable_assets_a0.schema.json" in docs_text
@@ -123,10 +206,20 @@ def test_schema_contract_docs_list_public_schema_ids() -> None:
 
 def test_altium_monkey_contract_schemas_are_parseable() -> None:
     schemas = {
+        "design_b0.schema.json": "altium_monkey.design.b0",
+        "compiled_schematic_graph_a0.schema.json": (
+            "altium_monkey.compiled_schematic_graph.a0"
+        ),
+        "schematic_hierarchy_a1.schema.json": ("altium_monkey.schematic_hierarchy.a1"),
+        "compiled_design_model_b0.schema.json": (
+            "altium_monkey.sch.compiled_design_model.b0"
+        ),
         "design_a2.schema.json": "altium_monkey.design.a2",
         "design_a1.schema.json": "altium_monkey.design.a1",
         "design_a0.schema.json": "altium_monkey.design.a0",
         "netlist_a0.schema.json": "altium_monkey.netlist.a0",
+        "netlist_b0.schema.json": "altium_monkey.netlist.b0",
+        "schematic_bom_a0.schema.json": "altium_monkey.schematic_bom.a0",
         "pcb_svg_enrichment_a0.schema.json": ("altium_monkey.pcb.svg.enrichment.a0"),
         "embedded_assets_a0.schema.json": "altium_monkey.pcb.embedded_assets.a0",
         "extractable_assets_a0.schema.json": "altium_monkey.extractable_assets.a0",
@@ -140,6 +233,55 @@ def test_altium_monkey_contract_schemas_are_parseable() -> None:
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         assert schema["properties"]["schema"]["const"] == schema_id
         assert schema_id in spec_text
+
+
+def test_schematic_schema_inventory_and_frozen_predecessors_are_exact() -> None:
+    assert {path.name for path in CONTRACTS_ROOT.glob("*.schema.json")} == {
+        "compiled_design_model_b0.schema.json",
+        "compiled_schematic_graph_a0.schema.json",
+        "design_a0.schema.json",
+        "design_a1.schema.json",
+        "design_a2.schema.json",
+        "design_b0.schema.json",
+        "embedded_assets_a0.schema.json",
+        "extractable_assets_a0.schema.json",
+        "netlist_a0.schema.json",
+        "netlist_b0.schema.json",
+        "pcb_svg_enrichment_a0.schema.json",
+        "schdoc_interop_a0.schema.json",
+        "schematic_bom_a0.schema.json",
+        "schematic_hierarchy_a1.schema.json",
+        "schlib_interop_a0.schema.json",
+    }
+    frozen_hashes = {
+        "design_b0.schema.json": (
+            "97a4888953ef71a937102bebe15f4cdfa79f3d4ee83954883d29f3a8abd644e5"
+        ),
+        "netlist_a0.schema.json": (
+            "b429ad532fe308c5f9584d0678505df627b3715c6a01dc5826ef3dc67b927109"
+        ),
+    }
+    for filename, expected_hash in frozen_hashes.items():
+        assert hashlib.sha256((CONTRACTS_ROOT / filename).read_bytes()).hexdigest() == (
+            expected_hash
+        )
+
+
+def test_schematic_typespec_sources_are_published() -> None:
+    source_root = CONTRACTS_ROOT / "typespec"
+    assert {path.name for path in source_root.glob("*.tsp")} == {
+        "common.tsp",
+        "compiled-graph-a0.tsp",
+        "design-b0.tsp",
+        "hierarchy-a1.tsp",
+        "main.tsp",
+        "netlist-a0.tsp",
+        "netlist-b0.tsp",
+        "schematic-bom-a0.tsp",
+    }
+    main_text = (source_root / "main.tsp").read_text(encoding="utf-8")
+    assert "./netlist-b0.tsp" in main_text
+    assert "./schematic-bom-a0.tsp" in main_text
 
 
 @pytest.mark.parametrize(
@@ -160,23 +302,96 @@ def test_altium_monkey_contract_schemas_are_parseable() -> None:
     [False, True],
     ids=["compact", "compile_metadata"],
 )
-def test_altium_design_a2_schema_validates_real_to_json_payloads(
+@pytest.mark.parametrize(
+    "include_pnp",
+    [True, False],
+    ids=["with_pnp", "schematic_only"],
+)
+def test_altium_design_b0_schema_validates_real_to_json_payloads(
     project_path: str,
     case_id: str,
     include_compile_metadata: bool,
+    include_pnp: bool,
 ) -> None:
     from altium_monkey import AltiumDesign
 
-    validator = _design_a2_schema_validator()
+    validator = _design_b0_schema_validator()
     payload = AltiumDesign.from_prjpcb(PUBLIC_ROOT / project_path).to_json(
-        include_compile_metadata=include_compile_metadata
+        include_compile_metadata=include_compile_metadata,
+        include_pnp=include_pnp,
     )
 
-    assert payload["schema"] == "altium_monkey.design.a2"
+    assert payload["schema"] == "altium_monkey.design.b0"
     assert ("compile" in payload) is include_compile_metadata
     assert ("diagnostics" in payload) is include_compile_metadata
-    assert "physical_pages" in payload
+    assert ("pnp" in payload) is include_pnp
+    assert "physical_pages" not in payload
+    assert payload["compiled_schematic_graph"]["schema"] == (
+        "altium_monkey.compiled_schematic_graph.a0"
+    )
+    assert len(payload["physical_page_metadata"]) == len(
+        payload["compiled_schematic_graph"]["page_occurrences"]
+    )
     _assert_schema_valid(validator, payload, case_id)
+
+
+@pytest.mark.parametrize(
+    ("project_path", "case_id"),
+    [
+        (
+            "examples/assets/projects/bunny_brain/bunny_brain_D.PrjPcb",
+            "bunny_brain",
+        ),
+        (
+            "examples/assets/projects/hydroscope/Hydroscope.PrjPcb",
+            "hydroscope",
+        ),
+    ],
+)
+def test_current_netlist_and_schematic_bom_schemas_validate_real_payloads(
+    project_path: str,
+    case_id: str,
+) -> None:
+    from altium_monkey import AltiumDesign
+
+    design = AltiumDesign.from_prjpcb(PUBLIC_ROOT / project_path)
+    netlist = design.to_netlist().to_json()
+    bom = design.to_bom_payload().to_json()
+
+    assert netlist["schema"] == "altium_monkey.netlist.b0"
+    assert bom["schema"] == "altium_monkey.schematic_bom.a0"
+    _assert_schema_valid(_netlist_b0_schema_validator(), netlist, case_id)
+    _assert_schema_valid(_schematic_bom_a0_schema_validator(), bom, case_id)
+
+
+def test_project_metadata_only_mode_is_public_and_keeps_documents_lazy() -> None:
+    from altium_monkey import (
+        AltiumDesign,
+        AltiumProjectCapabilityError,
+        AltiumProjectLoadMode,
+    )
+
+    project_path = (
+        PUBLIC_ROOT
+        / "examples"
+        / "assets"
+        / "projects"
+        / "bunny_brain"
+        / "bunny_brain_D.PrjPcb"
+    )
+    design = AltiumDesign.from_prjpcb(
+        project_path,
+        load_mode=AltiumProjectLoadMode.METADATA_ONLY,
+    )
+
+    assert design.load_mode is AltiumProjectLoadMode.METADATA_ONLY
+    assert design.schdocs == []
+    assert design.pcbdoc is None
+    assert design.get_pcbdoc_paths() == [
+        (project_path.parent / "bunny_brain_D.PCBdoc").resolve()
+    ]
+    with pytest.raises(AltiumProjectCapabilityError, match="metadata-only project"):
+        design.to_netlist()
 
 
 def test_public_gitignore_tracks_lockfile_and_ignores_example_outputs() -> None:
@@ -191,6 +406,77 @@ def test_public_gitignore_tracks_lockfile_and_ignores_example_outputs() -> None:
     assert (PUBLIC_ROOT / "uv.lock").exists()
     assert "uv.lock" not in gitignore_lines
     assert "examples/**/output/" in gitignore_lines
+
+
+def test_public_python_and_dependency_metadata_contract() -> None:
+    metadata = tomllib.loads((PUBLIC_ROOT / "pyproject.toml").read_text("utf-8"))
+    project = metadata["project"]
+
+    assert project["requires-python"] == EXPECTED_REQUIRES_PYTHON
+    assert _dependency_names(project["dependencies"]) == EXPECTED_RUNTIME_DEPENDENCIES
+    assert _dependency_names(project["optional-dependencies"]["examples"]) == {
+        "cadquery",
+        "casadi",
+    }
+    assert _dependency_names(project["optional-dependencies"]["test"]) == {
+        "jsonschema",
+        "pytest",
+    }
+    assert any(
+        requirement.startswith("casadi<3.8;")
+        for requirement in project["optional-dependencies"]["examples"]
+    )
+    direct_names = _dependency_names(project["dependencies"])
+    optional_names = {
+        name
+        for requirements in project["optional-dependencies"].values()
+        for name in _dependency_names(requirements)
+    }
+    assert not REMOVED_DIRECT_DEPENDENCIES & (direct_names | optional_names)
+    classifiers = set(project["classifiers"])
+    assert {
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+    } <= classifiers
+
+
+def test_python_314_workflows_build_before_installed_wheel_tests() -> None:
+    workflows = PUBLIC_ROOT / ".github" / "workflows"
+    validation = (workflows / "python-314.yml").read_text(encoding="utf-8")
+    release = (workflows / "release.yml").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in validation
+    assert not re.search(
+        r"^\s+(?:push|pull_request|release):", validation, re.MULTILINE
+    )
+    assert "matrix:" not in validation
+    assert 'python-version: "3.14"' in validation
+    assert "uv run --locked --python 3.14" in validation
+    assert validation.index("python -m build") < validation.index(
+        "validate_wheel.py --mode test"
+    )
+    assert "validate_wheel.py --mode core" in validation
+    assert "--mode core --python 3.12" in validation
+    assert "--mode examples --python 3.14" in validation
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in validation
+    assert "cancel-in-progress: true" in validation
+
+    assert "release:" in release
+    assert "types: [published]" in release
+    assert "workflow_dispatch:" not in release
+    assert release.count("pypa/gh-action-pypi-publish") == 1
+    assert 'python-version: "3.14"' in release
+    assert (
+        release.index("python -m build")
+        < release.index("validate_wheel.py --mode test")
+        < release.index("pypa/gh-action-pypi-publish")
+    )
+    assert "validate_wheel.py --mode core" in release
+    assert "--mode core --python 3.12" in release
+    assert "--mode examples" not in release
+    assert "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24" in release
+    assert "cancel-in-progress: false" in release
 
 
 def test_manifest_inputs_and_assets_do_not_use_ignored_output_dirs() -> None:
@@ -281,6 +567,38 @@ def test_public_lockfile_matches_release_dependency_shape() -> None:
     assert "mkdocs" not in optional_dependency_names
 
 
+@pytest.mark.parametrize("identifier", ("582E3334", "123E0045", "00012345"))
+def test_schlib_json_preserves_textual_identifiers(identifier: str) -> None:
+    from altium_monkey import AltiumSchLib
+
+    payload = {
+        "Header": {
+            "Filename": "identifier.SchLib",
+            "SymbolCount": 1,
+            "FontCount": 0,
+        },
+        "Symbols": [
+            {
+                "Name": "IDENTIFIER",
+                "Description": "",
+                "PartCount": 1,
+                "Objects": [
+                    {
+                        "ObjectType": "Component",
+                        "ObjectIndex": 0,
+                        "LibReference": "IDENTIFIER",
+                        "UniqueID": identifier,
+                    }
+                ],
+            }
+        ],
+    }
+
+    exported = AltiumSchLib.from_json(payload).to_json()
+
+    assert exported["Symbols"][0]["Objects"][0]["UniqueID"] == identifier
+
+
 def test_domain_docs_list_public_workflow_examples() -> None:
     docs_text = "\n".join(
         (PUBLIC_ROOT / "docs" / filename).read_text(encoding="utf-8")
@@ -333,10 +651,13 @@ def test_domain_docs_list_public_workflow_examples() -> None:
         "AltiumStackBranch",
         "source_stackup_ref",
         "layers_for_board_region",
+        "intlib_create_from_libraries",
         "intlib_extract_sources",
+        "altium_monkey.design.b0",
         "altium_monkey.design.a2",
         "altium_monkey.design.a1",
-        "altium_monkey.netlist.a0",
+        "altium_monkey.netlist.b0",
+        "altium_monkey.schematic_bom.a0",
         "altium_monkey.pcb.embedded_assets.a0",
         "altium_monkey.extractable_assets.a0",
         "embedded_asset_inventory",
@@ -363,6 +684,7 @@ def test_format_contract_docs_are_published() -> None:
         "index.md",
         "schdoc.md",
         "schlib.md",
+        "schematic_interop.md",
         "pcbdoc.md",
         "pcblib.md",
         "prjpcb.md",
@@ -397,6 +719,53 @@ def test_format_contract_docs_are_published() -> None:
     assert "layerstack_id" in pcbdoc_contract
     assert "branches_for_stack_ref" in pcbdoc_contract
     assert "with or without braces" in pcbdoc_contract
+
+
+def test_schematic_svg_bundled_fallback_embedding_is_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from altium_monkey import (
+        AltiumSchDoc,
+        ColorValue,
+        SchFontSpec,
+        SchPointMils,
+        SchSvgRenderOptions,
+        make_sch_text_string,
+    )
+    from altium_monkey.altium_font_resolver import clear_font_resolution_result_cache
+
+    monkeypatch.setenv("ALTIUM_FONT_DISABLE_SYSTEM", "1")
+    monkeypatch.delenv("ALTIUM_FONT_DIRS", raising=False)
+    clear_font_resolution_result_cache()
+    document = AltiumSchDoc()
+    assert document.sheet is not None
+    document.sheet.use_custom_sheet = True
+    document.sheet.custom_x = 1200
+    document.sheet.custom_y = 800
+    document.sheet.reference_zones_on = False
+    document.sheet.title_block_on = False
+    document.sheet.border_on = False
+    document.add_object(
+        make_sch_text_string(
+            location_mils=SchPointMils.from_mils(200, 200),
+            text="Portable SVG",
+            font=SchFontSpec(name="Arial", size=10),
+            color=ColorValue.from_hex("#000000"),
+        )
+    )
+
+    try:
+        compact_svg = document.to_svg()
+        embedded_svg = document.to_svg(
+            options=SchSvgRenderOptions(embed_bundled_fallback_fonts=True)
+        )
+    finally:
+        clear_font_resolution_result_cache()
+
+    assert "@font-face" not in compact_svg
+    assert "data:font/ttf;base64," not in compact_svg
+    assert embedded_svg.count("@font-face") == 1
+    assert "data:font/ttf;base64," in embedded_svg
 
 
 def test_public_v7_layer_docs_match_current_contract() -> None:
@@ -457,6 +826,29 @@ def test_generated_docs_are_current() -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_generated_docs_writer_preserves_lf_line_endings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_path = PUBLIC_ROOT / "tools" / "generate_docs.py"
+    spec = importlib.util.spec_from_file_location("public_generate_docs", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    output_path = tmp_path / "index.md"
+    monkeypatch.setattr(module, "PUBLIC_ROOT", tmp_path)
+    monkeypatch.setattr(module, "EXAMPLES_INDEX_PATH", output_path)
+    monkeypatch.setattr(module, "_load_manifest", lambda: [])
+
+    assert module.write_docs(check=False) == 0
+    assert b"\r\n" not in output_path.read_bytes()
+    fixed_mtime_ns = 1_000_000_000
+    os.utime(output_path, ns=(fixed_mtime_ns, fixed_mtime_ns))
+    assert module.write_docs(check=False) == 0
+    assert output_path.stat().st_mtime_ns == fixed_mtime_ns
 
 
 def test_public_markdown_links_resolve() -> None:
@@ -807,8 +1199,7 @@ def _assert_mechanical_kind_manifest(manifest: dict[str, object]) -> None:
 
 @pytest.mark.parametrize(
     "example",
-    _load_examples(),
-    ids=lambda example: str(example["id"]),
+    _example_test_cases(),
 )
 def test_asset_example_runs_and_writes_declared_outputs(
     example: dict[str, object],
@@ -1829,6 +2220,30 @@ def test_outjob_runner_prepares_static_rt_super_c1_outjob(
     assert project.outjob().path.name == "reference_gen.OutJob"
 
 
+def test_public_outjob_docs_disclose_automation_limits() -> None:
+    readme = (PUBLIC_ROOT / "README.md").read_text(encoding="utf-8")
+    prjpcb_doc = (PUBLIC_ROOT / "docs" / "prjpcb.md").read_text(encoding="utf-8")
+    example_doc = (PUBLIC_ROOT / "examples" / "outjob_runner" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    combined = "\n".join((readme, prjpcb_doc, example_doc))
+
+    for token in (
+        "Altium's scripting",
+        "OutJobRunResult.success",
+        "stage_outjob_copy=False",
+        "PDF/Publish",
+        "Project Releaser",
+        "verify every",
+    ):
+        assert token in combined
+
+    assert "project's logical documents" in " ".join(prjpcb_doc.split())
+    assert "does not close the opened project documents" in " ".join(
+        example_doc.split()
+    )
+
+
 def test_schdoc_clean_applies_key_style_rules(check_examples_root: Path) -> None:
     example = next(item for item in _load_examples() if item["id"] == "schdoc_clean")
     result = _run_example_entrypoint(example, check_examples_root)
@@ -2199,7 +2614,18 @@ def test_schlib_library_examples_write_parseable_outputs(
     assert merge_manifest["input_schlib_dir"] == "assets/schlib"
     assert merge_manifest["input_library_count"] == find_manifest["library_count"]
     assert merge_manifest["input_symbol_count"] == find_manifest["symbol_count"]
-    assert merge_manifest["merged_symbol_count"] == merge_manifest["input_symbol_count"]
+    assert (
+        merge_manifest["merged_symbol_count"]
+        == merge_manifest["mergeable_symbol_count"]
+    )
+    assert merge_manifest["skipped_libraries"] == []
+    assert (
+        merge_manifest["mergeable_library_count"]
+        == merge_manifest["input_library_count"]
+    )
+    assert (
+        merge_manifest["mergeable_symbol_count"] == merge_manifest["input_symbol_count"]
+    )
     assert {"MIMXRT685SFVKB", "R_2P", "L_2P"}.issubset(
         set(merge_manifest["merged_symbols"])
     )
@@ -5512,6 +5938,81 @@ def test_intlib_extract_sources_reports_metadata_and_writes_parseable_sources(
         assert len(intlib.get_source_entries()) == manifest["source_count"]
 
 
+def test_intlib_create_from_libraries_packages_ic_subset_two_ways(
+    check_examples_root: Path,
+) -> None:
+    example = next(
+        item
+        for item in _load_examples()
+        if item["id"] == "intlib_create_from_libraries"
+    )
+    result = _run_example_entrypoint(example, check_examples_root)
+    assert result.returncode == 0, result.stderr
+
+    from altium_monkey import AltiumIntLib
+
+    example_root = check_examples_root / "intlib_create_from_libraries"
+    manifest = json.loads(
+        (example_root / "output" / "intlib_create_manifest.json").read_text(
+            encoding="ascii"
+        )
+    )
+    assert manifest["component_graphs_match"] is True
+    assert manifest["deterministic"] == {
+        "aggregate": True,
+        "multi_source": True,
+    }
+    assert manifest["component_graph"] == {
+        "24LC32AT": ["SOT23-5"],
+        "MIMXRT685SFVKB": ["VFBGA176"],
+        "MX25R6435FZNIL0": ["W25Q_XSON_8"],
+        "RC0603FR-0710KL": ["R0603_0.55MM_MD"],
+        "RC0603FR-074K7L": ["R0603_0.55MM_MD"],
+        "SM712-02HTG": ["SOT143B"],
+        "SM712.TCT": ["D_SOD-323_P", "SOT143B"],
+    }
+
+    builds = manifest["builds"]
+    assert set(builds) == {"multi_source", "aggregate"}
+    assert builds["multi_source"]["source_count"] == 14
+    assert builds["aggregate"]["source_count"] == 2
+    for build in builds.values():
+        assert build["component_count"] == 7
+        assert build["footprint_count"] == 7
+        assert build["footprint_link_count"] == 8
+        assert build["embedded_model_count"] == 5
+        assert build["parameter_record_count"] == 21
+        assert build["source_hashes_match"] is True
+        assert build["warnings"] == [
+            {
+                "code": "unused_footprint",
+                "message": (
+                    "footprint is preserved in the PcbLib but is not linked by a "
+                    "component"
+                ),
+                "subject": "PCA9420",
+            }
+        ]
+
+        intlib_path = example_root / build["intlib"]
+        with AltiumIntLib(intlib_path) as intlib:
+            assert intlib.component_parse_error is None
+            assert {
+                component.name: [model.name for model in component.models]
+                for component in intlib.components
+            } == manifest["component_graph"]
+            for source in build["sources"]:
+                prepared = example_root / next(
+                    path
+                    for paths in manifest["prepared"].values()
+                    for path in (paths if isinstance(paths, list) else [paths])
+                    if Path(path).name == source["logical_name"]
+                )
+                assert (
+                    intlib.read_stream(source["stream_path"]) == prepared.read_bytes()
+                )
+
+
 def test_pcblib_add_free_3d_extruded_writes_component_body(
     check_examples_root: Path,
 ) -> None:
@@ -6186,6 +6687,7 @@ def test_pcbdoc_public_shared_primitive_option_roundtrip(tmp_path: Path) -> None
     assert parsed.shapebased_regions[0].properties["ISBOARDCUTOUT"] == "TRUE"
 
 
+@pytest.mark.optional_example
 def test_pcblib_power_resistor_synthesis_writes_parseable_libraries(
     check_examples_root: Path,
 ) -> None:

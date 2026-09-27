@@ -43,6 +43,7 @@ from .altium_pcb_layer_ref import (
 )
 from .altium_pcb_rule import AltiumPlaneClearanceRule, AltiumPlaneConnectRule
 from .altium_record_types import PcbLayer
+from .altium_record_pcb__pad import AltiumPcbPad
 from .altium_board import resolve_outline_arc_segment
 from .altium_resolved_layer_stack import (
     ResolvedLayerStack,
@@ -4323,8 +4324,12 @@ def _build_component_pad_order(
             continue
         comp_ref = dedup_map.get(comp_idx) or comp.designator
         for pin_num, pad_idx in enumerate(pad_indices, 1):
-            comp_pad_map[pad_idx] = (comp_ref, str(pin_num))
-            ordered_pad_items.append((pad_idx, pcbdoc.pads[pad_idx]))
+            pad = pcbdoc.pads[pad_idx]
+            comp_pad_map[pad_idx] = (
+                comp_ref,
+                _physical_pad_pin_identity(pad, pin_num),
+            )
+            ordered_pad_items.append((pad_idx, pad))
             ordered_pad_indices.add(pad_idx)
 
     for pad_idx, pad in enumerate(pcbdoc.pads):
@@ -4333,6 +4338,11 @@ def _build_component_pad_order(
         ordered_pad_items.append((pad_idx, pad))
 
     return ordered_pad_items, comp_pad_map
+
+
+def _physical_pad_pin_identity(pad: AltiumPcbPad, fallback_ordinal: int) -> str:
+    """Return the stored pad designator or its package-order fallback."""
+    return pad.designator or str(fallback_ordinal)
 
 
 def _build_padstacks(ctx: PcbIpc2581Context, step: ET.Element) -> None:
@@ -5818,7 +5828,7 @@ def _emit_package(
 
     # Pins  -  Altium always uses RectCenter for Pin shapes
     for i, pad in enumerate(pads):
-        pin_name = pad.designator or str(i + 1)
+        pin_name = _physical_pad_pin_identity(pad, i + 1)
         px_mm = ctx.coord_to_mm(pad.x)
         py_mm = ctx.coord_to_mm(pad.y)
 
@@ -6493,7 +6503,16 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             and layer_state.stored_legacy_layer_id is not None
             else int(layer_id)
         )
-        if (
+        net_name = ctx.resolve_net(net_index)
+        legacy_layer_name = ctx.resolve_layer(stored_legacy_layer_id)
+        document_alias = (
+            ctx.document_layer_aliases.get(legacy_layer_name)
+            if net_name == "No Net"
+            else None
+        )
+        if document_alias is not None:
+            layer_name = document_alias
+        elif (
             stored_legacy_layer_id
             in {PcbLayer.DRILL_DRAWING.value, PcbLayer.DRILL_GUIDE.value}
             and ctx.drill_pair_layers
@@ -6517,7 +6536,6 @@ def _build_layer_features(ctx: PcbIpc2581Context, step: ET.Element) -> None:
             )
         else:
             layer_name = ctx.resolve_layer(layer_id)
-        net_name = ctx.resolve_net(net_index)
         if net_name == "No Net" and layer_name in ctx.document_layer_aliases:
             layer_name = ctx.document_layer_aliases[layer_name]
         if (

@@ -13,6 +13,7 @@ from typing import Any
 
 from .altium_api_markers import public_api
 from .altium_common_enums import ComponentKind
+from .altium_text_semantics import altium_name_key
 from .altium_record_sch__component import AltiumSchComponent
 from .altium_record_sch__designator import AltiumSchDesignator
 from .altium_record_sch__harness_connector import AltiumSchHarnessConnector
@@ -30,7 +31,7 @@ from .altium_record_sch__power_port import AltiumSchPowerPort
 from .altium_record_sch__sheet_entry import AltiumSchSheetEntry
 from .altium_record_sch__sheet_symbol import AltiumSchSheetSymbol
 from .altium_record_types import SchRectMils
-from .altium_sch_display_mode import record_belongs_to_display_mode
+from .altium_sch_display_mode import pin_belongs_to_component_view
 from .altium_sch_enums import OffSheetConnectorStyle, PinElectrical
 
 
@@ -62,6 +63,12 @@ class _RecordLocationInfoMixin:
         if loc and hasattr(loc, "x") and hasattr(loc, "y"):
             return (loc.x, loc.y)
         return (0, 0)
+
+    @property
+    def _precise_connection_point(self) -> tuple[int, int, int, int]:
+        """Record location including persisted fractional coordinates."""
+        location = self.record.location
+        return (location.x, location.y, location.x_frac, location.y_frac)
 
 
 @public_api
@@ -95,20 +102,11 @@ class SchComponentInfo(_RecordLocationInfoMixin):
         """
         Pins for this component, filtered for the active part and display mode.
         """
-        current_part = getattr(self.record, "current_part_id", 1)
-        active_display_mode = self.display_mode
-        result: list[AltiumSchPin] = []
-        for pin in self.record.pins:
-            owner_part = getattr(pin, "owner_part_id", None)
-            part_matches = (
-                owner_part is None or owner_part <= 0 or owner_part == current_part
-            )
-            if part_matches and record_belongs_to_display_mode(
-                pin,
-                active_display_mode,
-            ):
-                result.append(pin)
-        return result
+        return [
+            pin
+            for pin in self.record.pins
+            if pin_belongs_to_component_view(pin, self.record)
+        ]
 
     @property
     def parameters(self) -> list[AltiumSchParameter]:
@@ -122,10 +120,7 @@ class SchComponentInfo(_RecordLocationInfoMixin):
         """
         Component value from the Value parameter.
         """
-        for param in self.parameters:
-            if param.name == "Value":
-                return param.text or ""
-        return ""
+        return self.get_parameter("Value") or ""
 
     @property
     def description(self) -> str:
@@ -133,7 +128,7 @@ class SchComponentInfo(_RecordLocationInfoMixin):
         Component description.
         """
         desc = self.get_parameter("Description")
-        if desc:
+        if desc is not None:
             return desc
         if (
             hasattr(self.record, "component_description")
@@ -147,9 +142,9 @@ class SchComponentInfo(_RecordLocationInfoMixin):
         """
         Component comment from the Comment parameter or design_item_id.
         """
-        for param in self.parameters:
-            if param.name == "Comment":
-                return param.text or ""
+        comment = self.get_parameter("Comment")
+        if comment is not None:
+            return comment
         return getattr(self.record, "design_item_id", "") or ""
 
     @property
@@ -201,8 +196,9 @@ class SchComponentInfo(_RecordLocationInfoMixin):
         """
         Get a parameter value by name.
         """
+        key = altium_name_key(name)
         for param in self.parameters:
-            if param.name == name:
+            if altium_name_key(param.name) == key:
                 return param.text
         return None
 
@@ -314,6 +310,12 @@ class SchPinInfo:
         """
         return self.pin.connection_point
 
+    @property
+    def _precise_connection_point(self) -> tuple[int, int, int, int]:
+        """Pin hot spot including the persisted fractional coordinate fields."""
+        point = self.pin.get_hot_spot()
+        return (point.x, point.y, point.x_frac, point.y_frac)
+
 
 @public_api
 @dataclass
@@ -341,12 +343,33 @@ class SchPortInfo(_RecordLocationInfoMixin):
     @property
     def connection_points(self) -> list[tuple[int, int]]:
         """
-        Connection points on the left and right edges.
+        Connection points at both ends of the port.
         """
-        x, y = self.location
-        points = [(x, y)]
-        if self.width > 0:
-            points.append((x + self.width, y))
+        return [(x, y) for x, y, _x_frac, _y_frac in self._precise_connection_points]
+
+    @property
+    def _precise_connection_points(self) -> list[tuple[int, int, int, int]]:
+        """Port endpoints including location and width fractional fields."""
+        location = self.record.location
+        scale = 100000
+        points = [
+            (location.x, location.y, location.x_frac, location.y_frac),
+        ]
+        width_frac = self.record._width_frac
+        width_total = self.width * scale + width_frac
+        if width_total > 0:
+            if int(self.record.style) <= 3:
+                end_total = location.x * scale + location.x_frac + width_total
+                end_x, end_x_frac = divmod(end_total, scale)
+                points.append(
+                    (end_x, location.y, end_x_frac, location.y_frac),
+                )
+            else:
+                end_total = location.y * scale + location.y_frac + width_total
+                end_y, end_y_frac = divmod(end_total, scale)
+                points.append(
+                    (location.x, end_y, location.x_frac, end_y_frac),
+                )
         return points
 
     @property

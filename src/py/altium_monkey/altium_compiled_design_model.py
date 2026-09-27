@@ -2,16 +2,101 @@
 
 from __future__ import annotations
 
+import json
+import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+import jsonschema_rs
+
+from ._compiled_design_schema import COMPILED_DESIGN_MODEL_B0_SCHEMA_JSON
 from .altium_api_markers import public_api
+from .altium_netlist_model import _SignalHarnessNameCandidate
 
 if TYPE_CHECKING:
+    from .altium_compiled_schematic_graph import (
+        AltiumCompiledSchematicGraph,
+        AltiumPhysicalPageMetadata,
+    )
     from .altium_netlist_model import Netlist
 
 COMPILED_DESIGN_SCHEMA = "altium_monkey.sch.compiled_design_model.b0"
 COMPILED_DESIGN_GENERATOR = "altium_monkey"
+_COMPILED_DESIGN_SCHEMA_DOCUMENT = cast(
+    "dict[str, jsonschema_rs.JSONType]",
+    json.loads(COMPILED_DESIGN_MODEL_B0_SCHEMA_JSON),
+)
+_COMPILED_DESIGN_VALIDATOR = jsonschema_rs.Draft202012Validator(
+    _COMPILED_DESIGN_SCHEMA_DOCUMENT
+)
+_JSON_INTEGER_MIN = -(2**63)
+_JSON_INTEGER_MAX = 2**64 - 1
+
+
+def _assert_json_domain(value: object) -> None:
+    """Reject Python-only values that cannot inhabit serde_json::Value."""
+    if value is None or isinstance(value, (bool, str)):
+        return
+    if isinstance(value, int):
+        _assert_json_integer(value)
+        return
+    if isinstance(value, float):
+        _assert_json_float(value)
+        return
+    if isinstance(value, list):
+        _assert_json_list(value)
+        return
+    if isinstance(value, dict):
+        _assert_json_object(value)
+        return
+    raise ValueError("compiled design payload contains a non-JSON value")
+
+
+def _assert_json_integer(value: int) -> None:
+    if not _JSON_INTEGER_MIN <= value <= _JSON_INTEGER_MAX:
+        raise ValueError("compiled design payload contains an out-of-range integer")
+
+
+def _assert_json_float(value: float) -> None:
+    if not math.isfinite(value):
+        raise ValueError("compiled design payload contains a non-finite number")
+
+
+def _assert_json_list(value: list[object]) -> None:
+    for item in value:
+        _assert_json_domain(item)
+
+
+def _assert_json_object(value: dict[object, object]) -> None:
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError("compiled design payload contains a non-string object key")
+        _assert_json_domain(item)
+
+
+def validate_compiled_design_payload(payload: object) -> None:
+    """Reject payloads outside the handwritten diagnostic b0 contract."""
+    if not isinstance(payload, dict):
+        raise ValueError("compiled design payload must be an object")
+    try:
+        _assert_json_domain(payload)
+    except RecursionError as error:
+        raise ValueError("compiled design payload is too deeply nested") from error
+    schema = payload.get("schema")
+    if schema != COMPILED_DESIGN_SCHEMA:
+        raise ValueError(
+            f"compiled design schema must be {COMPILED_DESIGN_SCHEMA!r}, got {schema!r}"
+        )
+    error = next(
+        iter(
+            _COMPILED_DESIGN_VALIDATOR.iter_errors(
+                cast("jsonschema_rs.JSONType", payload)
+            )
+        ),
+        None,
+    )
+    if error is not None:
+        raise ValueError(f"compiled design payload is invalid: {error}")
 
 
 def _compiled_connection_point_to_dict(
@@ -93,6 +178,7 @@ class AltiumProjectCompileOptions:
     power_port_names_take_priority: bool
     name_nets_hierarchically: bool
     auto_sheet_numbering: bool
+    allow_device_sheet_editing: bool
     channel_designator_format: str
     channel_room_naming_style: int
     channel_room_level_separator: str
@@ -117,6 +203,7 @@ class AltiumProjectCompileOptions:
             "power_port_names_take_priority": self.power_port_names_take_priority,
             "name_nets_hierarchically": self.name_nets_hierarchically,
             "auto_sheet_numbering": self.auto_sheet_numbering,
+            "allow_device_sheet_editing": self.allow_device_sheet_editing,
             "channel_designator_format": self.channel_designator_format,
             "channel_room_naming_style": self.channel_room_naming_style,
             "channel_room_level_separator": self.channel_room_level_separator,
@@ -148,9 +235,7 @@ class AltiumCompiledAnnotationState:
             "designator_record_count": self.designator_record_count,
             "sheet_number_record_count": self.sheet_number_record_count,
             "net_name_override_count": self.net_name_override_count,
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -182,9 +267,7 @@ class AltiumCompiledLogicalDocument:
             "parent_sheet_symbol_ids": list(self.parent_sheet_symbol_ids),
             "component_source_count": self.component_source_count,
             "local_net_count": self.local_net_count,
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -209,6 +292,20 @@ class AltiumCompiledSheetSymbol:
     repeat_end: int | None = None
     entry_count: int = 0
     diagnostics: tuple[AltiumCompileDiagnostic, ...] = ()
+    _managed_child_logical_document_ids: tuple[str, ...] = field(
+        default=(),
+        repr=False,
+    )
+    _managed_interface_child_logical_document_ids: tuple[str, ...] = field(
+        default=(),
+        repr=False,
+    )
+    _managed_retained_child_logical_document_ids: tuple[str, ...] | None = field(
+        default=None,
+        repr=False,
+    )
+    _managed_source_index_in_sheet: int = field(default=0, repr=False)
+    _managed_source_location: tuple[int, int] = field(default=(0, 0), repr=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible sheet-symbol record."""
@@ -230,9 +327,7 @@ class AltiumCompiledSheetSymbol:
             "repeat_start": self.repeat_start,
             "repeat_end": self.repeat_end,
             "entry_count": self.entry_count,
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -300,7 +395,22 @@ class AltiumCompiledPhysicalDocument:
     component_ids: tuple[str, ...] = ()
     sheet_number: str | None = None
     document_number: str | None = None
+    physical_room_name: str = ""
     diagnostics: tuple[AltiumCompileDiagnostic, ...] = ()
+    _managed_parent_from_repeat_sheet_symbol: bool = field(
+        default=False,
+        repr=False,
+    )
+    _managed_parent_sheet_symbol_index: int = field(default=0, repr=False)
+    _managed_parent_sheet_symbol_location: tuple[int, int] = field(
+        default=(0, 0),
+        repr=False,
+    )
+    _managed_parent_sheet_symbol_source_id: str = field(default="", repr=False)
+    _managed_repeat_channel_value: int | None = field(default=None, repr=False)
+    _managed_hierarchy_global_index: int | None = field(default=None, repr=False)
+    _managed_room_sheet_number: str | None = field(default=None, repr=False)
+    _managed_room_document_number: str | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible physical-document record."""
@@ -322,9 +432,8 @@ class AltiumCompiledPhysicalDocument:
             "component_ids": list(self.component_ids),
             "sheet_number": self.sheet_number,
             "document_number": self.document_number,
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "physical_room_name": self.physical_room_name,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -352,11 +461,19 @@ class AltiumCompiledComponent:
     description: str
     parameters: tuple[tuple[str, str], ...]
     pin_count: int
+    all_pin_count: int
     part_count: int
     current_part_id: int
     annotation_state: str = "logical"
     annotation_locked: bool = False
     diagnostics: tuple[AltiumCompileDiagnostic, ...] = ()
+    _project_multipart_collapsed: bool = False
+    _managed_source_component_occurrences: tuple[tuple[str, str, int, str], ...] = (
+        field(
+            default=(),
+            repr=False,
+        )
+    )
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible component record."""
@@ -380,13 +497,12 @@ class AltiumCompiledComponent:
             "description": self.description,
             "parameters": dict(self.parameters),
             "pin_count": self.pin_count,
+            "all_pin_count": self.all_pin_count,
             "part_count": self.part_count,
             "current_part_id": self.current_part_id,
             "annotation_state": self.annotation_state,
             "annotation_locked": self.annotation_locked,
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -400,6 +516,10 @@ class AltiumCompiledNetTerminal:
     pin: str
     pin_name: str = ""
     pin_type: str = "PASSIVE"
+    _source_component_uid: str = field(default="", repr=False)
+    _source_pin_uid: str = field(default="", repr=False)
+    _source_pin_object_id: int = field(default=0, repr=False)
+    _source_owner_part_id: int = field(default=1, repr=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible terminal record."""
@@ -427,6 +547,16 @@ class AltiumCompiledNetEndpoint:
     pin: str = ""
     pin_name: str = ""
     connection_point: tuple[int, int] | None = None
+    _source_occurrence_id: str = field(default="", repr=False, compare=False)
+    _source_pin_object_id: int = field(default=0, repr=False, compare=False)
+    _bus_signal_index: int | None = field(default=None, repr=False, compare=False)
+    _harness_entries_path: tuple[str, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _repeat_value: int | None = field(default=None, repr=False, compare=False)
+    _harness_type_name: str = field(default="", repr=False, compare=False)
+    _harness_interface_name: str = field(default="", repr=False, compare=False)
+    _harness_type_inferred: bool = field(default=False, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible endpoint record."""
@@ -464,6 +594,7 @@ class AltiumCompiledNetItem:
     connection_point: tuple[int, int] | None = None
     removed: bool = False
     inferred_from_harness: bool = False
+    _source_pin_object_id: int = field(default=0, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible net-item record."""
@@ -512,6 +643,51 @@ class AltiumCompiledNet:
     child_net_id: str = ""
     link_ids: tuple[str, ...] = ()
     diagnostics: tuple[AltiumCompileDiagnostic, ...] = ()
+    _name_source_kind: str = field(default="", repr=False, compare=False)
+    _name_source_name: str = field(default="", repr=False, compare=False)
+    _name_source_bus_prefix: str = field(default="", repr=False, compare=False)
+    _name_source_bus_prefix_full_name: str | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _name_source_bus_suffix: str = field(default="", repr=False, compare=False)
+    _name_source_priority: int = field(default=0, repr=False, compare=False)
+    _name_source_raw_name: str = field(default="", repr=False, compare=False)
+    _name_source_is_bus: bool = field(default=False, repr=False, compare=False)
+    _name_source_schematic_id: str = field(default="", repr=False, compare=False)
+    _name_source_hierarchy_path: tuple[str, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _name_source_is_multipath: bool = field(default=False, repr=False, compare=False)
+    _name_source_relative_multichannel_depth: int = field(
+        default=0, repr=False, compare=False
+    )
+    _name_source_full_name: str = field(default="", repr=False, compare=False)
+    _name_source_autogenerated: bool = field(default=False, repr=False, compare=False)
+    _bus_signal_width: int = field(default=0, repr=False, compare=False)
+    _bus_signal_offset: int = field(default=0, repr=False, compare=False)
+    _source_connection_link_id: str = field(default="", repr=False, compare=False)
+    _contains_bus: bool = field(default=False, repr=False, compare=False)
+    _port_bus_member_names: tuple[str, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _scalar_merge_name_sources: tuple[tuple[str, str], ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _signal_harness_name_candidates: tuple[_SignalHarnessNameCandidate, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _hierarchy_parent_entry_name: str = field(default="", repr=False, compare=False)
+    _hierarchy_link_name: str = field(default="", repr=False, compare=False)
+    _hierarchy_child_name: str = field(default="", repr=False, compare=False)
+    _hierarchy_child_object_ids: tuple[str, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _hierarchy_match_kind: str = field(default="", repr=False, compare=False)
+    _managed_item_count: int = field(default=0, repr=False, compare=False)
+    _managed_endpoint_count: int = field(default=0, repr=False, compare=False)
+    _managed_removed_item_count: int = field(default=0, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-compatible net record."""
@@ -536,9 +712,7 @@ class AltiumCompiledNet:
             "parent_net_id": self.parent_net_id,
             "child_net_id": self.child_net_id,
             "link_ids": list(self.link_ids),
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -560,6 +734,9 @@ class AltiumCompiledDesign:
     physical_sheet_symbols: tuple[AltiumCompiledPhysicalSheetSymbol, ...] = ()
     compile: dict[str, object] = field(default_factory=dict)
     debug: dict[str, object] = field(default_factory=dict)
+    compiled_schematic_graph: AltiumCompiledSchematicGraph | None = None
+    physical_page_metadata: tuple[AltiumPhysicalPageMetadata, ...] = ()
+    _component_body_evidence: tuple[AltiumCompiledComponent, ...] = ()
 
     @property
     def top_physical_document(self) -> AltiumCompiledPhysicalDocument | None:
@@ -600,11 +777,7 @@ class AltiumCompiledDesign:
                 for component in self.components
                 for diagnostic in component.diagnostics
             ],
-            *[
-                diagnostic
-                for net in self.nets
-                for diagnostic in net.diagnostics
-            ],
+            *[diagnostic for net in self.nets for diagnostic in net.diagnostics],
         ]
         net_flattening = self.compile.get("net_flattening")
         flattened_net_count = len(
@@ -624,7 +797,9 @@ class AltiumCompiledDesign:
             net_count=len(self.nets),
             flattened_net_count=flattened_net_count,
             diagnostic_count=len(diagnostics),
-            has_errors=any(diagnostic.severity == "error" for diagnostic in diagnostics),
+            has_errors=any(
+                diagnostic.severity == "error" for diagnostic in diagnostics
+            ),
             has_warnings=any(
                 diagnostic.severity == "warning" for diagnostic in diagnostics
             ),
@@ -649,9 +824,7 @@ class AltiumCompiledDesign:
             ],
             "components": [component.to_dict() for component in self.components],
             "nets": [net.to_dict() for net in self.nets],
-            "diagnostics": [
-                diagnostic.to_dict() for diagnostic in self.diagnostics
-            ],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
             "source_path": self.source_path,
             "compile": dict(sorted(self.compile.items())),
         }
@@ -669,6 +842,7 @@ class AltiumCompiledDesign:
 __all__ = [
     "COMPILED_DESIGN_GENERATOR",
     "COMPILED_DESIGN_SCHEMA",
+    "validate_compiled_design_payload",
     "AltiumCompileDiagnostic",
     "AltiumCompiledAnnotationState",
     "AltiumCompiledComponent",

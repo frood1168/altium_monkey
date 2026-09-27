@@ -48,13 +48,46 @@ Common workflows:
 6. inspect PCB layers, drills, board outlines, nets, and net classes
 7. author and mutate PCB vias, including IPC-4761 protection metadata
 8. extract embedded fonts and 3D models
-9. generate project containers and run associated OutJobs
+9. generate project containers and, on Windows with Altium Designer installed,
+   run associated OutJobs within the limitations below
 10. create experimental Draftsman pages with notes, text, pictures, and
     generated board-assembly-view highlight artwork
 
+## Known OutJob Automation Limitation
+
+`prj.outjob().run(...)` drives Altium Designer through its scripting API. It is
+a best-effort Windows integration, not a headless release service.
+
+- The verified scope is folder-based `GeneratedFiles` manufacturing output,
+  such as Gerber, NC Drill, ODB++, IPC-2581, and some netlist outputs. Exact
+  behavior remains dependent on the installed Altium version.
+- PDF/Publish document containers, including schematic prints, PCB prints, and
+  Draftsman output, are not currently supported reliably. The runner also does
+  not iterate every output container in a mixed-media OutJob.
+- The OutJob must be listed as a document in the `.PrjPcb`, not merely stored
+  beside it. When running a disposable project copy, use its project-bound
+  OutJob with `stage_outjob_copy=False`; copying only the OutJob to a temporary
+  path can break the project-document identity required by Altium.
+- `OutJobRunResult.success` means the Altium script returned its completion
+  marker without a reported script error. Altium can still generate zero
+  files, so automation must verify its expected artifacts before accepting a
+  run.
+
+For document/PDF output, use Altium's OutJob editor to generate each container
+or use the Project Releaser, which can target a local folder or a connected
+Workspace. Altium's own documentation states that direct OutJob generation is
+per container; there is no single batch command for every output container.
+See [Preparing Manufacturing Data with Output Jobs](https://www.altium.com/documentation/altium-designer/preparing-for-manufacture/output-jobs)
+and [Design Project Release](https://www.altium.com/documentation/altium-designer/preparing-for-manufacture/design-release).
+
+Tracked reports: [#33](https://github.com/wavenumber-eng/altium_monkey/issues/33),
+[#34](https://github.com/wavenumber-eng/altium_monkey/issues/34), and
+[#61](https://github.com/wavenumber-eng/altium_monkey/issues/61).
+
 ## Install
 
-Python 3.11 and Python 3.12 are supported for this release.
+Normal GIL-enabled CPython 3.12 through Python 3.14 are supported. Free-threaded
+Python builds are not currently part of the support contract.
 
 ```powershell
 pip install altium-monkey
@@ -66,16 +99,22 @@ or with `uv`:
 uv add altium-monkey
 ```
 
-For running the examples, prefer `uv run ...`. It is the highest-probability
-path for using the expected interpreter and dependencies without local
-environment drift.
+Install the optional example dependencies before running the full example set:
+
+```powershell
+pip install "altium-monkey[examples]"
+```
+
+With `uv`, use `uv run --extra examples ...` so examples that synthesize STEP
+geometry receive CadQuery without changing the core runtime environment.
 
 The package includes dependencies for SVG text shaping and STEP-model bounds.
-STEP bounds use `wn-geometer`, with published wheels currently available for
-Windows amd64, macOS arm64, and Linux x86_64 tagged `manylinux_2_39`. See
-[RELEASE_NOTES.md](RELEASE_NOTES.md) for platform and Python-version
-boundaries. The CadQuery dependency is only needed for the public example that
-synthesizes new STEP models.
+STEP bounds use the required `wn-geometer==2026.9.19` dependency. That release
+publishes wheels for Windows amd64, macOS arm64, and Linux x86_64/aarch64 using
+`manylinux_2_35`; other platforms are not currently part of the install support
+boundary. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for platform and
+Python-version boundaries. CadQuery is needed only by examples that synthesize
+new STEP models.
 
 ## Public API Compatibility
 
@@ -93,7 +132,22 @@ Parse a project and emit the public design JSON contract:
 from altium_monkey import AltiumDesign
 
 design = AltiumDesign.from_prjpcb("example.PrjPcb")
-payload = design.to_json()
+payload = design.to_json(include_pnp=False)  # Schematic-only; no board parse.
+```
+
+Project loading is proportional to the requested work. The default `FULL`
+mode loads the schematic/compiler context but does not parse any referenced
+PcbDoc. Use `METADATA_ONLY` when a tool needs project parameters, variants, or
+document discovery without loading either schematics or boards:
+
+```python
+from altium_monkey import AltiumDesign, AltiumProjectLoadMode
+
+design = AltiumDesign.from_prjpcb(
+    "example.PrjPcb",
+    load_mode=AltiumProjectLoadMode.METADATA_ONLY,
+)
+board = design.load_pcbdoc()  # The board is parsed only when requested.
 ```
 
 Create or modify a schematic, then save it:
@@ -137,12 +191,13 @@ The public docs are Markdown-first for this release:
 4. [PcbLib](docs/pcblib.md)
 5. [PrjPcb](docs/prjpcb.md)
 6. [AltiumDesign](docs/altium_design.md)
-7. [IntLib](docs/intlib.md)
-8. [API patterns](docs/api_patterns/index.md)
-9. [Schema contracts](docs/schemas/index.md)
-10. [Format contracts](docs/format_contracts/index.md)
-11. [Docs style foundation](docs/style.md)
-12. [Examples](docs/examples/index.md)
+7. [Draftsman](docs/draftsman.md)
+8. [IntLib](docs/intlib.md)
+9. [API patterns](docs/api_patterns/index.md)
+10. [Schema contracts](docs/schemas/index.md)
+11. [Format contracts](docs/format_contracts/index.md)
+12. [Docs style foundation](docs/style.md)
+13. [Examples](docs/examples/index.md)
 
 The examples are the best starting point for public API usage. They are kept in
 [`examples/`](examples/) and are indexed from `examples/manifest.toml`.
@@ -158,8 +213,21 @@ When a common Altium/Windows family is unavailable, schematic rendering can use
 bundled open-source fallback fonts. Arial and Microsoft Sans Serif-style
 families substitute Arimo, Times New Roman-style families substitute Tinos, and
 Courier New or monospace families substitute Cousine. SVG output embeds bundled
-fallback faces when they are used so browser rendering follows the same metrics
-used to place text.
+fallback faces only when callers explicitly request a self-contained artifact:
+
+```python
+from altium_monkey import SchSvgRenderOptions
+
+svg = schdoc.to_svg(
+    options=SchSvgRenderOptions(embed_bundled_fallback_fonts=True)
+)
+```
+
+The default is `False`, which keeps SVG output compact. Font substitution and
+text measurement are unchanged in either mode. The option never embeds an
+installed, configured, or otherwise caller-provided font, and it does not write
+font sidecar files. A compact SVG viewed on a machine without the selected
+fallback family may not reproduce the renderer's text metrics exactly.
 
 gotIR carries font-resolution diagnostics for substitutions and fallbacks so
 downstream tools can surface a warning instead of silently using a hard
@@ -218,14 +286,16 @@ Known release boundaries include:
    component cross-reference metadata cannot be parsed.
 4. Variant processing supports DNP handling and parameter overrides; alternate
    fitted component replacement is not applied semantically yet.
-5. Complex hierarchical channels now route through the compiled design model
-   for design JSON, netlist JSON, and physical schematic SVG/IR output.
-   Rich consumers should use `AltiumDesign.to_json(...)` `physical_pages` or
-   `AltiumDesign.to_physical_svg(...)` for repeated sheets instead of assuming
-   one source SVG ID maps to one physical component.
-6. Project design JSON now emits `altium_monkey.design.a2`. Strict validators
-   pinned to the old `design.a1` schema should refresh to `design.a2`; compile
-   metadata and diagnostics are opt-in through
+5. Complex hierarchical channels route through the compiled design model for
+   design JSON, netlist JSON, and physical schematic SVG/IR output. Rich
+   consumers should use the required Design b0 `compiled_schematic_graph` and
+   select pages by canonical page occurrence id instead of assuming one source
+   SVG ID maps to one physical component.
+6. Project design JSON emits `altium_monkey.design.b0`. Strict validators
+   pinned to Design a2 should refresh to `design_b0.schema.json`; Design b0
+   requires `altium_monkey.compiled_schematic_graph.a0` and intentionally does
+   not emit the duplicated Design a2 `physical_pages` projection. Compile
+   metadata and diagnostics remain opt-in through
    `to_json(include_compile_metadata=True)`.
 7. Windows remains the primary validation platform. macOS font discovery and
    bundled schematic font substitution have focused coverage; Linux coverage

@@ -18,9 +18,10 @@
 ## Object Ownership
 
 SchDoc uses the `ObjectCollection` model. Typed views such as `components`,
-`wires`, and `notes` are live filtered views over the owned object collection.
-Use `add_object(...)`, `insert_object(...)`, `remove_object(...)`, or typed
-high-level helpers for structural mutation.
+`wires`, and `notes`, plus `objects` and `all_objects`, are read-only live views
+over the owned object collection. Do not append to a view or assign
+`all_objects`. Use `add_object(...)`, `insert_object(...)`,
+`remove_object(...)`, or typed high-level helpers for structural mutation.
 
 Owned child records must be added through their owner:
 
@@ -62,6 +63,15 @@ round-tripping continue to preserve the source fields independently.
 includes a root `viewBox`; strict native/oracle output may omit it by default.
 
 See [SVG](svg.md) for the shared rendering contract.
+
+## Embedded Storage Compatibility
+
+Root Storage uses Altium-compatible, bounded declared-prefix semantics for
+legacy image streams. Only selected entries are interpreted, and selected
+framing, compression, and image payload errors still fail. Storage with a
+stale effective count, missing header terminator, or case-insensitive duplicate
+name is regenerated canonically when saved. Every selected payload is validated
+and budgeted; image lookup retains the first selected name.
 
 ## Symbol Extraction
 

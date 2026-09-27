@@ -4,8 +4,11 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from struct import pack, unpack
-from typing import Any
+from struct import pack
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .altium_font_manager import FontIDManager
 
 from .altium_sch_enums import (
     IEEE_SYMBOL_NAMES,
@@ -22,6 +25,7 @@ from .altium_sch_enums import (
     SymbolLineWidth,
 )
 from .altium_record_types import (
+    MAX_INDEXED_ITEMS_PER_RECORD,
     CoordPoint,
     SchPrimitive,
     SchRecordType,
@@ -29,9 +33,12 @@ from .altium_record_types import (
     parse_bool,
     rgb_to_win32_color,
 )
+from .altium_sch_compact_acp import decode_compact_acp, encode_compact_acp
 from .altium_sch_svg_renderer import (
     PIN_LINE_WIDTH,
     SchSvgRenderContext,
+    _format_intermediate_svg_number,
+    exact_intermediate_svg_numbers,
     render_text_with_overline,
     svg_ellipse,
     svg_group,
@@ -40,10 +47,17 @@ from .altium_sch_svg_renderer import (
     svg_polygon,
     svg_rect,
     svg_text_or_poly,
+    using_exact_intermediate_svg_numbers,
 )
-from .altium_serializer import process_mbcs_string
+from .altium_serializer import (
+    AltiumSerializer,
+    read_dynamic_string_field,
+    write_dynamic_string_field,
+)
 from .altium_text_metrics import measure_text_width
 from .altium_ttf_metrics import get_font_factor
+
+_SVG_NUMBER_PATTERN = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
 
 def _get_case_insensitive(
@@ -68,28 +82,14 @@ def _get_case_insensitive(
     # Try exact match first (most common)
     if key in record:
         return record[key]
-    # Try uppercase variant
-    upper_key = key.upper()
-    if upper_key in record:
-        return record[upper_key]
+    normalized = key.casefold()
+    for actual_key, value in record.items():
+        if actual_key.casefold() == normalized:
+            return value
     return default
 
 
-def _get_case_insensitive_str(
-    record: dict[str, object],
-    key: str,
-    default: str = "",
-) -> str:
-    value = _get_case_insensitive(record, key, default)
-    return default if value is None else str(value)
-
-
-def _get_case_insensitive_int(
-    record: dict[str, object],
-    key: str,
-    default: int = 0,
-) -> int:
-    value = _get_case_insensitive(record, key, default)
+def _coerce_case_insensitive_int(value: object | None, default: int = 0) -> int:
     if value is None:
         return default
     if not isinstance(value, int | float | str):
@@ -97,22 +97,247 @@ def _get_case_insensitive_int(
     return int(value)
 
 
-def _has_case_insensitive(record: dict, key: str) -> bool:
+class _FoldedRecordView:
     """
-    Check if key exists in record with case-insensitive lookup.
+    Casefolded first-match index over one record for repeated field reads.
+
+    Lookups mirror _get_case_insensitive / _has_case_insensitive exactly: an
+    exact (record-native) hit wins, then the first case-insensitive match in
+    record iteration order. Build only after record mutation is finished; the
+    index does not track later changes.
     """
-    return key in record or key.upper() in record
+
+    __slots__ = ("record", "folded")
+
+    def __init__(self, record: dict[str, object]) -> None:
+        self.record = record
+        folded: dict[str, object] = {}
+        for actual_key, value in record.items():
+            folded.setdefault(actual_key.casefold(), value)
+        self.folded = folded
+
+    def has(self, key: str) -> bool:
+        return key in self.record or key.casefold() in self.folded
+
+    def get(self, key: str, default: object | None = None) -> object | None:
+        record = self.record
+        if key in record:
+            return record[key]
+        return self.folded.get(key.casefold(), default)
+
+    def get_int(self, key: str, default: int = 0) -> int:
+        return _coerce_case_insensitive_int(self.get(key, default), default)
+
+    def get_str(self, key: str, default: str = "") -> str:
+        value = self.get(key, default)
+        return default if value is None else str(value)
 
 
-def _read_swap_id_part_and_pin(record: dict[str, Any]) -> tuple[str, bool]:
+def _remove_case_insensitive(record: dict[str, object], *fields: str) -> None:
+    normalized_fields = {field.casefold() for field in fields}
+    for key in tuple(record):
+        if key.casefold() in normalized_fields:
+            record.pop(key)
+
+
+def _is_indexed_field(key: str, prefix: str) -> bool:
+    normalized_key = key.casefold()
+    normalized_prefix = prefix.casefold()
+    if not normalized_key.startswith(normalized_prefix):
+        return False
+    suffix = normalized_key[len(normalized_prefix) :]
+    return bool(suffix) and suffix.isascii() and suffix.isdigit()
+
+
+def _import_pin_electrical(value: int) -> PinElectrical:
+    """Apply the V5 byte range and undefined-value normalization contract."""
+    if not 0 <= value <= 0xFF:
+        raise ValueError("Electrical must fit an unsigned byte")
+    if value > PinElectrical.POWER.value:
+        return PinElectrical.IO
+    return PinElectrical(value)
+
+
+def _binary_coord_whole(whole: int, fraction: int) -> int:
+    total = whole * 100000 + fraction
+    magnitude = abs(total) // 100000
+    return -magnitude if total < 0 else magnitude
+
+
+def _split_coord_truncating_toward_zero(total: int) -> tuple[int, int]:
+    whole = abs(total) // 100000
+    if total < 0:
+        whole = -whole
+    return whole, total - whole * 100000
+
+
+def _format_pin_delay(value: float) -> str:
+    if not math.isfinite(value):
+        raise ValueError("PinPropagationDelay must be finite")
+    mantissa, exponent = f"{value:.6E}".split("E", maxsplit=1)
+    return f"{mantissa}E{int(exponent):+04d}"
+
+
+def _parse_pin_delay(value: object) -> float:
+    if not isinstance(value, int | float | str):
+        raise ValueError("PinPropagationDelay must be numeric")
+    parsed = float(value or 0.0)
+    if not math.isfinite(parsed):
+        raise ValueError("PinPropagationDelay must be finite")
+    return parsed
+
+
+def _checked_unsigned(value: int, maximum: int, field: str) -> int:
+    if not 0 <= value <= maximum:
+        raise ValueError(f"{field} must be in 0..={maximum}")
+    return value
+
+
+def _checked_u8(value: int, field: str) -> int:
+    if not 0 <= value <= 0xFF:
+        raise ValueError(f"{field} must fit an unsigned byte")
+    return value
+
+
+def _checked_i16(value: int, field: str) -> int:
+    if not -(1 << 15) <= value < (1 << 15):
+        raise ValueError(f"{field} must fit a signed 16-bit field")
+    return value
+
+
+def _checked_i32(value: int, field: str) -> int:
+    if not -(1 << 31) <= value < (1 << 31):
+        raise ValueError(f"{field} must fit a signed 32-bit field")
+    return value
+
+
+def _folded_validated_int(
+    record: dict[str, object],
+    folded: dict[str, object],
+    field: str,
+) -> int | None:
     """
-    Read the pin swap-part mapping using Altium's MBCS string rules.
+    Coerced int for a present field, or None when the field is absent.
+
+    Present fields never yield None: a stored None coerces to the 0 default,
+    matching _get_case_insensitive_int. Exact keys win over the first
+    case-insensitive match, matching _get_case_insensitive.
     """
-    for key in ("%UTF8%SwapIDPart", "SwapIDPart", "SwapIdPartAndPartPin"):
-        if _has_case_insensitive(record, key):
-            value = str(_get_case_insensitive(record, key))
-            return process_mbcs_string(value), True
-    return "|&|", False
+    if field in record:
+        return _coerce_case_insensitive_int(record[field])
+    normalized = field.casefold()
+    if normalized not in folded:
+        return None
+    return _coerce_case_insensitive_int(folded[normalized])
+
+
+def _validate_pin_text_numeric_fields(view: _FoldedRecordView) -> None:
+    record = view.record
+    field_groups = (
+        (
+            (
+                "OwnerIndex",
+                "Location.X_Frac",
+                "Location.Y_Frac",
+                "PinLength_Frac",
+                "PinPackageLength_Frac",
+                "Name_CustomPosition_Margin_Frac",
+                "Name_CustomPosition_VerticalMargin_Frac",
+                "Designator_CustomPosition_Margin_Frac",
+                "Designator_CustomPosition_VerticalMargin_Frac",
+            ),
+            _checked_i32,
+        ),
+        (
+            (
+                "OwnerPartId",
+                "PinLength",
+                "Location.X",
+                "Location.Y",
+                "PinPackageLength",
+                "Name_CustomPosition_Margin",
+                "Name_CustomPosition_VerticalMargin",
+                "Name_CustomFontID",
+                "Designator_CustomPosition_Margin",
+                "Designator_CustomPosition_VerticalMargin",
+                "Designator_CustomFontID",
+            ),
+            _checked_i16,
+        ),
+    )
+    # The shared casefolded first-value view replaces a full key scan per
+    # checked field while keeping the first match like the scan it replaces.
+    folded = view.folded
+    for fields, validator in field_groups:
+        for field in fields:
+            present = _folded_validated_int(record, folded, field)
+            if present is not None:
+                validator(present, field)
+    for field in (
+        "OwnerPartDisplayMode",
+        "FormalType",
+        "Electrical",
+        "PinConglomerate",
+        "SymBol_InnerEdge",
+        "SymBol_OuterEdge",
+        "SymBol_Inner",
+        "SymBol_Outer",
+        "SymBol_LineWidth",
+        "PinName_PositionConglomerate",
+        "PinDesignator_PositionConglomerate",
+    ):
+        present = _folded_validated_int(record, folded, field)
+        if present is not None:
+            _checked_u8(present, field)
+    color = _folded_validated_int(record, folded, "Color")
+    if color is not None:
+        _checked_unsigned(color, 0xFFFF_FFFF, "Color")
+    for field in ("Name_CustomColor", "Designator_CustomColor"):
+        present = _folded_validated_int(record, folded, field)
+        if present is not None:
+            _checked_unsigned(present, 0x7FFF_FFFF, field)
+
+
+def _append_pascal_cp1252(data: bytearray, value: str, field: str) -> None:
+    encoded = encode_compact_acp(value)
+    if len(encoded) > 0xFF:
+        raise ValueError(f"{field} must contain at most 255 encoded bytes")
+    data.append(len(encoded))
+    data.extend(encoded)
+
+
+@dataclass(slots=True)
+class _BinaryPinCursor:
+    data: bytes
+    offset: int = 0
+
+    def take(self, size: int, field: str) -> bytes:
+        end = self.offset + size
+        if end > len(self.data):
+            available = max(0, len(self.data) - self.offset)
+            raise ValueError(
+                f"PIN binary field {field} truncated at offset {self.offset}: "
+                f"need {size} bytes, have {available}"
+            )
+        value = self.data[self.offset : end]
+        self.offset = end
+        return value
+
+    def read_u8(self, field: str) -> int:
+        return self.take(1, field)[0]
+
+    def read_i32(self, field: str) -> int:
+        return int.from_bytes(self.take(4, field), "little", signed=True)
+
+    def read_u32(self, field: str) -> int:
+        return int.from_bytes(self.take(4, field), "little", signed=False)
+
+    def read_i16(self, field: str) -> int:
+        return int.from_bytes(self.take(2, field), "little", signed=True)
+
+    def read_pascal_cp1252(self, field: str) -> str:
+        size = self.read_u8(f"{field}.length")
+        return decode_compact_acp(self.take(size, field))
 
 
 def _normalize_native_pin_text(text: str, *, native_svg_export: bool) -> str:
@@ -375,6 +600,8 @@ class PinTextSettings:
     position_margin_frac: int | None = (
         None  # Fractional sub-10000 precision, None = not present
     )
+    position_vertical_margin: int | None = None
+    position_vertical_margin_frac: int | None = None
     rotation: Rotation90 = Rotation90.DEG_0
     rotation_anchor: PinTextAnchor = PinTextAnchor.PIN
 
@@ -397,6 +624,24 @@ class _PinTextRenderSpec:
     margin: float
     rotated: bool
     settings: PinTextSettings | None
+
+
+def _pin_text_settings_state(
+    settings: PinTextSettings, margin_mils: float | None
+) -> tuple[object, ...]:
+    return (
+        settings.font_mode,
+        settings.font_id,
+        settings.color,
+        settings.position_mode,
+        settings.position_margin,
+        settings.position_margin_frac,
+        settings.position_vertical_margin,
+        settings.position_vertical_margin_frac,
+        settings.rotation,
+        settings.rotation_anchor,
+        margin_mils,
+    )
 
 
 def _validate_pin_text_rotation(rotation: PinTextRotation | int | None) -> int | None:
@@ -446,11 +691,11 @@ def _resolve_pin_electrical_type(
     *,
     is_user_mode: bool,
 ) -> PinElectrical:
+    if not is_user_mode:
+        return PinElectrical.PASSIVE
     if isinstance(electrical_type, PinElectrical):
         return electrical_type
-    if is_user_mode:
-        return PinElectrical(electrical_type)
-    return PinElectrical.PASSIVE
+    return PinElectrical(electrical_type)
 
 
 def _resolve_owner_part_id(owner_part_id: int | None, designator: str | None) -> int:
@@ -503,11 +748,11 @@ def _apply_constructor_text_settings(
 
 
 def _parse_pin_visibility_flags(
-    record: dict[str, Any], pin_conglomerate: int
+    view: _FoldedRecordView, pin_conglomerate: int
 ) -> tuple[bool, bool, bool, bool]:
     def _flag(field_name: str, bit_mask: int) -> bool:
-        if _has_case_insensitive(record, field_name):
-            return parse_bool(_get_case_insensitive(record, field_name))
+        if view.has(field_name):
+            return parse_bool(view.get(field_name))
         return (pin_conglomerate & bit_mask) != 0
 
     return (
@@ -534,7 +779,9 @@ def _parse_pin_symbol_fields(
     )
 
 
-def _translate_pin_font_id(font_manager: Any, raw_font_id: int) -> int:
+def _translate_pin_font_id(
+    font_manager: "FontIDManager | None", raw_font_id: int
+) -> int:
     return font_manager.translate_in(raw_font_id) if font_manager else raw_font_id
 
 
@@ -554,12 +801,12 @@ def _apply_pin_text_position_conglomerate(
 
 
 def _read_optional_pin_text_value(
-    record: dict[str, Any],
+    view: _FoldedRecordView,
     *field_names: str,
 ) -> Any:
     for field_name in field_names:
-        if _has_case_insensitive(record, field_name):
-            value = _get_case_insensitive(record, field_name)
+        if view.has(field_name):
+            value = view.get(field_name)
             if isinstance(value, str):
                 try:
                     return int(value)
@@ -570,60 +817,68 @@ def _read_optional_pin_text_value(
 
 
 def _parse_pin_text_settings_from_record(
-    record: dict[str, Any],
+    view: _FoldedRecordView,
     *,
     settings: PinTextSettings,
     prefix: str,
-    font_manager: Any,
+    font_manager: "FontIDManager | None",
 ) -> None:
     legacy_prefix = f"{prefix}_"
     _apply_pin_text_position_conglomerate(
         settings,
-        value=_read_optional_pin_text_value(
-            record, f"Pin{prefix}_PositionConglomerate"
-        ),
+        value=_read_optional_pin_text_value(view, f"Pin{prefix}_PositionConglomerate"),
     )
 
-    font_mode = _read_optional_pin_text_value(record, f"{prefix}FontMode")
+    font_mode = _read_optional_pin_text_value(view, f"{prefix}FontMode")
     if font_mode is not None:
         settings.font_mode = PinItemMode(int(font_mode))
-    position_mode = _read_optional_pin_text_value(record, f"{prefix}PositionMode")
+    position_mode = _read_optional_pin_text_value(view, f"{prefix}PositionMode")
     if position_mode is not None:
         settings.position_mode = PinItemMode(int(position_mode))
     rotation_relative = _read_optional_pin_text_value(
-        record, f"{prefix}CustomRotationRelative"
+        view, f"{prefix}CustomRotationRelative"
     )
     if rotation_relative is not None:
         settings.rotation = Rotation90(int(rotation_relative))
     rotation_anchor = _read_optional_pin_text_value(
-        record, f"{prefix}CustomRotationAnchor"
+        view, f"{prefix}CustomRotationAnchor"
     )
     if rotation_anchor is not None:
         settings.rotation_anchor = PinTextAnchor(int(rotation_anchor))
 
     position_margin = _read_optional_pin_text_value(
-        record,
+        view,
         f"{legacy_prefix}CustomPosition_Margin",
         f"{prefix}CustomPositionMargin",
     )
     if position_margin is not None:
         settings.position_margin = int(position_margin)
     position_margin_frac = _read_optional_pin_text_value(
-        record,
+        view,
         f"{legacy_prefix}CustomPosition_Margin_Frac",
         f"{prefix}CustomPositionMarginFrac",
     )
     if position_margin_frac is not None:
         settings.position_margin_frac = int(position_margin_frac)
+    vertical_margin = _read_optional_pin_text_value(
+        view, f"{prefix}_CustomPosition_VerticalMargin"
+    )
+    if vertical_margin is not None:
+        settings.position_vertical_margin = int(vertical_margin)
+    vertical_margin_frac = _read_optional_pin_text_value(
+        view, f"{prefix}_CustomPosition_VerticalMargin_Frac"
+    )
+    if vertical_margin_frac is not None:
+        settings.position_vertical_margin_frac = int(vertical_margin_frac)
     font_id = _read_optional_pin_text_value(
-        record,
+        view,
         f"{legacy_prefix}CustomFontID",
         f"{prefix}CustomFontID",
     )
     if font_id is not None:
         settings.font_id = _translate_pin_font_id(font_manager, int(font_id))
     color = _read_optional_pin_text_value(
-        record,
+        view,
         f"{legacy_prefix}CustomColor",
         f"{prefix}CustomColor",
     )
@@ -644,32 +899,74 @@ def _cache_pin_text_margin(
 
 
 def _write_pin_text_settings(
-    record: dict[str, Any],
+    record: dict[str, object],
     *,
     prefix: str,
     settings: PinTextSettings,
     margin_mils: float | None,
+    font_manager: "FontIDManager | None" = None,
 ) -> None:
-    conglomerate = 0
-    if settings.position_mode == PinItemMode.CUSTOM:
-        conglomerate |= 0x01
-        conglomerate |= settings.rotation_anchor.value << 1
-        conglomerate |= settings.rotation.value << 2
-        if margin_mils is not None:
-            internal_coord = int(round(margin_mils * 10000))
-            margin_whole = internal_coord // 100000
-            margin_frac = internal_coord % 100000
-            record[f"{prefix}_CustomPosition_Margin"] = str(margin_whole)
-            if margin_frac != 0:
-                record[f"{prefix}_CustomPosition_Margin_Frac"] = str(margin_frac)
-    if settings.font_mode == PinItemMode.CUSTOM:
-        conglomerate |= 0x10
-        if settings.font_id is not None:
-            record[f"{prefix}_CustomFontID"] = str(settings.font_id)
-        if settings.color is not None:
-            record[f"{prefix}_CustomColor"] = str(settings.color)
+    conglomerate = _write_pin_position_settings(
+        record, prefix=prefix, settings=settings, margin_mils=margin_mils
+    )
+    conglomerate |= _write_pin_font_settings(
+        record, prefix=prefix, settings=settings, font_manager=font_manager
+    )
     if conglomerate != 0:
         record[f"Pin{prefix}_PositionConglomerate"] = str(conglomerate)
+
+
+def _write_pin_position_settings(
+    record: dict[str, object],
+    *,
+    prefix: str,
+    settings: PinTextSettings,
+    margin_mils: float | None,
+) -> int:
+    if settings.position_mode != PinItemMode.CUSTOM:
+        return 0
+    conglomerate = (
+        0x01 | settings.rotation_anchor.value << 1 | settings.rotation.value << 2
+    )
+    if margin_mils is not None:
+        internal_coord = int(round(margin_mils * 10000))
+        margin_whole, margin_frac = _split_coord_truncating_toward_zero(internal_coord)
+        if margin_whole != 0 or settings.position_margin is not None:
+            record[f"{prefix}_CustomPosition_Margin"] = str(margin_whole)
+        if margin_frac != 0:
+            record[f"{prefix}_CustomPosition_Margin_Frac"] = str(margin_frac)
+    vertical_whole = settings.position_vertical_margin or 0
+    vertical_frac = settings.position_vertical_margin_frac or 0
+    if vertical_whole != 0:
+        record[f"{prefix}_CustomPosition_VerticalMargin"] = str(vertical_whole)
+    if vertical_frac != 0:
+        record[f"{prefix}_CustomPosition_VerticalMargin_Frac"] = str(vertical_frac)
+    return conglomerate
+
+
+def _write_pin_font_settings(
+    record: dict[str, object],
+    *,
+    prefix: str,
+    settings: PinTextSettings,
+    font_manager: "FontIDManager | None",
+) -> int:
+    if settings.font_mode != PinItemMode.CUSTOM:
+        return 0
+    output_font_id = (
+        font_manager.translate_out(settings.font_id)
+        if font_manager is not None and settings.font_id is not None
+        else settings.font_id
+    )
+    if output_font_id not in (None, 0):
+        record[f"{prefix}_CustomFontID"] = str(
+            _checked_i16(int(output_font_id), f"{prefix}_CustomFontID")
+        )
+    if settings.color != 0:
+        record[f"{prefix}_CustomColor"] = str(
+            _checked_unsigned(settings.color, 0x7FFF_FFFF, f"{prefix}_CustomColor")
+        )
+    return 0x10
 
 
 class AltiumSchPin(SchPrimitive):
@@ -834,6 +1131,12 @@ class AltiumSchPin(SchPrimitive):
         self.designator = str(designator) if designator is not None else "0"
         self.name = str(name) if name is not None else "0"
         self.description = description
+        self._has_designator = False
+        self._has_name = False
+        self._has_description = False
+        self._used_utf8_designator = False
+        self._used_utf8_name = False
+        self._used_utf8_description = False
 
         # Electrical properties
         self.electrical = _resolve_pin_electrical_type(
@@ -881,6 +1184,9 @@ class AltiumSchPin(SchPrimitive):
         self._has_swap_id_part: bool = (
             False  # Track if SwapIDPart was present in original
         )
+        self._used_utf8_swap_id_part: bool = False
+        self._has_default_value: bool = False
+        self._used_utf8_default_value: bool = False
 
         # Advanced properties
         self.pin_package_length: int = 0
@@ -888,9 +1194,10 @@ class AltiumSchPin(SchPrimitive):
         self.hidden_net_name: str = ""
 
         # Owner tracking
-        self.owner_index: int = 0
         self.owner_index_additional_list: bool = False
-        self.owner_part_id = _resolve_owner_part_id(owner_part_id, designator)
+        self.owner_part_id: int | None = _resolve_owner_part_id(
+            owner_part_id, designator
+        )
         self.owner_part_display_mode = owner_part_display_mode
 
         # Text customization (used by PinTextData stream)
@@ -910,6 +1217,7 @@ class AltiumSchPin(SchPrimitive):
 
         # Raw binary data
         self._raw_binary: bytes | None = None
+        self._font_manager: "FontIDManager | None" = None
 
         # === Custom styling ===
         # Store all styling in PinTextSettings - no private attrs for font/color/rotation
@@ -944,6 +1252,53 @@ class AltiumSchPin(SchPrimitive):
 
         # The legacy _needs_pintextdata and _use_custom_fonts flags were removed.
         # Use the needs_pintextdata property instead, which computes the same value
+        self._capture_pin_text_source_state()
+
+    def _capture_pin_text_source_state(self) -> None:
+        self._source_formal_type = self.formal_type
+        self._source_electrical = self.electrical
+        self._source_orientation = self.orientation
+        self._source_is_hidden = self.is_hidden
+        self._source_show_name = self.show_name
+        self._source_show_designator = self.show_designator
+        self._source_is_not_accessible = self.is_not_accessible
+        self._source_owner_index_additional_list = self.owner_index_additional_list
+        self._source_length_mils = self._length_mils
+        self._source_location = CoordPoint(
+            self.location.x,
+            self.location.y,
+            self.location.x_frac,
+            self.location.y_frac,
+        )
+        self._source_color = self.color
+        self._source_symbol_inner_edge = self.symbol_inner_edge
+        self._source_symbol_outer_edge = self.symbol_outer_edge
+        self._source_symbol_inner = self.symbol_inner
+        self._source_symbol_outer = self.symbol_outer
+        self._source_symbol_line_width = self.symbol_line_width
+        self._source_name = self.name
+        self._source_designator = self.designator
+        self._source_description = self.description
+        self._source_swap_id_pin = self.swap_id_pin
+        self._source_swap_id_pair = self.swap_id_pair
+        self._source_swap_id_part_and_pin = self.swap_id_part_and_pin
+        self._source_default_value = self.default_value
+        self._source_pin_package_length = self.pin_package_length
+        self._source_propagation_delay = self.propagation_delay
+        self._source_pin_conglomerate = self._text_pin_conglomerate()
+        self._source_name_settings_state = _pin_text_settings_state(
+            self.name_settings, self._name_margin_mils
+        )
+        self._source_designator_settings_state = _pin_text_settings_state(
+            self.designator_settings, self._designator_margin_mils
+        )
+        self._source_defined_functions = list(self.defined_functions)
+        self._source_selected_functions = list(self.selected_functions)
+        self._source_hide_name_as_function = self.hide_name_as_function
+        self._source_symbolic_name = self.symbolic_name
+        self._source_show_symbolic_name_as_function = (
+            self.show_symbolic_name_as_function
+        )
 
     @property
     def record_type(self) -> SchRecordType:
@@ -954,14 +1309,14 @@ class AltiumSchPin(SchPrimitive):
         """
         X position in mils.
         """
-        return self.location.x * 10.0
+        return self.location.x * 10.0 + self.location.x_frac / 10000.0
 
     @property
     def y_mils(self) -> float:
         """
         Y position in mils.
         """
-        return self.location.y * 10.0
+        return self.location.y * 10.0 + self.location.y_frac / 10000.0
 
     @property
     def length_mils(self) -> float:
@@ -1069,7 +1424,7 @@ class AltiumSchPin(SchPrimitive):
     def parse_from_record(
         self,
         record: dict[str, Any],
-        font_manager: Any | None = None,
+        font_manager: "FontIDManager | None" = None,
     ) -> None:
         """
         Parse PIN from record dictionary.
@@ -1099,36 +1454,62 @@ class AltiumSchPin(SchPrimitive):
                 Note: Altium files may have UPPERCASE keys (older exports) or MixedCase
                 keys (newer exports). All lookups use case-insensitive helpers.
         """
+        # The parse below never mutates the record, so one shared casefolded
+        # view serves validation and every optional-field read.
+        view = _FoldedRecordView(record)
+        _validate_pin_text_numeric_fields(view)
+
         # Location - use case-insensitive lookup for LOCATION.X vs Location.X
         self.location = CoordPoint(
-            _get_case_insensitive_int(record, "Location.X", 0),
-            _get_case_insensitive_int(record, "Location.Y", 0),
+            view.get_int("Location.X", 0),
+            view.get_int("Location.Y", 0),
         )
 
         # Fractional precision (legacy Altium format, sub-10000 precision)
         # Only set if present in original record (use None = not present)
-        if _has_case_insensitive(record, "Location.X_Frac"):
-            frac_val = _get_case_insensitive_int(record, "Location.X_Frac", 0)
+        if view.has("Location.X_Frac"):
+            frac_val = view.get_int("Location.X_Frac", 0)
             self.location_x_frac = frac_val
             self.location.x_frac = frac_val
-        if _has_case_insensitive(record, "Location.Y_Frac"):
-            frac_val = _get_case_insensitive_int(record, "Location.Y_Frac", 0)
+        if view.has("Location.Y_Frac"):
+            frac_val = view.get_int("Location.Y_Frac", 0)
             self.location_y_frac = frac_val
             self.location.y_frac = frac_val
-        if _has_case_insensitive(record, "PinLength_Frac"):
-            self.pin_length_frac = _get_case_insensitive_int(
-                record, "PinLength_Frac", 0
-            )
+        if view.has("PinLength_Frac"):
+            self.pin_length_frac = view.get_int("PinLength_Frac", 0)
 
         # Basic properties
         # Note: Altium omits Name/Designator fields when they're empty strings.
         # Default to empty string when parsing files, not '0' like the constructor.
-        self.designator = _get_case_insensitive_str(record, "Designator", "")
-        self.name = _get_case_insensitive_str(record, "Name", "")
-        self.description = _get_case_insensitive_str(record, "Description", "")
+        serializer = AltiumSerializer()
+        self.designator, self._has_designator, self._used_utf8_designator = (
+            read_dynamic_string_field(
+                serializer,
+                record,
+                self._record,
+                "Designator",
+                default="",
+            )
+        )
+        self.name, self._has_name, self._used_utf8_name = read_dynamic_string_field(
+            serializer,
+            record,
+            self._record,
+            "Name",
+            default="",
+        )
+        self.description, self._has_description, self._used_utf8_description = (
+            read_dynamic_string_field(
+                serializer,
+                record,
+                self._record,
+                "Description",
+                default="",
+            )
+        )
 
         # Length - default to 0 because Altium omits PinLength field when length=0
-        self.length = _get_case_insensitive_int(record, "PinLength", 0)
+        self.length = view.get_int("PinLength", 0)
 
         # Compute _length_mils at parse time from the whole and fractional fields.
         # Formula: length is in 10-mil units, pin_length_frac is in DXP units (1/10000 mil)
@@ -1138,36 +1519,31 @@ class AltiumSchPin(SchPrimitive):
 
         # Orientation - can come from 'Orientation' field OR from PinConglomerate bits 0-1
         # In SchDoc text records, orientation is stored in PinConglomerate, not a separate field
-        if _has_case_insensitive(record, "Orientation"):
-            self.orientation = Rotation90(
-                _get_case_insensitive_int(record, "Orientation") & 0x03
-            )
+        if view.has("Orientation"):
+            self.orientation = Rotation90(view.get_int("Orientation") & 0x03)
         else:
             # Extract from PinConglomerate (bits 0-1)
-            pin_conglomerate = _get_case_insensitive_int(record, "PinConglomerate", 0)
+            pin_conglomerate = view.get_int("PinConglomerate", 0)
             self.orientation = Rotation90(pin_conglomerate & 0x03)
 
         # Electrical type
-        self.electrical = PinElectrical(
-            _get_case_insensitive_int(record, "Electrical", 0)
-        )  # Default is INPUT (0)
+        self.electrical = _import_pin_electrical(view.get_int("Electrical", 0))
 
         # FormalType native JSON field
-        if _has_case_insensitive(record, "FormalType"):
-            self.formal_type = StdLogicState(
-                _get_case_insensitive_int(record, "FormalType")
-            )
+        self.formal_type = StdLogicState(view.get_int("FormalType", 0))
 
-        pin_conglomerate = _get_case_insensitive_int(record, "PinConglomerate", 0)
+        pin_conglomerate = view.get_int("PinConglomerate", 0)
         (
             self.is_hidden,
             self.show_name,
             self.show_designator,
             self.is_not_accessible,
-        ) = _parse_pin_visibility_flags(record, pin_conglomerate)
+        ) = _parse_pin_visibility_flags(view, pin_conglomerate)
+        # ImportPin intentionally clears the persisted conglomerate lock bit.
+        self.graphically_locked = False
 
         # Color
-        self.color = _get_case_insensitive_int(record, "Color", 0)
+        self.color = view.get_int("Color", 0)
 
         (
             self.symbol_inner,
@@ -1178,33 +1554,69 @@ class AltiumSchPin(SchPrimitive):
         ) = _parse_pin_symbol_fields(self._record)
 
         # Owner tracking
-        if _has_case_insensitive(record, "OwnerIndex"):
-            self.owner_index = _get_case_insensitive_int(record, "OwnerIndex")
-        if _has_case_insensitive(record, "OwnerIndexForSaveAdditionalList"):
+        if view.has("OwnerIndex"):
+            self.owner_index = view.get_int("OwnerIndex")
+        if view.has("OwnerIndexForSaveAdditionalList"):
             self.owner_index_additional_list = parse_bool(
-                _get_case_insensitive(record, "OwnerIndexForSaveAdditionalList")
+                view.get("OwnerIndexForSaveAdditionalList")
             )
 
         # Swap IDs
         # SwapIdPin is for individual pin ID
-        self.swap_id_pin = _get_case_insensitive_str(record, "SwapIdPin", "")
-        self.swap_id_pair = _get_case_insensitive_str(record, "SwapIdPair", "")
+        self.swap_id_pin = view.get_str("SwapIdPin", "")
+        self.swap_id_pair = view.get_str("SwapIdPair", "")
         # SwapIDPart stores part/sequence mapping (e.g., "|&|" or "part|&|seq").
         # Native import reads this through MBCS processing, so escaped pipe
         # sentinels such as 0xA6 must become literal separators before binary
         # SchLib serialization.
-        self.swap_id_part_and_pin, self._has_swap_id_part = _read_swap_id_part_and_pin(
-            record
+        (
+            self.swap_id_part_and_pin,
+            self._has_swap_id_part,
+            self._used_utf8_swap_id_part,
+        ) = read_dynamic_string_field(
+            serializer,
+            record,
+            self._record,
+            "SwapIDPart",
+            default="",
+        )
+        (
+            self.default_value,
+            self._has_default_value,
+            self._used_utf8_default_value,
+        ) = read_dynamic_string_field(
+            serializer,
+            record,
+            self._record,
+            "DefaultValue",
+            default="",
+        )
+        self.pin_package_length = view.get_int(
+            "PinPackageLength", 0
+        ) * 100000 + view.get_int("PinPackageLength_Frac", 0)
+        self.propagation_delay = _parse_pin_delay(view.get("PinPropagationDelay", 0.0))
+        self.hide_name_as_function = parse_bool(
+            view.get("HidePinNameAsFunction", False)
+        )
+        self.selected_functions = self._parse_alternate_pin_functions(
+            view, "PinSelectedFunctionsCount", "PinSelectedFunction"
+        )
+        self.defined_functions = self._parse_alternate_pin_functions(
+            view, "PinDefinedFunctionsCount", "PinDefinedFunction"
+        )
+        self.symbolic_name = view.get_str("PinSymbolicName", "")
+        self.show_symbolic_name_as_function = parse_bool(
+            view.get("ShowPinSymbolicNameAsFunction", False)
         )
 
         _parse_pin_text_settings_from_record(
-            record,
+            view,
             settings=self.name_settings,
             prefix="Name",
             font_manager=self._font_manager,
         )
         _parse_pin_text_settings_from_record(
-            record,
+            view,
             settings=self.designator_settings,
             prefix="Designator",
             font_manager=self._font_manager,
@@ -1230,6 +1642,26 @@ class AltiumSchPin(SchPrimitive):
                 self._designator_custom_position_margin,
                 self._designator_margin_mils,
             ) = _cache_pin_text_margin(self.designator_settings)
+        self.owner_part_id = view.get_int("OwnerPartId", -1)
+        self.owner_part_display_mode = view.get_int("OwnerPartDisplayMode", 0)
+        self._capture_primitive_source_state()
+        self._capture_pin_text_source_state()
+        self._raw_pin_conglomerate = view.get_int("PinConglomerate", 0)
+
+    @staticmethod
+    def _parse_alternate_pin_functions(
+        view: _FoldedRecordView, count_field: str, item_prefix: str
+    ) -> list[str]:
+        count = _checked_i32(view.get_int(count_field, 0), count_field)
+        if count < 0:
+            return []
+        if count > MAX_INDEXED_ITEMS_PER_RECORD:
+            raise ValueError(
+                f"{count_field} exceeds {MAX_INDEXED_ITEMS_PER_RECORD} entries"
+            )
+        return [
+            view.get_str(f"{item_prefix}{index}", "") for index in range(1, count + 1)
+        ]
 
     def _parse_binary(self, binary_data: bytes) -> None:
         """
@@ -1238,125 +1670,80 @@ class AltiumSchPin(SchPrimitive):
         This is the primary parsing method for SchLib PIN records.
         Binary format based on native pin export format.
         """
-        if len(binary_data) < 30:
-            raise ValueError(f"PIN binary data too short: {len(binary_data)} bytes")
-
         self._raw_binary = binary_data
-        cursor = 0
+        cursor = _BinaryPinCursor(binary_data)
 
         # Byte 0: RECORD instruction (single byte, should be 0x02)
-        record_type = binary_data[cursor]
+        record_type = cursor.read_u8("RECORD")
         if record_type != SchRecordType.PIN:
             raise ValueError(f"Invalid PIN record type: {record_type}")
-        cursor += 1
-
         # Bytes 1-4: OwnerIndex (int32 LE)
-        (self.owner_index,) = unpack("<I", binary_data[cursor : cursor + 4])
-        cursor += 4
+        self.owner_index = cursor.read_i32("OwnerIndex")
 
         # Bytes 5-6: OwnerPartId (int16 LE)
-        (self.owner_part_id,) = unpack("<h", binary_data[cursor : cursor + 2])
-        cursor += 2
+        self.owner_part_id = cursor.read_i16("OwnerPartId")
 
         # Byte 7: OwnerPartDisplayMode
-        self.owner_part_display_mode = binary_data[cursor]
-        cursor += 1
+        self.owner_part_display_mode = cursor.read_u8("OwnerPartDisplayMode")
 
         # Bytes 8-11: Symbol decorations (4 bytes)
         # Order from Altium: InnerEdge, OuterEdge, Inside, Outside
-        self.symbol_inner_edge = IeeeSymbol(binary_data[cursor])
-        self.symbol_outer_edge = IeeeSymbol(binary_data[cursor + 1])
-        self.symbol_inner = IeeeSymbol(binary_data[cursor + 2])
-        self.symbol_outer = IeeeSymbol(binary_data[cursor + 3])
-        cursor += 4
+        self.symbol_inner_edge = IeeeSymbol(cursor.read_u8("SymbolInnerEdge"))
+        self.symbol_outer_edge = IeeeSymbol(cursor.read_u8("SymbolOuterEdge"))
+        self.symbol_inner = IeeeSymbol(cursor.read_u8("SymbolInner"))
+        self.symbol_outer = IeeeSymbol(cursor.read_u8("SymbolOuter"))
 
         # Description (Pascal string)
-        desc_len = binary_data[cursor]
-        cursor += 1
-        self.description = binary_data[cursor : cursor + desc_len].decode(
-            "iso-8859-1", errors="replace"
-        )
-        cursor += desc_len
+        self.description = cursor.read_pascal_cp1252("Description")
 
         # FormalType (was incorrectly skipped as "unknown byte 0x01")
-        self.formal_type = StdLogicState(binary_data[cursor])
-        cursor += 1
+        self.formal_type = StdLogicState(cursor.read_u8("FormalType"))
 
         # Electrical type byte
-        self.electrical = PinElectrical(binary_data[cursor] & 0x0F)
-        cursor += 1
+        self.electrical = _import_pin_electrical(cursor.read_u8("Electrical"))
 
         # PinConglomerate (orientation + visibility + flags)
-        conglomerate = binary_data[cursor]
+        conglomerate = cursor.read_u8("PinConglomerate")
         self.orientation = Rotation90(conglomerate & 0x03)
         self.is_hidden = (conglomerate & 0x04) != 0
         self.show_name = (conglomerate & 0x08) != 0
         self.show_designator = (conglomerate & 0x10) != 0
         self.is_not_accessible = (conglomerate & 0x20) != 0
-        self.graphically_locked = (conglomerate & 0x40) != 0
+        self.graphically_locked = False
         self.owner_index_additional_list = (conglomerate & 0x80) != 0
-        cursor += 1
-
         # Pin length (int16 LE, units of 10mil)
-        (self.length,) = unpack("<h", binary_data[cursor : cursor + 2])
-        cursor += 2
+        self.length = cursor.read_i16("PinLength")
 
         # Compute the precombined length in mils at parse time.
         # Binary format has no frac field - length is stored as int16 in 10-mil units
         self._length_mils = self.length * 10.0
 
         # X, Y coordinates (int16 LE each, units of 10mil)
-        x, y = unpack("<hh", binary_data[cursor : cursor + 4])
+        x = cursor.read_i16("Location.X")
+        y = cursor.read_i16("Location.Y")
         self.location = CoordPoint(x, y)
-        cursor += 4
 
         # Color (Win32 format - int32 LE)
-        (self.color,) = unpack("<I", binary_data[cursor : cursor + 4])
-        cursor += 4
+        self.color = cursor.read_u32("Color")
 
         # Name (Pascal string)
         # Use cp1252 (Windows-1252) as Altium is a Windows application
-        name_len = binary_data[cursor]
-        cursor += 1
-        self.name = binary_data[cursor : cursor + name_len].decode(
-            "cp1252", errors="replace"
-        )
-        cursor += name_len
+        self.name = cursor.read_pascal_cp1252("Name")
 
         # Designator (Pascal string)
-        desig_len = binary_data[cursor]
-        cursor += 1
-        self.designator = binary_data[cursor : cursor + desig_len].decode(
-            "cp1252", errors="replace"
-        )
-        cursor += desig_len
+        self.designator = cursor.read_pascal_cp1252("Designator")
 
         # SwapIdPin (Pascal string)
-        swap_len = binary_data[cursor]
-        cursor += 1
-        self.swap_id_pin = binary_data[cursor : cursor + swap_len].decode(
-            "cp1252", errors="replace"
-        )
-        cursor += swap_len
+        self.swap_id_pin = cursor.read_pascal_cp1252("SwapIdPin")
 
         # SwapIDPart (Pascal string) - format: "{part}|&|{sequence}"
-        part_seq_len = binary_data[cursor]
-        cursor += 1
-        self.swap_id_part_and_pin = binary_data[cursor : cursor + part_seq_len].decode(
-            "cp1252", errors="replace"
-        )
-        cursor += part_seq_len
+        self.swap_id_part_and_pin = cursor.read_pascal_cp1252("SwapIDPart")
 
         # DefaultValue (Pascal string)
-        default_len = binary_data[cursor]
-        cursor += 1
-        self.default_value = binary_data[cursor : cursor + default_len].decode(
-            "iso-8859-1", errors="replace"
-        )
-        cursor += default_len
+        self.default_value = cursor.read_pascal_cp1252("DefaultValue")
 
         # Store cursor position for potential extended data parsing
-        self._parsed_cursor = cursor
+        self._parsed_cursor = cursor.offset
 
     def serialize_to_record(self) -> dict[str, Any]:
         """
@@ -1385,10 +1772,19 @@ class AltiumSchPin(SchPrimitive):
         Text format is used in SchDoc files where PINs are stored as
         key-value pairs rather than binary records.
         """
-        record = {
-            "RECORD": str(self.record_type.value),
-            "OwnerIndex": str(self.owner_index),
-        }
+        self._validate_text_numeric_state()
+        record: dict[str, object] = (
+            dict(self._raw_record)
+            if self._raw_record is not None
+            else {"RECORD": str(self.record_type.value)}
+        )
+        self._serialize_managed_int(
+            record,
+            "OwnerIndex",
+            ["OwnerIndex", "OWNERINDEX"],
+            self.owner_index,
+            self._source_owner_index,
+        )
         self._serialize_text_header_fields(record)
         self._serialize_text_geometry_fields(record)
         self._serialize_text_identity_fields(record)
@@ -1396,14 +1792,181 @@ class AltiumSchPin(SchPrimitive):
         self._serialize_text_swap_and_metadata(record)
         self._serialize_text_visibility_fields(record)
         self._serialize_text_settings_fields(record)
+        if self._raw_record is None:
+            return self._order_fields_case_insensitively(
+                record, self._authored_text_field_order()
+            )
         return record
 
-    def _serialize_text_header_fields(self, record: dict[str, Any]) -> None:
+    def _authored_text_field_order(self) -> tuple[str, ...]:
+        selected = tuple(
+            f"PinSelectedFunction{index}"
+            for index in range(1, len(self.selected_functions) + 1)
+        )
+        defined = tuple(
+            f"PinDefinedFunction{index}"
+            for index in range(1, len(self.defined_functions) + 1)
+        )
+        return (
+            "RECORD",
+            "OwnerIndex",
+            "OwnerPartId",
+            "OwnerPartDisplayMode",
+            "SymBol_InnerEdge",
+            "SymBol_OuterEdge",
+            "SymBol_Inner",
+            "SymBol_Outer",
+            "Description",
+            "FormalType",
+            "Electrical",
+            "PinConglomerate",
+            "PinLength",
+            "PinLength_Frac",
+            "Location.X",
+            "Location.X_Frac",
+            "Location.Y",
+            "Location.Y_Frac",
+            "Color",
+            "Name",
+            "Designator",
+            "SwapIdPin",
+            "SwapIDPart",
+            "DefaultValue",
+            "SwapIdPair",
+            "PinName_PositionConglomerate",
+            "Name_CustomPosition_Margin",
+            "Name_CustomPosition_Margin_Frac",
+            "Name_CustomPosition_VerticalMargin",
+            "Name_CustomPosition_VerticalMargin_Frac",
+            "Name_CustomFontID",
+            "Name_CustomColor",
+            "PinDesignator_PositionConglomerate",
+            "Designator_CustomPosition_Margin",
+            "Designator_CustomPosition_Margin_Frac",
+            "Designator_CustomPosition_VerticalMargin",
+            "Designator_CustomPosition_VerticalMargin_Frac",
+            "Designator_CustomFontID",
+            "Designator_CustomColor",
+            "SymBol_LineWidth",
+            "PinPackageLength",
+            "PinPackageLength_Frac",
+            "PinPropagationDelay",
+            "UniqueID",
+            "HidePinNameAsFunction",
+            "PinSelectedFunctionsCount",
+            *selected,
+            "PinDefinedFunctionsCount",
+            *defined,
+            "PinSymbolicName",
+            "ShowPinSymbolicNameAsFunction",
+            "IsSchematicBlockObject",
+        )
+
+    def _validate_text_numeric_state(self) -> None:
+        _checked_i32(self.owner_index, "OwnerIndex")
         if self.owner_part_id is not None:
-            record["OwnerPartId"] = str(self.owner_part_id)
-        if self.formal_type is not None and self.formal_type.value != 0:
-            record["FormalType"] = str(self.formal_type.value)
-        record["PinConglomerate"] = str(self._text_pin_conglomerate())
+            _checked_i16(self.owner_part_id, "OwnerPartId")
+        if self.owner_part_display_mode is not None:
+            _checked_unsigned(
+                self.owner_part_display_mode, 0xFF, "OwnerPartDisplayMode"
+            )
+        _checked_unsigned(self.color, 0xFFFF_FFFF, "Color")
+        _checked_i16(self.location.x, "Location.X")
+        _checked_i16(self.location.y, "Location.Y")
+        _checked_i32(self.location.x_frac, "Location.X_Frac")
+        _checked_i32(self.location.y_frac, "Location.Y_Frac")
+        if not math.isfinite(self._length_mils):
+            raise ValueError("PinLength must be finite")
+        length_whole, length_frac = _split_coord_truncating_toward_zero(
+            int(round(self._length_mils * 10000))
+        )
+        _checked_i16(length_whole, "PinLength")
+        _checked_i32(length_frac, "PinLength_Frac")
+        package_whole, package_frac = _split_coord_truncating_toward_zero(
+            self.pin_package_length
+        )
+        _checked_i16(package_whole, "PinPackageLength")
+        _checked_i32(package_frac, "PinPackageLength_Frac")
+        self._validate_text_settings_numeric_state(
+            "Name", self.name_settings, self._name_margin_mils
+        )
+        self._validate_text_settings_numeric_state(
+            "Designator", self.designator_settings, self._designator_margin_mils
+        )
+
+    @staticmethod
+    def _validate_text_settings_numeric_state(
+        prefix: str,
+        settings: PinTextSettings,
+        margin_mils: float | None,
+    ) -> None:
+        if margin_mils is not None and not math.isfinite(margin_mils):
+            raise ValueError(f"{prefix}_CustomPosition_Margin must be finite")
+        if settings.font_id is not None:
+            _checked_i16(settings.font_id, f"{prefix}_CustomFontID")
+        if settings.color is not None:
+            _checked_unsigned(settings.color, 0x7FFF_FFFF, f"{prefix}_CustomColor")
+        for suffix, whole, frac in (
+            (
+                "CustomPosition_Margin",
+                settings.position_margin,
+                settings.position_margin_frac,
+            ),
+            (
+                "CustomPosition_VerticalMargin",
+                settings.position_vertical_margin,
+                settings.position_vertical_margin_frac,
+            ),
+        ):
+            if whole is not None:
+                _checked_i16(whole, f"{prefix}_{suffix}")
+            if frac is not None:
+                _checked_i32(frac, f"{prefix}_{suffix}_Frac")
+
+    def _serialize_text_header_fields(self, record: dict[str, Any]) -> None:
+        self._serialize_managed_optional_int(
+            record,
+            "OwnerPartId",
+            ["OwnerPartId", "OWNERPARTID"],
+            self.owner_part_id,
+            self._source_owner_part_id,
+        )
+        self._serialize_managed_optional_int(
+            record,
+            "OwnerPartDisplayMode",
+            ["OwnerPartDisplayMode", "OWNERPARTDISPLAYMODE"],
+            self.owner_part_display_mode,
+            self._source_owner_part_display_mode,
+        )
+        self._serialize_pin_param_int(
+            record,
+            "FormalType",
+            self.formal_type.value,
+            self._source_formal_type.value,
+        )
+        self._serialize_pin_param_int(
+            record,
+            "PinConglomerate",
+            self._text_pin_conglomerate(),
+            self._source_pin_conglomerate,
+            force=self._graphically_locked_dirty,
+        )
+
+    def _serialize_pin_param_int(
+        self,
+        record: dict[str, object],
+        field: str,
+        value: int,
+        source: int,
+        *,
+        force: bool = False,
+    ) -> None:
+        if self._raw_record is not None and value == source and not force:
+            return
+        serializer = AltiumSerializer()
+        serializer.remove_field(record, field)
+        if value != 0:
+            serializer.write_int(record, field, value, self._raw_record, force=True)
 
     def _text_pin_conglomerate(self) -> int:
         return (
@@ -1418,79 +1981,405 @@ class AltiumSchPin(SchPrimitive):
 
     def _serialize_text_geometry_fields(self, record: dict[str, Any]) -> None:
         self._serialize_text_length_fields(record)
-        record["Location.X"] = str(self.location.x)
         x_frac = self.location.x_frac or (
             self.location_x_frac if self.location_x_frac is not None else 0
         )
-        if x_frac != 0:
-            record["Location.X_Frac"] = str(x_frac)
-        record["Location.Y"] = str(self.location.y)
         y_frac = self.location.y_frac or (
             self.location_y_frac if self.location_y_frac is not None else 0
         )
-        if y_frac != 0:
-            record["Location.Y_Frac"] = str(y_frac)
+        self._serialize_pin_coord(
+            record,
+            "Location.X",
+            "Location.X_Frac",
+            self.location.x,
+            x_frac,
+            self._source_location.x,
+            self._source_location.x_frac,
+        )
+        self._serialize_pin_coord(
+            record,
+            "Location.Y",
+            "Location.Y_Frac",
+            self.location.y,
+            y_frac,
+            self._source_location.y,
+            self._source_location.y_frac,
+        )
+
+    def _serialize_pin_coord(
+        self,
+        record: dict[str, object],
+        whole_field: str,
+        frac_field: str,
+        whole: int,
+        frac: int,
+        source_whole: int,
+        source_frac: int,
+    ) -> None:
+        if (
+            self._raw_record is not None
+            and whole == source_whole
+            and frac == source_frac
+        ):
+            return
+        serializer = AltiumSerializer()
+        serializer.remove_field(record, whole_field)
+        serializer.remove_field(record, frac_field)
+        if whole != 0:
+            serializer.write_int(
+                record, whole_field, whole, self._raw_record, force=True
+            )
+        if frac != 0:
+            serializer.write_int(record, frac_field, frac, self._raw_record, force=True)
 
     def _serialize_text_length_fields(self, record: dict[str, Any]) -> None:
+        if (
+            self._raw_record is not None
+            and self._length_mils == self._source_length_mils
+        ):
+            return
+        serializer = AltiumSerializer()
+        serializer.remove_field(record, "PinLength")
+        serializer.remove_field(record, "PinLength_Frac")
         if self._length_mils == 0:
             return
         internal_coord = int(round(self._length_mils * 10000))
-        length_whole = internal_coord // 100000
-        length_frac = internal_coord % 100000
+        length_whole, length_frac = _split_coord_truncating_toward_zero(internal_coord)
         if length_whole != 0:
-            record["PinLength"] = str(length_whole)
+            serializer.write_int(
+                record, "PinLength", length_whole, self._raw_record, force=True
+            )
         if length_frac != 0:
-            record["PinLength_Frac"] = str(length_frac)
+            serializer.write_int(
+                record,
+                "PinLength_Frac",
+                length_frac,
+                self._raw_record,
+                force=True,
+            )
 
     def _serialize_text_identity_fields(self, record: dict[str, Any]) -> None:
-        record["Name"] = self.name
-        record["Designator"] = self.designator
-        record["Color"] = str(self.color)
-        record["Electrical"] = str(self.electrical.value)
+        serializer = AltiumSerializer()
+        for field, value, source, present, used_utf8 in (
+            (
+                "Name",
+                self.name,
+                self._source_name,
+                self._has_name,
+                self._used_utf8_name,
+            ),
+            (
+                "Designator",
+                self.designator,
+                self._source_designator,
+                self._has_designator,
+                self._used_utf8_designator,
+            ),
+        ):
+            if self._raw_record is not None and value == source:
+                continue
+            if not value:
+                _remove_case_insensitive(record, field, f"%UTF8%{field}")
+                continue
+            raw_fallback = _get_case_insensitive(self._raw_record or {}, field)
+            if used_utf8 and raw_fallback is not None:
+                record[field] = str(raw_fallback)
+            write_dynamic_string_field(
+                serializer,
+                record,
+                field,
+                value,
+                raw_record=self._raw_record,
+                used_utf8_sidecar=used_utf8,
+                was_present=present,
+                force=True,
+            )
+        self._serialize_pin_param_int(record, "Color", self.color, self._source_color)
+        self._serialize_pin_param_int(
+            record,
+            "Electrical",
+            self.electrical.value,
+            self._source_electrical.value,
+        )
 
     def _serialize_text_symbol_fields(self, record: dict[str, Any]) -> None:
-        if self.symbol_inner_edge.value != 0:
-            record["SymBol_InnerEdge"] = str(self.symbol_inner_edge.value)
-        if self.symbol_outer_edge.value != 0:
-            record["SymBol_OuterEdge"] = str(self.symbol_outer_edge.value)
-        if self.symbol_inner.value != 0:
-            record["SymBol_Inner"] = str(self.symbol_inner.value)
-        if self.symbol_outer.value != 0:
-            record["SymBol_Outer"] = str(self.symbol_outer.value)
-        if self.symbol_line_width.value != 0:
-            record["SymBol_LineWidth"] = str(self.symbol_line_width.value)
+        for field, value, source in (
+            (
+                "SymBol_InnerEdge",
+                self.symbol_inner_edge.value,
+                self._source_symbol_inner_edge.value,
+            ),
+            (
+                "SymBol_OuterEdge",
+                self.symbol_outer_edge.value,
+                self._source_symbol_outer_edge.value,
+            ),
+            (
+                "SymBol_Inner",
+                self.symbol_inner.value,
+                self._source_symbol_inner.value,
+            ),
+            (
+                "SymBol_Outer",
+                self.symbol_outer.value,
+                self._source_symbol_outer.value,
+            ),
+            (
+                "SymBol_LineWidth",
+                self.symbol_line_width.value,
+                self._source_symbol_line_width.value,
+            ),
+        ):
+            self._serialize_pin_param_int(record, field, value, source)
 
     def _serialize_text_swap_and_metadata(self, record: dict[str, Any]) -> None:
-        if self.swap_id_pin:
-            record["SwapIdPin"] = self.swap_id_pin
-        if self._has_swap_id_part or (
-            self.swap_id_part_and_pin and self.swap_id_part_and_pin != "|&|"
+        self._serialize_pin_ordinary_string(
+            record, "SwapIdPin", self.swap_id_pin, self._source_swap_id_pin
+        )
+        self._serialize_pin_ordinary_string(
+            record,
+            "SwapIDPart",
+            self.swap_id_part_and_pin,
+            self._source_swap_id_part_and_pin,
+            dynamic_import=True,
+        )
+        self._serialize_pin_ordinary_string(
+            record,
+            "DefaultValue",
+            self.default_value,
+            self._source_default_value,
+            dynamic_import=True,
+        )
+        self._serialize_pin_ordinary_string(
+            record, "SwapIdPair", self.swap_id_pair, self._source_swap_id_pair
+        )
+        self._serialize_pin_description(record)
+        self._serialize_pin_package_and_delay(record)
+        self._serialize_pin_contextual_unique_id(record)
+        self._serialize_alternate_pin_function_state(record)
+
+    def _serialize_pin_description(self, record: dict[str, object]) -> None:
+        serializer = AltiumSerializer()
+        if self._raw_record is None or self.description != self._source_description:
+            if not self.description:
+                _remove_case_insensitive(record, "Description", "%UTF8%Description")
+            else:
+                raw_description = _get_case_insensitive(
+                    self._raw_record or {}, "Description"
+                )
+                if self._used_utf8_description and raw_description is not None:
+                    record["Description"] = str(raw_description)
+                write_dynamic_string_field(
+                    serializer,
+                    record,
+                    "Description",
+                    self.description,
+                    raw_record=self._raw_record,
+                    used_utf8_sidecar=self._used_utf8_description,
+                    was_present=self._has_description,
+                    force=True,
+                )
+
+    def _serialize_pin_package_and_delay(self, record: dict[str, object]) -> None:
+        serializer = AltiumSerializer()
+        package_whole, package_frac = _split_coord_truncating_toward_zero(
+            self.pin_package_length
+        )
+        source_package_whole, source_package_frac = _split_coord_truncating_toward_zero(
+            self._source_pin_package_length
+        )
+        self._serialize_pin_coord(
+            record,
+            "PinPackageLength",
+            "PinPackageLength_Frac",
+            package_whole,
+            package_frac,
+            source_package_whole,
+            source_package_frac,
+        )
+        if (
+            self._raw_record is None
+            or self.propagation_delay != self._source_propagation_delay
         ):
-            record["SwapIDPart"] = self.swap_id_part_and_pin
-        if self.description:
-            record["Description"] = self.description
-        if self.unique_id:
+            serializer.remove_field(record, "PinPropagationDelay")
+            if self.propagation_delay != 0.0:
+                serializer.write_str(
+                    record,
+                    "PinPropagationDelay",
+                    _format_pin_delay(self.propagation_delay),
+                    None,
+                    force=True,
+                )
+
+    def _serialize_pin_contextual_unique_id(self, record: dict[str, object]) -> None:
+        if self.unique_id and (
+            self._raw_record is not None
+            or self.parent is not None
+            or self._bound_schematic_context is not None
+        ):
             record["UniqueID"] = self.unique_id
 
+    def _serialize_alternate_pin_function_state(
+        self, record: dict[str, object]
+    ) -> None:
+        self._serialize_pin_param_bool(
+            record,
+            "HidePinNameAsFunction",
+            self.hide_name_as_function,
+            self._source_hide_name_as_function,
+        )
+        self._serialize_alternate_pin_functions(
+            record,
+            "PinSelectedFunctionsCount",
+            "PinSelectedFunction",
+            self.selected_functions,
+            self._source_selected_functions,
+        )
+        self._serialize_alternate_pin_functions(
+            record,
+            "PinDefinedFunctionsCount",
+            "PinDefinedFunction",
+            self.defined_functions,
+            self._source_defined_functions,
+        )
+        self._serialize_pin_ordinary_string(
+            record,
+            "PinSymbolicName",
+            self.symbolic_name,
+            self._source_symbolic_name,
+        )
+        self._serialize_pin_param_bool(
+            record,
+            "ShowPinSymbolicNameAsFunction",
+            self.show_symbolic_name_as_function,
+            self._source_show_symbolic_name_as_function,
+        )
+
+    def _serialize_pin_param_bool(
+        self,
+        record: dict[str, object],
+        field: str,
+        value: bool,
+        source: bool,
+    ) -> None:
+        if self._raw_record is not None and value == source:
+            return
+        serializer = AltiumSerializer()
+        serializer.remove_field(record, field)
+        if value:
+            serializer.write_bool(record, field, True, None, force=True)
+
+    def _serialize_alternate_pin_functions(
+        self,
+        record: dict[str, object],
+        count_field: str,
+        item_prefix: str,
+        values: list[str],
+        source: list[str],
+    ) -> None:
+        if self._raw_record is not None and values == source:
+            return
+        if len(values) > MAX_INDEXED_ITEMS_PER_RECORD:
+            raise ValueError(
+                f"{count_field} exceeds {MAX_INDEXED_ITEMS_PER_RECORD} entries"
+            )
+        serializer = AltiumSerializer()
+        serializer.remove_field(record, count_field)
+        for key in tuple(record):
+            if _is_indexed_field(key, item_prefix):
+                record.pop(key)
+        if not values:
+            return
+        serializer.write_int(record, count_field, len(values), None, force=True)
+        for index, value in enumerate(values, start=1):
+            if value:
+                serializer.write_str(
+                    record, f"{item_prefix}{index}", value, None, force=True
+                )
+
+    def _serialize_pin_ordinary_string(
+        self,
+        record: dict[str, object],
+        field: str,
+        value: str,
+        source: str,
+        *,
+        dynamic_import: bool = False,
+    ) -> None:
+        if self._raw_record is not None and value == source:
+            return
+        serializer = AltiumSerializer()
+        if dynamic_import:
+            _remove_case_insensitive(record, field, f"%UTF8%{field}")
+        else:
+            serializer.remove_field(record, field)
+        if value:
+            serializer.write_str(record, field, value, self._raw_record, force=True)
+
     def _serialize_text_visibility_fields(self, record: dict[str, Any]) -> None:
-        record["Orientation"] = str(self.orientation.value)
-        record["ShowName"] = "true" if self.show_name else "false"
-        record["ShowDesignator"] = "true" if self.show_designator else "false"
-        record["IsHidden"] = "true" if self.is_hidden else "false"
+        for field, changed in (
+            ("Orientation", self.orientation != self._source_orientation),
+            ("ShowName", self.show_name != self._source_show_name),
+            (
+                "ShowDesignator",
+                self.show_designator != self._source_show_designator,
+            ),
+            ("IsHidden", self.is_hidden != self._source_is_hidden),
+        ):
+            if changed:
+                AltiumSerializer().remove_field(record, field)
 
     def _serialize_text_settings_fields(self, record: dict[str, Any]) -> None:
-        _write_pin_text_settings(
-            record,
-            prefix="Name",
-            settings=self.name_settings,
-            margin_mils=self._name_margin_mils,
-        )
-        _write_pin_text_settings(
-            record,
-            prefix="Designator",
-            settings=self.designator_settings,
-            margin_mils=self._designator_margin_mils,
-        )
+        for prefix, settings, margin_mils, source_state in (
+            (
+                "Name",
+                self.name_settings,
+                self._name_margin_mils,
+                self._source_name_settings_state,
+            ),
+            (
+                "Designator",
+                self.designator_settings,
+                self._designator_margin_mils,
+                self._source_designator_settings_state,
+            ),
+        ):
+            state = _pin_text_settings_state(settings, margin_mils)
+            if self._raw_record is not None and state == source_state:
+                continue
+            self._remove_pin_text_settings_fields(record, prefix)
+            _write_pin_text_settings(
+                record,
+                prefix=prefix,
+                settings=settings,
+                margin_mils=margin_mils,
+                font_manager=self._font_manager,
+            )
+
+    @staticmethod
+    def _remove_pin_text_settings_fields(
+        record: dict[str, object], prefix: str
+    ) -> None:
+        exact = {
+            f"pin{prefix}_positionconglomerate".casefold(),
+            f"{prefix}_customposition_margin".casefold(),
+            f"{prefix}_customposition_margin_frac".casefold(),
+            f"{prefix}_customposition_verticalmargin".casefold(),
+            f"{prefix}_customposition_verticalmargin_frac".casefold(),
+            f"{prefix}_customfontid".casefold(),
+            f"{prefix}_customcolor".casefold(),
+            f"{prefix}fontmode".casefold(),
+            f"{prefix}positionmode".casefold(),
+            f"{prefix}customrotationrelative".casefold(),
+            f"{prefix}customrotationanchor".casefold(),
+            f"{prefix}custompositionmargin".casefold(),
+            f"{prefix}custompositionmarginfrac".casefold(),
+            f"{prefix}customfontid".casefold(),
+            f"{prefix}customcolor".casefold(),
+        }
+        for key in tuple(record):
+            if key.casefold() in exact:
+                record.pop(key)
 
     def _serialize_binary(self) -> bytes:
         """
@@ -1504,11 +2393,11 @@ class AltiumSchPin(SchPrimitive):
         data.append(0x02)
 
         # Bytes 1-4: OwnerIndex (int32 LE)
-        data.extend(pack("<I", self.owner_index))
+        data.extend(pack("<i", _checked_i32(self.owner_index, "OwnerIndex")))
 
         # Bytes 5-6: OwnerPartId (int16 LE)
         owner_part = self.owner_part_id if self.owner_part_id is not None else -1
-        data.extend(pack("<h", owner_part))
+        data.extend(pack("<h", _checked_i16(owner_part, "OwnerPartId")))
 
         # Byte 7: OwnerPartDisplayMode
         display_mode = (
@@ -1516,7 +2405,7 @@ class AltiumSchPin(SchPrimitive):
             if self.owner_part_display_mode is not None
             else 0
         )
-        data.append(display_mode)
+        data.append(_checked_unsigned(display_mode, 0xFF, "OwnerPartDisplayMode"))
 
         # Bytes 8-11: Symbol decorations (4 bytes)
         data.append(self.symbol_inner_edge.value)
@@ -1525,9 +2414,7 @@ class AltiumSchPin(SchPrimitive):
         data.append(self.symbol_outer.value)
 
         # Description (Pascal string)
-        desc_bytes = self.description.encode("iso-8859-1", errors="replace")
-        data.append(len(desc_bytes))
-        data.extend(desc_bytes)
+        _append_pascal_cp1252(data, self.description, "Description")
 
         # FormalType enum value
         data.append(self.formal_type.value)
@@ -1549,41 +2436,49 @@ class AltiumSchPin(SchPrimitive):
 
         # Pin length (int16 LE) - reconstruct from _length_mils
         # Binary format stores length in 10-mil units (no fractional component)
-        length_10mil = int(round(self._length_mils / 10))
-        data.extend(pack("<h", length_10mil))
+        length_10mil = _binary_coord_whole(
+            self.length,
+            self.pin_length_frac or 0,
+        )
+        data.extend(pack("<h", _checked_i16(length_10mil, "PinLength")))
 
         # X, Y coordinates (int16 LE each)
-        data.extend(pack("<h", self.location.x))
-        data.extend(pack("<h", self.location.y))
+        data.extend(
+            pack(
+                "<h",
+                _checked_i16(
+                    _binary_coord_whole(self.location.x, self.location.x_frac),
+                    "Location.X",
+                ),
+            )
+        )
+        data.extend(
+            pack(
+                "<h",
+                _checked_i16(
+                    _binary_coord_whole(self.location.y, self.location.y_frac),
+                    "Location.Y",
+                ),
+            )
+        )
 
         # Color (int32 LE)
-        data.extend(pack("<I", self.color))
+        data.extend(pack("<I", _checked_unsigned(self.color, 0xFFFF_FFFF, "Color")))
 
         # Name (Pascal string)
-        name_bytes = self.name.encode("iso-8859-1", errors="replace")
-        data.append(len(name_bytes))
-        data.extend(name_bytes)
+        _append_pascal_cp1252(data, self.name, "Name")
 
         # Designator (Pascal string)
-        desig_bytes = self.designator.encode("iso-8859-1", errors="replace")
-        data.append(len(desig_bytes))
-        data.extend(desig_bytes)
+        _append_pascal_cp1252(data, self.designator, "Designator")
 
         # SwapIdPin (Pascal string)
-        swap_bytes = self.swap_id_pin.encode("iso-8859-1", errors="replace")
-        data.append(len(swap_bytes))
-        data.extend(swap_bytes)
+        _append_pascal_cp1252(data, self.swap_id_pin, "SwapIdPin")
 
         # SwapIDPart (Pascal string) - format: "{part}|&|{sequence}"
-        part_seq = self.swap_id_part_and_pin
-        part_seq_bytes = part_seq.encode("iso-8859-1", errors="replace")
-        data.append(len(part_seq_bytes))
-        data.extend(part_seq_bytes)
+        _append_pascal_cp1252(data, self.swap_id_part_and_pin, "SwapIDPart")
 
         # DefaultValue (Pascal string)
-        default_bytes = self.default_value.encode("iso-8859-1", errors="replace")
-        data.append(len(default_bytes))
-        data.extend(default_bytes)
+        _append_pascal_cp1252(data, self.default_value, "DefaultValue")
 
         return bytes(data)
 
@@ -1771,7 +2666,7 @@ class AltiumSchPin(SchPrimitive):
     def _parse_svg_rotation(transform: str | None) -> float:
         if not transform:
             return 0.0
-        match = re.search(r"rotate\(\s*([-+]?\d+(?:\.\d+)?)", transform)
+        match = re.search(rf"rotate\(\s*({_SVG_NUMBER_PATTERN})", transform)
         return float(match.group(1)) if match else 0.0
 
     @staticmethod
@@ -1802,12 +2697,12 @@ class AltiumSchPin(SchPrimitive):
             return None
         match = re.fullmatch(
             r"\s*M\s*"
-            r"([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*"
+            rf"({_SVG_NUMBER_PATTERN})\s*,\s*({_SVG_NUMBER_PATTERN})\s*"
             r"A\s*"
-            r"([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s+"
-            r"([-+]?\d+(?:\.\d+)?)\s+"
+            rf"({_SVG_NUMBER_PATTERN})\s*,\s*({_SVG_NUMBER_PATTERN})\s+"
+            rf"({_SVG_NUMBER_PATTERN})\s+"
             r"([01])\s*,\s*([01])\s+"
-            r"([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*",
+            rf"({_SVG_NUMBER_PATTERN})\s*,\s*({_SVG_NUMBER_PATTERN})\s*",
             str(d),
         )
         if not match:
@@ -1832,7 +2727,7 @@ class AltiumSchPin(SchPrimitive):
         *,
         units_per_px: int,
     ) -> dict[str, Any] | None:
-        from .altium_sch_geometry_oracle import make_pen
+        from .altium_sch_geometry_oracle import _geometry_item_length, make_pen
 
         color_raw = cls._parse_svg_color(stroke)
         if color_raw is None:
@@ -1842,7 +2737,7 @@ class AltiumSchPin(SchPrimitive):
             return make_pen(color_raw, width=0)
         return make_pen(
             color_raw,
-            width=int(round(stroke_width_px * units_per_px)),
+            width=_geometry_item_length(stroke_width_px, units_per_px=units_per_px),
         )
 
     def _svg_elements_to_geometry_operations(
@@ -1855,7 +2750,9 @@ class AltiumSchPin(SchPrimitive):
         from .altium_sch_geometry_oracle import (
             SchGeometryOp,
             SchGeometryOpKind,
+            _geometry_item_length,
             make_font_payload,
+            make_rounded_rectangle_operation,
             make_solid_brush,
             svg_coord_to_geometry,
         )
@@ -2394,18 +3291,6 @@ class AltiumSchPin(SchPrimitive):
                 height = self._parse_svg_numeric(element.get("height"))
                 rx = self._parse_svg_numeric(element.get("rx"))
                 ry = self._parse_svg_numeric(element.get("ry"))
-                x1, y1 = svg_coord_to_geometry(
-                    x,
-                    y,
-                    sheet_height_px=sheet_height_px,
-                    units_per_px=units_per_px,
-                )
-                x2, y2 = svg_coord_to_geometry(
-                    x + width,
-                    y + height,
-                    sheet_height_px=sheet_height_px,
-                    units_per_px=units_per_px,
-                )
                 fill_raw = self._parse_svg_color(element.get("fill"))
                 brush = make_solid_brush(fill_raw) if fill_raw is not None else None
                 pen = self._pen_from_svg(
@@ -2414,13 +3299,15 @@ class AltiumSchPin(SchPrimitive):
                     units_per_px=units_per_px,
                 )
                 append_operation(
-                    SchGeometryOp.rounded_rectangle(
-                        x1=x1,
-                        y1=y1,
-                        x2=x2,
-                        y2=y2,
-                        corner_x_radius=rx * units_per_px,
-                        corner_y_radius=ry * units_per_px,
+                    make_rounded_rectangle_operation(
+                        x1_px=x,
+                        y1_px=y,
+                        x2_px=x + width,
+                        y2_px=y + height,
+                        sheet_height_px=sheet_height_px,
+                        units_per_px=units_per_px,
+                        corner_x_radius_px=rx,
+                        corner_y_radius_px=ry,
                         brush=brush,
                         pen=pen,
                     ),
@@ -2455,8 +3342,12 @@ class AltiumSchPin(SchPrimitive):
                     SchGeometryOp.arc(
                         center_x=center_x,
                         center_y=center_y,
-                        width=radius_x * 2.0 * units_per_px,
-                        height=radius_y * 2.0 * units_per_px,
+                        width=_geometry_item_length(
+                            radius_x * 2.0, units_per_px=units_per_px
+                        ),
+                        height=_geometry_item_length(
+                            radius_y * 2.0, units_per_px=units_per_px
+                        ),
                         start_angle=start_angle,
                         end_angle=end_angle,
                         pen=pen,
@@ -2559,8 +3450,12 @@ class AltiumSchPin(SchPrimitive):
                     SchGeometryOp.arc(
                         center_x=center_x,
                         center_y=center_y,
-                        width=arc_spec["rx"] * 2.0 * units_per_px,
-                        height=arc_spec["ry"] * 2.0 * units_per_px,
+                        width=_geometry_item_length(
+                            arc_spec["rx"] * 2.0, units_per_px=units_per_px
+                        ),
+                        height=_geometry_item_length(
+                            arc_spec["ry"] * 2.0, units_per_px=units_per_px
+                        ),
                         start_angle=start_angle,
                         end_angle=end_angle,
                         pen=pen,
@@ -2613,10 +3508,10 @@ class AltiumSchPin(SchPrimitive):
         if self.is_hidden and not ctx.show_pins:
             return None if wrap_record else []
 
+        with exact_intermediate_svg_numbers():
+            elements = self.to_svg(ctx)
         operations = self._svg_elements_to_geometry_operations(
-            self.to_svg(ctx),
-            ctx,
-            units_per_px=units_per_px,
+            elements, ctx, units_per_px=units_per_px
         )
         if not wrap_record:
             return operations
@@ -2683,6 +3578,8 @@ class AltiumSchPin(SchPrimitive):
         body_end = ctx.transform_coord_precise(self.location)
         hot_spot_coord = self.get_hot_spot()
         hot_spot = ctx.transform_coord_precise(hot_spot_coord)
+        if using_exact_intermediate_svg_numbers():
+            return body_end, hot_spot_coord, hot_spot
         return (
             (round(body_end[0], 3), round(body_end[1], 3)),
             hot_spot_coord,
@@ -2817,8 +3714,11 @@ class AltiumSchPin(SchPrimitive):
             self.name,
             native_svg_export=getattr(ctx, "native_svg_export", False),
         )
-        clean_name = (
-            display_name.replace("\\", "") if "\\" in display_name else display_name
+        from .altium_sch_geometry_oracle import split_overline_text
+
+        clean_name, _ = split_overline_text(
+            display_name,
+            single_slash_negation=ctx.options.single_slash_negation,
         )
         text_width = measure_text_width(
             clean_name,
@@ -2972,7 +3872,13 @@ class AltiumSchPin(SchPrimitive):
         if spec.rotated:
             name_x = body_end[0] - spec.margin - int(spec.font_size_px / 2)
             name_y = body_end[1] + spec.text_width / 2
-            return (name_x, name_y, f"rotate(-90 {name_x:.4f} {name_y:.4f})")
+            return (
+                name_x,
+                name_y,
+                "rotate(-90 "
+                f"{_format_intermediate_svg_number(name_x, digits=4)} "
+                f"{_format_intermediate_svg_number(name_y, digits=4)})",
+            )
         name_x = body_end[0] - spec.margin - spec.text_width - inner_bounds_offset
         name_y = (
             body_end[1]
@@ -3003,7 +3909,13 @@ class AltiumSchPin(SchPrimitive):
             else:
                 name_x = body_end[0] + centering_offset
                 name_y = body_end[1] + spec.text_width + spec.margin
-            return (name_x, name_y, f"rotate(-90 {name_x:.4f} {name_y:.4f})")
+            return (
+                name_x,
+                name_y,
+                "rotate(-90 "
+                f"{_format_intermediate_svg_number(name_x, digits=4)} "
+                f"{_format_intermediate_svg_number(name_y, digits=4)})",
+            )
 
         name_x = body_end[0] - spec.text_width / 2
         name_y = body_end[1] + perpendicular_baseline_offset + spec.margin
@@ -3031,7 +3943,13 @@ class AltiumSchPin(SchPrimitive):
             ):
                 name_x += spec.line_height - spec.font_size_px
             name_y = body_end[1] + spec.text_width / 2
-            return (name_x, name_y, f"rotate(-90 {name_x:.4f} {name_y:.4f})")
+            return (
+                name_x,
+                name_y,
+                "rotate(-90 "
+                f"{_format_intermediate_svg_number(name_x, digits=4)} "
+                f"{_format_intermediate_svg_number(name_y, digits=4)})",
+            )
 
         name_x = body_end[0] + spec.margin + inner_bounds_offset
         name_y = (
@@ -3063,7 +3981,13 @@ class AltiumSchPin(SchPrimitive):
             else:
                 name_x = body_end[0] + centering_offset
                 name_y = body_end[1] - spec.margin
-            return (name_x, name_y, f"rotate(-90 {name_x:.4f} {name_y:.4f})")
+            return (
+                name_x,
+                name_y,
+                "rotate(-90 "
+                f"{_format_intermediate_svg_number(name_x, digits=4)} "
+                f"{_format_intermediate_svg_number(name_y, digits=4)})",
+            )
 
         use_float_half_height = (
             ctx.options.truncate_font_size_for_baseline
@@ -3118,6 +4042,7 @@ class AltiumSchPin(SchPrimitive):
                 spec.font_family,
                 fill=spec.fill,
                 stroke_color=spec.fill,
+                single_slash_negation=ctx.options.single_slash_negation,
             )
             for line in overline_elements:
                 if "transform=" not in line:
@@ -3137,6 +4062,7 @@ class AltiumSchPin(SchPrimitive):
                 spec.font_family,
                 fill=spec.fill,
                 stroke_color=spec.fill,
+                single_slash_negation=ctx.options.single_slash_negation,
             )
             elements.extend(overline_elements)
             elements.append(
@@ -3358,14 +4284,26 @@ class AltiumSchPin(SchPrimitive):
             if spec.rotated:
                 desig_x = base_x + baseline_offset
                 desig_y = base_y
-                return (desig_x, desig_y, f"rotate(-90 {desig_x:.4f} {desig_y:.4f})")
+                return (
+                    desig_x,
+                    desig_y,
+                    "rotate(-90 "
+                    f"{_format_intermediate_svg_number(desig_x, digits=4)} "
+                    f"{_format_intermediate_svg_number(desig_y, digits=4)})",
+                )
             return (base_x, base_y - descent_offset - y_offset, None)
 
         if effective_orient == Rotation90.DEG_90:
             if spec.rotated:
                 desig_x = base_x - descent_offset
                 desig_y = base_y
-                return (desig_x, desig_y, f"rotate(-90 {desig_x:.4f} {desig_y:.4f})")
+                return (
+                    desig_x,
+                    desig_y,
+                    "rotate(-90 "
+                    f"{_format_intermediate_svg_number(desig_x, digits=4)} "
+                    f"{_format_intermediate_svg_number(desig_y, digits=4)})",
+                )
             desig_x = base_x - spec.text_width
             desig_y = base_y - DESIGNATOR_PERPENDICULAR_OFFSET
             if self._designator_margin_mils is None:
@@ -3382,7 +4320,13 @@ class AltiumSchPin(SchPrimitive):
                 if spec.font_family == "Times New Roman":
                     desig_x += 1
                 desig_y = base_y
-                return (desig_x, desig_y, f"rotate(-90 {desig_x:.4f} {desig_y:.4f})")
+                return (
+                    desig_x,
+                    desig_y,
+                    "rotate(-90 "
+                    f"{_format_intermediate_svg_number(desig_x, digits=4)} "
+                    f"{_format_intermediate_svg_number(desig_y, digits=4)})",
+                )
             return (base_x - spec.text_width, base_y - descent_offset - y_offset, None)
 
         if spec.rotated:
@@ -3390,7 +4334,13 @@ class AltiumSchPin(SchPrimitive):
             if self._get_parent_orientation() in (Rotation90.DEG_0, Rotation90.DEG_180):
                 desig_x -= descent_offset
             desig_y = base_y + spec.text_width
-            return (desig_x, desig_y, f"rotate(-90 {desig_x:.4f} {desig_y:.4f})")
+            return (
+                desig_x,
+                desig_y,
+                "rotate(-90 "
+                f"{_format_intermediate_svg_number(desig_x, digits=4)} "
+                f"{_format_intermediate_svg_number(desig_y, digits=4)})",
+            )
         return (base_x - spec.text_width, base_y + baseline_offset, None)
 
     def _apply_pin_designator_rotated_component_adjustments(
@@ -3414,7 +4364,11 @@ class AltiumSchPin(SchPrimitive):
             else:
                 desig_x -= DESIGNATOR_PERPENDICULAR_OFFSET
             if desig_transform is not None:
-                desig_transform = f"rotate(-90 {desig_x:.4f} {desig_y:.4f})"
+                desig_transform = (
+                    "rotate(-90 "
+                    f"{_format_intermediate_svg_number(desig_x, digits=4)} "
+                    f"{_format_intermediate_svg_number(desig_y, digits=4)})"
+                )
 
         if (
             spec.rotated
@@ -3426,7 +4380,11 @@ class AltiumSchPin(SchPrimitive):
         ):
             desig_x += 1
             if desig_transform is not None:
-                desig_transform = f"rotate(-90 {desig_x:.4f} {desig_y:.4f})"
+                desig_transform = (
+                    "rotate(-90 "
+                    f"{_format_intermediate_svg_number(desig_x, digits=4)} "
+                    f"{_format_intermediate_svg_number(desig_y, digits=4)})"
+                )
         return (desig_x, desig_transform)
 
     def _render_electrical_glyph(
@@ -5160,6 +6118,9 @@ class AltiumSchPin(SchPrimitive):
         has_outer_edge = self.symbol_outer_edge != IeeeSymbol.NONE
         outer_offset = 6 if has_outer_edge else 0
 
+        def fmt(value: float) -> str:
+            return _format_intermediate_svg_number(value, digits=1)
+
         if self.orientation == Rotation90.DEG_0:
             # Symbol extends right from body_end
             # Two vertical lines + semicircle arc on top
@@ -5175,7 +6136,8 @@ class AltiumSchPin(SchPrimitive):
                 ),
                 # Arc from left to right (semicircle on top)
                 svg_path(
-                    f"M{left_x:.1f},{leg_top_y:.1f} A{arc_radius},{arc_radius} 0 0,1 {right_x:.1f},{leg_top_y:.1f}",
+                    f"M{fmt(left_x)},{fmt(leg_top_y)} A{arc_radius},{arc_radius} "
+                    f"0 0,1 {fmt(right_x)},{fmt(leg_top_y)}",
                     stroke=stroke,
                     stroke_width=SYMBOL_STROKE_WIDTH,
                     vector_effect="non-scaling-stroke",
@@ -5195,7 +6157,8 @@ class AltiumSchPin(SchPrimitive):
                 self._make_symbol_line(right_x, lower_y, left_x, lower_y, stroke),
                 # Vertical arc on left side, from lower to upper
                 svg_path(
-                    f"M{left_x:.1f},{lower_y:.1f} A{arc_radius},{arc_radius} 0 0,1 {left_x:.1f},{upper_y:.1f}",
+                    f"M{fmt(left_x)},{fmt(lower_y)} A{arc_radius},{arc_radius} "
+                    f"0 0,1 {fmt(left_x)},{fmt(upper_y)}",
                     stroke=stroke,
                     stroke_width=SYMBOL_STROKE_WIDTH,
                     vector_effect="non-scaling-stroke",
@@ -5215,7 +6178,8 @@ class AltiumSchPin(SchPrimitive):
                 self._make_symbol_line(right_x, lower_y, right_x, upper_y, stroke),
                 # Horizontal arc at top, from left to right
                 svg_path(
-                    f"M{left_x:.1f},{upper_y:.1f} A{arc_radius},{arc_radius} 0 0,1 {right_x:.1f},{upper_y:.1f}",
+                    f"M{fmt(left_x)},{fmt(upper_y)} A{arc_radius},{arc_radius} "
+                    f"0 0,1 {fmt(right_x)},{fmt(upper_y)}",
                     stroke=stroke,
                     stroke_width=SYMBOL_STROKE_WIDTH,
                     vector_effect="non-scaling-stroke",
@@ -5235,7 +6199,8 @@ class AltiumSchPin(SchPrimitive):
                 self._make_symbol_line(right_x, lower_y, left_x, lower_y, stroke),
                 # Vertical arc on left side, from lower to upper (sweep=1)
                 svg_path(
-                    f"M{left_x:.1f},{lower_y:.1f} A{arc_radius},{arc_radius} 0 0,1 {left_x:.1f},{upper_y:.1f}",
+                    f"M{fmt(left_x)},{fmt(lower_y)} A{arc_radius},{arc_radius} "
+                    f"0 0,1 {fmt(left_x)},{fmt(upper_y)}",
                     stroke=stroke,
                     stroke_width=SYMBOL_STROKE_WIDTH,
                     vector_effect="non-scaling-stroke",

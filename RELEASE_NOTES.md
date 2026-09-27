@@ -1,3 +1,775 @@
+# altium-monkey 2026.09.22 Release Notes
+
+Package version: `2026.9.22`
+
+This compatibility release fixes harness-entry topology in compiled schematic
+graphs used by downstream design and visualization tools.
+
+## Changes
+
+- Fixed compiled schematic graphs omitting individual harness-entry terminals
+  and their drawing links. Each entry now retains its exact page-local net and
+  source identity, while shared harness ports and connector selectors remain
+  page-scoped instead of being assigned to an arbitrary scalar member net.
+
+---
+
+# altium-monkey 2026.09.21 Release Notes
+
+Package version: `2026.9.21`
+
+This compatibility release fixes loading of valid schematic cross-reference
+ownership produced by current Altium versions.
+
+## Changes
+
+- Fixed SchDoc loading for persisted `CrossRef` parameters owned by
+  cross-sheet connectors or sheet entries. The owner relationship, raw owner
+  index, parameter value, and unrelated document streams are preserved across
+  load/save/reopen.
+- Retained strict structural checks for unresolved, forward, cross-domain, and
+  otherwise unreviewed owner relationships.
+
+---
+
+# altium-monkey 2026.09.19 Release Notes
+
+Package version: `2026.9.19`
+
+This maintenance release makes existing projects with duplicate document
+entries load deterministically and advances the supported Geometer runtime.
+
+## Changes
+
+- Fixed project loading for existing `.PrjPcb` files that contain duplicate
+  normalized `DocumentPath` entries. The first entry in project-membership
+  order is used deterministically, a warning identifies ignored sections, and
+  authoring APIs continue to reject new duplicates.
+- Updated the required native geometry package from
+  `wn-geometer==2026.9.13` to `wn-geometer==2026.9.19`. The newer runtime adds
+  deterministic B0 half-space clipping and advances its supported native,
+  IPC, and static SDK artifacts. Altium Monkey's existing STEP-bounds API
+  remains source compatible.
+
+---
+
+# altium-monkey 2026.09.18 Release Notes
+
+Package version: `2026.9.18`
+
+This release corrects hierarchical and multipart netlist compilation, recovers
+large-project compiler performance, adds fast PCB-backed manufacturing views,
+and expands integrated-library authoring and compatibility.
+
+## Changes
+
+- Fixed legacy netlist projection so pins and terminals bind through compiled
+  occurrence and source identity before display-name aliases. Logical and
+  physical designator collisions no longer move pins between components
+  (public issue #52).
+- Fixed automatic-hierarchy compilation so all sheets use the single
+  design-resolved scope. Pin-less port-to-entry bridge nets are preserved on
+  sheets that also contain ordinary pin nets (public issue #53).
+- Fixed split multipart components placed on different sheets so their bodies
+  bind through compiled occurrence identity instead of page-plus-designator
+  text lookup (public issue #62).
+- Made net-name ambiguity explicit. `Netlist.resolve_net()` now raises
+  `AmbiguousNetNameError` when a provenance alias maps to multiple nets, while
+  `Netlist.get_nets_by_alias()` returns every match. Canonical net names remain
+  the unique global lookup namespace.
+- Recovered schematic compiler performance by reusing compile-scoped source,
+  hierarchy, parameter, connectivity, and graph work without weakening
+  Unicode, ordering, hierarchy, multipart, or net-ownership behavior. The
+  governed large-project compile checkpoint fell from approximately 780
+  seconds to approximately 13.6 seconds on the development workstation
+  (public issue #60).
+- Changed `AltiumDesign.to_pnp()` to use PcbDoc placement and component text as
+  its default manufacturing authority, avoiding a schematic compile. The
+  historical display comment and canonical `Comment` parameter are preserved.
+  Pass `use_schematic_metadata=True` to opt into the compiled schematic
+  metadata join.
+- Kept the existing compiled-schematic default for `AltiumDesign.to_bom()` but
+  removed its redundant netlist construction. The new
+  `to_bom(use_pcb_data=True)` option provides a no-compile view of physical
+  parts placed on the PcbDoc. PCB mode assumes a synchronized board and can
+  differ from evaluated schematic metadata or omit unplaced logical parts.
+- Added deterministic, transactional
+  `AltiumIntLib.create_from_libraries(...)` authoring from ordered SchLib and
+  PcbLib paths. It supports shared and alternate PCB-library choices, preserves
+  exact source bytes and embedded PcbLib assets, returns typed counts, hashes,
+  and warnings, and runs cross-platform without Altium. PCB3DLib,
+  non-PCBLIB models, bytes/logical-name inputs, and ambiguity overrides remain
+  outside this bounded first API.
+- Fixed `AltiumIntLib` reads of Altium's raw `0x00` metadata envelope for
+  `LibCrossRef.Txt` and `Parameters   .bin`. Bounded zlib decoding now rejects
+  truncated or trailing compressed data; the default 256 MiB per-stream limit
+  is configurable through `max_decompressed_stream_bytes`. Exact raw reads and
+  the writer's existing `0x02` output remain unchanged.
+- Added transactional `AltiumSchLib.rename_symbol(...)` and
+  `AltiumPcbLib.rename_footprint(...)` operations. They synchronize container
+  identities, preserve auxiliary and opaque streams, reject collisions without
+  partial mutation, and retain serialized PCB GUID and unique-ID tables.
+- Fixed standalone `.stackup` loss-tangent parsing for Altium's
+  `$LSM$LossTangent` property while preserving compatibility with the earlier
+  `DielLossTangent` representation (public issue #63).
+- Corrected SchDoc geometry for wrapped `TSVGImage` source rectangles, opaque
+  Note shadow outlines, and final-line TextFrame metrics after an explicit line
+  break.
+- Documented the Altium scripting OutJob runner as a best-effort bridge for
+  folder-based manufacturing outputs. PDF/Publish, schematic and PCB prints,
+  and Draftsman outputs can complete without producing files. An OutJob must be
+  a logical project document, and callers must verify every expected artifact.
+  Use Altium's OutJob editor or Project Releaser for document output and native
+  multi-container orchestration (public issues #33, #34, and #61).
+
+---
+
+# altium-monkey 2026.09.15 Release Notes
+
+Package version: `2026.9.15`
+
+This release fixes record-text compatibility for documents Altium accepts but
+strict decoding rejected, restores dash patterns in default schematic SVG
+output, and makes large-document parsing and rendering substantially faster.
+
+## Changes
+
+- Fixed record-text decoding so PcbDoc, PcbLib, SchDoc, and SchLib files
+  containing the five legacy byte values accepted by Altium's Windows text
+  reader load correctly instead of failing. Writers preserve the same bytes on
+  save, and existing Unicode companion fields are kept intact.
+- Matched Altium's replacement behavior for malformed `%UTF8%`-marked fields
+  while preserving the existing recovery warning for historical unmarked
+  UTF-8 records.
+- Fixed default (onscreen) schematic SVG output dropping dash patterns from
+  pen-carrying primitives (public issue #59). Dashed, dotted, and dash-dot
+  Blanket borders and harness bundle lines now serialize their pen dash style
+  as `stroke-dasharray` in every pen-bearing geometry element. Dash patterns
+  match Altium's on-screen renderer: they scale with the stroke width, and
+  dotted styles render as round dots. Native-parity (`native_altium`) output
+  is unchanged.
+- Fixed a quadratic slowdown in `AltiumSchDoc` parsing and SVG rendering
+  introduced with the live `all_objects` query view, and removed repeated
+  case-insensitive key scans from the record read path (public issue #60).
+  Parsing a large real-world multi-sheet project is over 2x faster than
+  `2026.9.13.post1`; parsed values, round-trip output, and rendering are
+  identical.
+- Removed `SchSvgRenderOptions.bezier_segment_count`. The option had no
+  effect: bezier curves are flattened with a fixed subdivision depth that
+  Altium itself does not expose as a setting, so setting it was silently
+  ignored. Code that passed it should drop the argument; rendering output is
+  unchanged.
+- Reduced clean-install validation cost by moving CadQuery and CasADi from the
+  `test` extra to the `examples` extra. Install `altium-monkey[examples]` when
+  running examples that synthesize STEP geometry.
+
+No compiler, netlist, or compiled-schematic contract changes are included.
+
+---
+
+# altium-monkey 2026.09.13-2 Release Notes
+
+Package version: `2026.9.13.post1`
+
+This patch release restores bounded compatibility with schematic auxiliary
+streams that Altium accepts but does not write in its current canonical form.
+
+## Changes
+
+- SchLib `PinTextData` now follows Altium's managed-reader behavior for the
+  declared stream prefix. Selected numeric pin aliases are applied in source
+  order, including later rows that reset pin-text modes to their defaults.
+- Embedded-image `Storage` in SchLib and SchDoc now follows Altium's declared
+  prefix and case-insensitive first-name selection behavior. Every selected
+  payload is still structurally validated and counted against resource limits,
+  including duplicate names that are not chosen for linkage.
+- Unchanged noncanonical `PinTextData` streams are replayed byte-for-byte.
+  Explicit semantic synchronization continues to emit strict canonical output.
+
+No public API or compiled-schematic contract changes are included.
+
+---
+
+# altium-monkey 2026.09.13 Release Notes
+
+Package version: `2026.9.13`
+
+This release advances the native geometry dependency used for embedded STEP
+model bounds and projections.
+
+## Changes
+
+- Updated the required native geometry package to `wn-geometer==2026.9.13`.
+  The release adds direct STEP and analytic illustration operations, makes Fast
+  detail and Fast Mesh Shadow the default HLR modes, and retains usable STEP
+  faces with warnings when individual faces cannot be tessellated.
+
+No Altium Monkey API or file-format behavior changes are included.
+
+---
+
+# altium-monkey 2026.09.12-3 Release Notes
+
+Package version: `2026.9.12.post2`
+
+This third 2026.09.12 release is a focused Geometer compatibility update.
+
+## Changes
+
+- Updated the required native geometry package to `wn-geometer==2026.9.12`.
+  The new release accepts governed large illustration attachments while keeping
+  the public Altium Monkey API and file-format behavior unchanged.
+
+---
+
+# altium-monkey 2026.09.12-2 Release Notes
+
+Package version: `2026.9.12.post1`
+
+This second 2026.09.12 release is a focused SchLib JSON compatibility hotfix.
+
+## Changes
+
+- Fixed SchLib JSON export so textual identifiers remain strings instead of
+  being coerced to numbers or rejected when they resemble floating-point
+  exponents. Numeric fields retain their existing validation. This resolves
+  public issue #58.
+
+No public API, compiler, netlist, or compiled-schematic contract changes are
+included in this hotfix.
+
+---
+
+# altium-monkey 2026.09.12 Release Notes
+
+Package version: `2026.9.12`
+
+This is a focused compatibility hotfix for the `2026.9.11` release.
+
+## Changes
+
+- Fixed package imports on Python 3.12. A schematic bus-entry annotation was
+  evaluated at import time even though its type dependency was intentionally
+  available only to static type checking.
+
+- Release validation now imports every packaged module from isolated wheels
+  under both Python 3.12 and Python 3.14. This guards against similar eager
+  annotation and interpreter-specific import failures.
+
+No public API or file-format behavior changes are included in this hotfix.
+
+---
+
+# altium-monkey 2026.09.11 Release Notes
+
+Package version: `2026.9.11`
+
+This release strengthens schematic compiler and netlist identity, adds explicit
+versioned netlist and BOM transports, fixes PcbDoc/PcbLib mutation paths, and
+makes bundled fallback-font embedding opt-in.
+
+## Breaking Changes And Migration
+
+- `Netlist.to_json()`, `to_json_text()`, and `to_json_bytes()` now emit only
+  `altium_monkey.netlist.b0`; there is no legacy-output switch. Consumers of
+  Netlist a0 must select the b0 schema, replace filename-only
+  `nets[].source_sheets` handling with structured `nets[].source_pages`, and
+  accept the required stable component/page identity fields on components,
+  terminals, endpoints, and graphical pin references. Design b0 is a separate
+  established contract: its embedded `nets` retain their Design-owned
+  `source_sheets` representation and are intentionally not standalone Netlist
+  b0 rows.
+
+- `AltiumSchDoc.objects`, `AltiumSchDoc.all_objects`, and the typed
+  `ObjectCollection`-backed accessors are read-only live query views. Code that
+  appended to a view or assigned `all_objects` must use the explicit structural
+  mutation APIs such as `add_object()`, `insert_object()`, `remove_object()`, or
+  the appropriate `add_*()` helper. This keeps ownership and save-time indexes
+  synchronized. The same rule now applies to `AltiumSchLib.symbols` and
+  `AltiumSymbol.objects`: use `AltiumSchLib.add_symbol()` / `remove_symbol()`
+  and `AltiumSymbol.add_object()` / `remove_object()` instead of mutating the
+  returned views.
+
+- The unfinished `altium_monkey.pcb_manufacturing` package and
+  `altium_monkey.altium_pcb_source_snapshot` module were physically included
+  in 2026.9.7 despite never being declared or supported public APIs. They are
+  removed from public source and distributions in this release, with no
+  supported replacement. Ordinary PcbDoc loading no longer pays the associated
+  whole-document snapshot, normalization, serialization, and hashing cost.
+
+## Contract Source Of Truth
+
+Design b0, compiled-graph a0, hierarchy a1, Netlist b0, and schematic-BOM a0
+are governed by the TypeSpec sources published in the public source repository
+under `docs/schemas/altium_monkey/typespec/`. They provide the reviewable wire
+shape for generated JSON Schemas and internal Python `msgspec` boundary DTOs.
+The handwritten Python adapters remain the supported API because they provide
+semantic validation, resource limits, and the rich `Netlist`/BOM behavior.
+
+The already-published Design b0 and Netlist a0 JSON Schema files remain frozen
+byte-for-byte compatibility snapshots. Netlist a0 is retained only for
+historical consumers and is not emitted by this release. Generator-specific DTO
+classes are implementation details and are not added to the declared Python
+public surface.
+
+## Supported Environments And Validation
+
+Normal GIL-enabled CPython 3.12 through 3.14 is supported. The required
+`wn-geometer==2026.9.12` wheels define the current platform boundary: Windows
+amd64, macOS arm64, and Linux x86_64/aarch64 using `manylinux_2_35`. The release
+distribution is built from an sdist-derived wheel and validated in clean Python
+3.14 test and core-only environments, including the complete installed-wheel
+public suite and dependency checks.
+
+## Changes
+
+- The exact `wn-geometer` runtime dependency is updated from `2026.9.7` to
+  `2026.9.11`, retaining published wheels for Windows amd64, macOS arm64, and
+  Linux x86_64/aarch64 while avoiding downstream resolver conflicts with the
+  current Geometer release.
+
+- `AltiumDesign.from_prjpcb(...)` now accepts
+  `AltiumProjectLoadMode.METADATA_ONLY` for project parameters, options,
+  variants, DNP/override rows, and document discovery without reading SchDoc or
+  PcbDoc document bytes. Schematic-dependent operations fail explicitly with
+  `AltiumProjectCapabilityError`. The default `FULL` mode retains schematic
+  compiler behavior while also guaranteeing that referenced boards remain
+  unloaded until a PCB-dependent operation requests one. Design JSON retains
+  its compatible `include_pnp=True` default; use
+  `to_json(include_pnp=False)` for a schematic-only projection that does not
+  parse the board. Selected boards are cached by resolved path and preserve
+  mutable object identity across equivalent selectors.
+
+- On Windows Python 3.14, the `examples` and `test` extras constrain transitive
+  CasADi to `<3.8` to avoid a native shutdown failure observed through the
+  CadQuery example environment. Core installs do not include CadQuery or
+  CasADi.
+
+- Schematic SVG keeps packaged Arimo, Tinos, and Cousine fallbacks for portable
+  font resolution and measurement, but no longer embeds their TTF payloads by
+  default. Set
+  `SchSvgRenderOptions(embed_bundled_fallback_fonts=True)` for a self-contained
+  SVG. The opt-in embeds only package-owned fallback faces used by painted text;
+  it never embeds host or configured fonts and creates no font sidecars.
+
+- IPC-2581 component pad references now use each pad's stored designator, so
+  reordered numeric and alphanumeric pin names remain connected to the same
+  package pin. Pads with an empty designator retain their existing sequential
+  fallback.
+
+- Component pads now expose typed 32-layer removed-copper-land inspection and
+  explicit mutation through `is_copper_land_removed(...)` and
+  `set_copper_land_removed(...)`. PcbDoc and PcbLib saves preserve original
+  per-layer geometry, optional bitmap state, full-stack entries, and unknown
+  tail bytes; valid legacy pads without a table receive the Altium-compatible
+  651-byte form on first removal. Ambiguous or malformed layouts fail closed,
+  and existing via behavior is unchanged.
+
+- `AltiumPcbLib(existing_path)` now parses the existing PcbLib immediately,
+  matching `from_file(...)` and the other library containers. This fixes the
+  empty `footprints` result seen when callers passed an IntLib-extracted
+  PcbLib to the constructor. IntLib extraction itself remains byte-exact. A
+  no-argument constructor still creates a new library, and a nonexistent path
+  remains supported as destination metadata for compatible authoring code.
+
+- PcbDoc saves now regenerate each owned counted section's four-byte `Header`
+  together with its `Data`. Direct changes to writer-owned primitive
+  collections no longer leave stale counts that can make Altium reject the
+  saved board, including deletion of the final record. The correction applies
+  across the owned PCB primitive and metadata sections rather than only arcs.
+  It guarantees serialization integrity, not cascading object deletion;
+  unsupported and otherwise unowned streams remain lossless passthrough.
+
+- Schematic geometry documents now derive `failed_renders` from records with
+  nonempty renderer errors, keeping generated IR valid when an individual
+  managed geometry target fails without aborting the whole document.
+
+- Schematic geometry-IR v1 now has a strict public validator and validated
+  dictionary/file decoders. They reject malformed counts and indexes,
+  unbalanced transform/clip/group stacks, non-finite values, duplicate or
+  case-colliding JSON keys, unknown operations, and out-of-budget payloads
+  while preserving allowed extension fields.
+
+- Schematic SVG rendering now exposes Altium's `SingleSlashNegation` option.
+  Overline parsing matches managed UTF-16 behavior for leading, repeated,
+  trailing, and astral-character slash markers, including HarnessEntry and
+  SheetEntry labels.
+
+- `SchPaintColorMode` is now exported for selecting the managed schematic SVG
+  color, grayscale, or monochrome painter modes. `NetlistSourcePage` exposes
+  structured compiled-page identity, and `validate_compiled_design_payload()`
+  validates the strict low-level compiled-design diagnostic transport.
+
+- SchLib mutation now rebuilds Data and Additional membership in Altium's
+  managed depth-first order. Save recomputes owner and `IndexInSheet` fields,
+  keeps object-list members ahead of managed fields, and removes ignored or
+  structurally unattached owner subtrees while clean files retain lossless raw
+  replay.
+
+- Parsed SchLib symbol mutation now persists explicit `add_object()` and
+  `remove_object()` membership changes. Save transactionally rebuilds the Data
+  rows, removes complete child subtrees with their selected owner, repairs
+  unrelated retained ownership across Data and Additional, and adopts new row
+  identities for later edits; schematic parameter values containing literal
+  pipes also survive clean save/reopen.
+
+- Logical schematic multipart labels now use the component's implemented
+  parts in its active display mode, including bound fields. Placing another
+  part with the same design item no longer adds a spurious suffix, and empty
+  designators can correctly display a suffix alone.
+
+- Compiler component names/comments and schematic body labels use the last
+  admitted Designator/Comment field, including explicitly empty values.
+  Ignored later fields do not replace an earlier live field, and physical
+  annotations target the selected field consistently.
+
+- Python schematic compilation indexes component pin evidence once per source
+  document, avoiding repeated scans of unrelated pin buckets while retaining
+  pin order and signal identities.
+
+- Schematic compilation retains components with missing or empty source
+  designators, including their pins, physical annotations and repeated-page
+  names, while preserving component-kind and compile-mask filtering.
+
+- Compiler pin and net projection keeps distinct source parts correctly bound
+  when duplicate logical designators receive different physical annotations,
+  including a multipart component whose part B alone is renamed.
+
+- Public schematic netlists now keep terminals, pin endpoints, and graphical
+  pin references on their exact physical component when a logical designator
+  collides with another component's board-annotated designator, including
+  repeated-channel multipart designs. Ambiguous compatibility aliases no
+  longer select an owner based on component order.
+
+- Schematic Additional-stream ownership now follows Altium's exact `T`
+  flag semantics. Noncanonical text such as `TRUE` or `1` no longer selects
+  the wrong parent stream, and untouched source text still round-trips.
+- Physical schematic body labels now include implemented multipart suffixes
+  inside channel formats (for example, U1A_2), while aggregate component and
+  netlist keys stay unsuffixed. Compiled schematic graph occurrences carry
+  the same full body display names.
+- Explicitly empty component designator annotations now remain empty in
+  compiled component and terminal names. Physical schematic rendering retains
+  logical text when the full physical display name is empty, matching the
+  managed renderer's fresh-state behavior.
+- Component child edits now retain nested owned records in the schematic
+  object store, including harness entries, so they remain available to queries
+  and subsequent saves.
+- IntLib extraction now normalizes dot, Windows device, trailing-dot/space,
+  control-character, and overlong source names deterministically. SchLib split
+  patterns reject rooted, multi-segment, or control-character output names, so
+  symbol metadata cannot escape the requested destination directory.
+- Known limitation: compiled-design and netlist generation derives harness
+  definitions from schematic connectors but does not yet honor `LOCKED;`
+  definitions in sibling `.Harness` files or definitions supplied by custom
+  project `.Harness` documents. Ordinary autogenerated `.Harness` files are
+  not required.
+- `AltiumDesign.to_bom_payload()` adds the schema-tagged
+  `altium_monkey.schematic_bom.a0` transport with immutable typed rows,
+  component/source-page identity, fitted/DNP state, strict validation, and
+  bounded JSON encoding. The established list-returning `to_bom()` API remains
+  available.
+- SchDoc and SchLib JSON interoperability now has explicit schema-tagged
+  `{schema, document}` envelopes and strict validators, while the established
+  untagged `to_json()` document shape remains unchanged.
+- Compiled schematic graph ingress now rejects unknown root fields.
+- Schematic authoring now applies Altium-compatible UniqueID collision repair
+  and identity locking across SchDoc and SchLib containers. `AltiumSymbol`
+  adds an explicit `remove_object()` mutation API that releases the detached
+  record's managed identity lock.
+- Low-level schematic record-stream parsing now raises contextual errors for
+  truncated, zero-length text, or unterminated record framing instead of
+  silently accepting a partial stream.
+- Schematic geometry mutation now persists sparse source-backed setter changes
+  across all scalar, rectangular, curved, vertex, and text-frame record
+  families. Fractional-only coordinates are retained, stale extended vertices
+  are removed when a path is shortened, empty authored paths omit their zero
+  count, and paths beyond Altium's canonical 32,817-vertex writer limit are
+  rejected before allocation or serialization. Typed mutation back to a wire
+  default now removes the field without losing untouched raw defaults. Line,
+  polyline, and rectangle dash-dot styles use Altium's exact extended-key
+  spelling, and unsupported inherited fill/location/TextFrame fields no longer
+  alter typed state or leak into canonical output. Typed angle mutation uses
+  Altium's invariant three-decimal parameter spelling.
+- Low-level schematic geometry construction now uses Altium's managed authored
+  widths, fill flags, unit-backed dimensions, and default preference colors,
+  while sparse records continue to preserve absent fields. Public mil factories
+  retain their documented explicit geometry and color-omission overrides.
+- Low-level connectivity records now distinguish absent raw fields from their
+  effective Altium defaults while preserving source spelling, field order,
+  unknown fields, and sparse mutation. Blanket export no longer synthesizes
+  inherited fill flags that ADDevelop does not persist.
+- Text, port, power-port, and note records now distinguish sparse persisted
+  fields from their effective Altium defaults. Missing text remains absent on
+  round-trip while semantic access returns the correct empty/default value,
+  and sparse port dimensions and note presentation defaults no longer leak
+  incorrect synthesized fields.
+- Connectivity and directive records now follow Altium's exact authored field
+  order and dynamic-string rules. NoERC suppression data is normalized against
+  the complete managed 165-error-kind and 153-connection-pair inventories,
+  record-17 cross-sheet dispatch accepts the documented boolean spellings, and
+  unsupported inherited fields remain raw-lossless without altering typed
+  state or canonical output.
+- IEEE symbols, pie charts, pins, and components now preserve their exact
+  sparse-versus-authored field contracts. Fractional pin coordinates and
+  dynamic UTF-8 sidecars survive mutation, component multipart and extended
+  fields retain source order, and stale noncanonical mirror or description
+  sidecars are removed on serialization.
+- Sheet, sheet-entry, sheet-symbol, child-label, and template records now
+  distinguish raw absence, imported semantic state, authored defaults, and
+  exact exporter output. Sheet rendering also preserves Altium's separate
+  working-margin behavior when `BorderOn` is absent.
+- Harness connector, harness entry/type, signal-harness, and implementation
+  records now preserve Altium's sparse/imported/authored distinctions,
+  dynamic UTF-8 fields, exact exporter order, and owner references. Indexed
+  implementation and map data is bounded before allocation, while unsupported
+  wrapper identities and stale indexed fields are removed only when required.
+- Image records now preserve rotation, fractional geometry, and dynamic UTF-8
+  metadata without emitting unsupported inherited fields. Stream headers are
+  modeled as contextual preambles rather than graphical records, and typed
+  ObjectDefinitions metadata and the complete Altium object-ID dispatch are
+  retained instead of being silently discarded.
+
+# altium-monkey 2026.09.07 Release Notes
+
+Package version: `2026.9.7`
+
+This release only updates the `wn-geometer` dependency from `2026.9.4` to
+`2026.9.7`.
+
+# altium-monkey 2026.09.04 Release Notes
+
+Package version: `2026.9.4`
+
+This release only updates the `wn-geometer` dependency from `2026.8.21` to
+`2026.9.4`.
+
+# altium-monkey 2026.08.21 Release Notes
+
+Package version: `2026.8.21`
+
+This release fixes PCB parameter text decoding for non-ASCII characters,
+multichannel channel numbering and naming under non-default project options,
+sheet-symbol child resolution for extension-less references, compiled-graph
+projection, and SchDoc/SchLib SVG paint order.
+
+## PCB Parameter Unicode
+
+- Fixed PCB component parameter text decoding for non-ASCII characters such
+  as the degree (U+00B0) and plus-minus (U+00B1) signs, which previously read
+  back as mojibake like `A-circumflex + degree` pairs (GitHub issue #32).
+  PcbDoc and PcbLib parameter readers now prefer Altium's authoritative
+  `UNICODE__<FIELD>` UTF-16 code-unit sidebands over the plain fields, whose
+  byte encoding depends on the writing machine's ANSI code page, so parameter
+  text decodes correctly regardless of the system code page the file was
+  saved under.
+- The PcbDoc builder also emits `UNICODE=EXISTS` and `UNICODE__NAME` /
+  `UNICODE__VALUE` sidebands when authoring non-ASCII parameters so Altium
+  reads them back losslessly on any system code page.
+
+## Multichannel Numbering And Naming
+
+- Fixed multichannel `$ChannelIndex` / `$ChannelAlpha` numbering (GitHub
+  issue #40; thanks to the PR #42 reporter for the diagnosis and verification
+  data). When the same child schematic is instantiated by two or more
+  discrete sheet symbols, channels were numbered by sheet-symbol record order
+  in the parent document instead of Altium's hierarchy-rank order, swapping
+  physical designators and channel-scoped net names relative to what Altium
+  writes to the PcbDoc and its netlists. The compiler now assigns the
+  channel index as the 1-based rank in Altium's hierarchy-path sort,
+  unconditionally for every channel designator format. This matches Altium
+  for reversed stored order, non-contiguous designators (for example
+  `PSU_5`/`PSU_9` yield indices 1/2), nested multichannel designs, and
+  `Repeat()` ranges starting above 1, all pinned by new Altium
+  compile-oracle regression fixtures.
+- Fixed three multichannel naming behaviors that diverged from Altium when
+  non-default `[Design]` project options are set, pinned by a new 700-variant
+  Altium compile-oracle matrix sweeping channel designator formats, room
+  naming styles, and room-suffix options:
+  - `Repeat()` channels now apply Altium's alpha room-name swap under the
+    flat-alpha, alpha-name-path, and mixed-name-path room naming styles.
+  - `$ChannelPrefix` now resolves to the `Repeat()` base name for repeat
+    channels instead of the expanded channel designator.
+  - Channel-expanded net-name detection now follows Altium's source-object
+    priority, so a sheet-entry-named root net no longer replaces the
+    channel-expanded net spellings under `$RoomName`-leading channel
+    designator formats ([GitHub issue #47](https://github.com/wavenumber-eng/altium_monkey/issues/47)).
+- Fixed compiled-design channel formatting for designators whose prefix
+  contains punctuation, such as `Leaf_1`; `$ComponentPrefix` now preserves
+  `Leaf_` and `$ComponentIndex` resolves to `1`, matching Altium Designer.
+- Fixed compiled sheet/document numbering for `Repeat()` channels: each path
+  level now uses the repeat value at that expansion position (or 1 for the
+  first position when the project uses old sheet-symbol indexing) instead of
+  the expansion ordinal, matching the sheet numbers Altium reports.
+- Compiled physical sheet-symbol rows now report the resolved child
+  document's file name, so extension-less sheet-symbol references surface
+  the child's real file name instead of the raw reference text.
+
+## Sheet-Symbol Child Resolution
+
+- Fixed sheet-symbol child document resolution when the stored reference has
+  no schematic extension (for example `Power` instead of `Power.SchDoc`),
+  which previously raised `unresolved_sheet_symbol_child` and silently
+  compiled only a subset of the design's sheets (GitHub issue #38).
+  Extension-less references are first-class in Altium; both compiler
+  resolution paths now match references to loaded documents by
+  case-insensitive filename stem (stripping `.SchDoc`/`.SchDot`/`.sch`),
+  and ambiguous stem matches are reported with the
+  `ambiguous_sheet_symbol_child` diagnostic instead of resolving
+  arbitrarily.
+
+## Compiled Graph And SVG Rendering
+
+- Fixed compiled-design and compiled-schematic graph projection for multipart
+  shared-pin cardinality, duplicate loaded source paths, and repeated-page
+  component SVG indexes.
+- Fixed [GitHub issue #43](https://github.com/wavenumber-eng/altium_monkey/issues/43):
+  SchDoc and SchLib IR/SVG output now follows Altium's owner-scoped paint order,
+  including UID-less nested graphics and Altium's component/library
+  transparency ordering rule.
+
+## Import And Authoring Corrections
+
+- Fixed schematic component-description parsing so MBCS pipe escapes are
+  normalized consistently when Altium supplies a preferred UTF-8 sidecar.
+- Aligned newly authored native harness connectors with Altium and Python's
+  right-side default while preserving the left-side fallback for imported
+  sparse legacy records.
+
+## Dependencies
+
+- The `wn-geometer` dependency is updated to `2026.8.21` (ABI `20260821`),
+  including endpoint/radius arc support for planar regions.
+
+# altium-monkey 2026.08.11-2 Release Notes
+
+Package version: `2026.8.11.post1`
+
+`2026.08.11-2` is represented in Python package metadata as the PEP 440
+canonical form `2026.8.11.post1`.
+
+This second 2026.08.11 release adds Python 3.14 support and fixes compiled
+schematic identity for distinct unannotated components with the same displayed
+designator.
+
+## Python 3.14 Support
+
+- Normal GIL-enabled CPython 3.12, 3.13, and 3.14 are supported. Free-threaded
+  Python builds remain outside the current support contract.
+- Pillow is updated to 12.3.0 so clean Python 3.14 installs resolve from wheels.
+- CadQuery remains an optional example/test dependency; Trimesh and Cascadio
+  are not core dependencies.
+- Release validation now builds first and runs the complete public suite from
+  the exact installed wheel in a clean Python 3.14 environment. A separate
+  plain-wheel environment verifies optional geometry packages are absent.
+
+## Duplicate Unannotated Components
+
+- Distinct terminal-bearing components that share a displayed designator such
+  as `R?` or `M?` retain their exact source component and pin ownership.
+- Identity now survives single-sheet connectivity, hierarchy, repeated sheets,
+  compiled-graph projection, and design-review serialization.
+- Projection consumes exact source-body evidence without expanding candidates
+  by displayed designator. Missing source identity omits only the affected
+  semantic row and emits a compile warning rather than aborting the graph.
+
+## Verification
+
+The release was checked with clean wheel-only installs on CPython 3.12, 3.13,
+and 3.14, the complete installed-wheel public suite on Python 3.14, targeted
+image, text, STEP, Draftsman, and webfont tests, private signoff, exact
+Python/native compiled-graph parity, and native CLI smoke tests.
+
+# altium-monkey 2026.08.11 Release Notes
+
+Package version: `2026.8.11`
+
+`2026.08.11` is represented in Python package metadata as the PEP 440
+canonical form `2026.8.11`.
+
+This patch release fixes schematic parameter-stream Unicode compatibility for
+SchDoc and SchLib files.
+
+## Schematic Unicode Encoding
+
+- Writers now follow Altium's native representation for non-ASCII text:
+  a lossless `%UTF8%<Field>` sidecar plus a Windows-1252-safe ordinary field.
+- Leading and trailing whitespace is preserved exactly in authoritative UTF-8
+  sidecars.
+- Readers recover legacy unmarked UTF-8 emitted by older Monkey versions when
+  Windows-1252 cannot decode the record, and report the affected stream,
+  record, pair, and field where that context is available.
+- Malformed content that is neither valid Windows-1252 nor valid UTF-8 now
+  fails closed consistently in Python and the native implementation.
+
+## Verification
+
+The release was checked with exact reported CJK byte sequences, byte-exact
+Python/native writer parity, SchDoc and SchLib Unicode round trips, project
+compilation, public package tests, clean wheel installation, and distribution
+metadata checks.
+
+# altium-monkey 2026.08.10 Release Notes
+
+Package version: `2026.8.10`
+
+`2026.08.10` is represented in Python package metadata as the PEP 440
+canonical form `2026.8.10`.
+
+This release publishes the consolidated schematic design compiler, the
+source-neutral compiled schematic graph, cross-platform project discovery
+fixes, and the complete three-family Altium stroke webfont bundle.
+
+## Breaking Design b0 Contract
+
+Project Design JSON advances from `altium_monkey.design.a2` to
+`altium_monkey.design.b0`. Design b0 requires the embedded
+`altium_monkey.compiled_schematic_graph.a0`, which retains realized hierarchy,
+multipart component bodies, page-local scalar nets, terminals, hierarchy
+bindings, and scoped drawing evidence with stable canonical identities.
+
+Design b0 removes the duplicated Design a2 `physical_pages` projection. Its
+replacement, `physical_page_metadata`, is narrow presentation metadata keyed by
+canonical page-occurrence IDs. Project variants and DNP/fitted state remain in
+the surrounding Design payload and are intentionally outside the
+variant-neutral graph. The Design a2 schema remains bundled only for validating
+archived payloads; consumers must explicitly migrate to Design b0.
+
+Python and native C++ emit identical graph and page-metadata payloads.
+
+## Consolidated Schematic Compilation
+
+`AltiumDesign.to_netlist()` and the function-level `compile_netlist()` entry now
+both compile an `AltiumCompiledDesign` and project its netlist. The superseded
+Python multi-sheet project compiler and public WireList serialization path were
+removed; WireList cannot represent repeated/channel hierarchy without losing
+information.
+
+The compiler now preserves Altium's fractional scalar connectivity, metric
+endpoint tolerance, port-body electrical lines, bus/harness object dispatch,
+sheet-entry fractional placement, repeated-channel naming and provenance,
+physical sheet expansion, sheet/document numbering, device-sheet behavior, and
+multipart duplicate-designator semantics. These fixes cover flat, hierarchical,
+repeated-channel, metric, bus/harness, and multipart projects.
+
+## Cross-Platform Project Discovery
+
+Fixed `.PrjPcb` document discovery on Linux, macOS, and WSL when Altium stores
+nested `SchDoc`, `PcbDoc`, or `OutJob` paths with Windows-style backslash
+separators. Reachable sheets are distinguished by full project-relative paths
+when folders contain duplicate filenames, and managed device-sheet sections
+survive project save without duplicate document entries.
+
+## Complete Altium Stroke Webfont Bundle
+
+Expanded the packaged webfont bundle to all three native stroke styles.
+`Altium Stroke`, `Altium Stroke Sans`, and `Altium Stroke Serif` each ship in
+Light, Regular, and Bold weights with per-style stroke ratios tuned against
+Altium rendering. Sans and serif include newly authored Greek, math, and
+electronics symbols, corrected proportional symbol spacing, and family-native
+e-grave glyphs. The bundled demo shows the same equation, BOM, symbol, weight,
+and fabrication-note specimens in all three families.
+
 # altium-monkey 2026.08.01 Release Notes
 
 Package version: `2026.8.1`
@@ -203,8 +975,7 @@ For review-safe graphical identity in repeated/channel projects, combine a
 ## WireList API Removal
 
 WireList serialization APIs are removed from the public output path:
-`AltiumDesign.to_wirelist()`, `Netlist.to_wirelist()`, and
-`AltiumSchDoc.to_netlist(format="wirelist")`. WireList can lose hierarchy,
+`AltiumDesign.to_wirelist()` and `Netlist.to_wirelist()`. WireList can lose hierarchy,
 zero-pin interface, long-name, alias, and repeated-channel information. Use
 `AltiumDesign.to_json()`, `AltiumDesign.compile().to_dict()`, or
 `AltiumDesign.to_netlist().to_json()` for programmatic consumers.

@@ -12,12 +12,37 @@ Use it when you need to:
 5. find, split, or render footprints
 6. inventory footprints and embedded payloads before selecting one
 
+## Loading And Creation
+
+Pass an existing PcbLib path to the constructor or use `from_file(...)` to
+parse it. Both forms populate footprints, primitives, and embedded models:
+
+```python
+pcblib = AltiumPcbLib("vendor.PcbLib")
+# Equivalent explicit factory:
+pcblib = AltiumPcbLib.from_file("vendor.PcbLib")
+```
+
+`AltiumPcbLib()` creates a new in-memory library. A nonexistent path passed to
+the constructor is retained as destination metadata for compatibility, but new
+authoring code should normally use the no-argument form and pass the output
+path to `save(...)`. Passing an existing invalid file raises a parse error;
+passing a directory raises `IsADirectoryError`.
+
 ## Object Model
 
 PcbLib uses a footprint-oriented API. `AltiumPcbLib` owns embedded models and
 footprints. `AltiumPcbFootprint` owns its primitive lists:
 `footprint.pads`, `footprint.tracks`, `footprint.arcs`, `footprint.regions`,
 `footprint.texts`, `footprint.vias`, and `footprint.component_bodies`.
+
+Rename a library-owned footprint with
+`pcblib.rename_footprint(footprint_or_name, name)`. String selection is exact
+and case-sensitive. The method returns the same owned footprint, updates the
+catalog, parameters, section keys, and storage identity together, and preserves
+known identifiers plus opaque per-footprint streams. Rename targets are
+printable ASCII and at most 255 bytes; unsupported names and collisions are
+rejected without changing the library.
 
 Attach a footprint to a library before adding primitives so the library can
 manage model streams and authoring metadata:

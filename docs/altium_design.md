@@ -15,23 +15,58 @@ Use it when you need to:
 
 ## Public Contracts
 
-`AltiumDesign.to_json(...)` emits `altium_monkey.design.a2`.
+`AltiumDesign.to_json(...)` emits `altium_monkey.design.b0`.
 
-`AltiumDesign.to_netlist().to_json(...)` emits `altium_monkey.netlist.a0`.
+`AltiumDesign.to_netlist().to_json(...)` emits `altium_monkey.netlist.b0`.
+
+`AltiumDesign.to_bom_payload()` emits
+`altium_monkey.schematic_bom.a0` through an immutable
+`SchematicBomPayload`. Use its `to_json()`, `to_json_text()`, or
+`to_json_bytes()` methods for a versioned transport. The established
+list-returning `to_bom()` API remains available. Its default remains a logical
+compiled-schematic BOM, but it now projects directly from the compiled design
+without constructing an intermediate netlist.
+
+Use `to_bom(use_pcb_data=True)` for a faster no-compile view of physical parts
+placed on the board. PCB mode uses Texts6 designators, component footprint and
+description fields, source library references, `PrimitiveParameters` metadata,
+and PCB `ComponentKind` filtering. It applies project-variant DNP state but does
+not join or compare schematic data.
+
+The PCB option assumes the board is synchronized. It may omit schematic-only
+or unplaced components, returns an empty `sheet` value, and can expose cached
+PCB parameters that differ from evaluated schematic parameters. It is
+available from `AltiumProjectLoadMode.METADATA_ONLY`.
 
 `AltiumDesign.compile(force=False)` returns the beta compiled schematic model.
 Project netlist, design JSON, and physical schematic rendering now derive from
 this compiled model instead of a separate legacy hierarchy rewriter.
 
-`AltiumDesign.to_physical_ir(physical_page_id)` and
-`AltiumDesign.to_physical_svg(physical_page_id)` render one compiled physical
+`AltiumDesign.to_physical_ir(page_occurrence_ref)` and
+`AltiumDesign.to_physical_svg(page_occurrence_ref)` render one compiled physical
 schematic page. Use these APIs for repeated sheets and multi-channel projects
 where one logical `.SchDoc` appears multiple times with different resolved
 designators such as `R1.1`, `R1.2`, `R1A`, or `R1B`.
 
 `AltiumDesign.to_pnp(...)` returns pick-and-place entries from the project
-PcbDoc. When a project has a PcbDoc, `AltiumDesign.to_json(...)` also includes
-the same data under the optional root `pnp` field.
+PcbDoc. The board is the default manufacturing authority: Texts6 supplies the
+physical designator and display-value comment; the component record supplies
+placement, layer, footprint, and description; and PCB `PrimitiveParameters`
+supply other metadata. The returned parameters include a canonical `Comment`
+copied from the component-owned Texts6 comment. `exclude_no_bom=True` uses the
+PCB component kind. Project variant DNP filtering still comes from the
+PrjPcb. If a board has no owned comment record, cached `Value` or `Comment`
+metadata provides the fallback.
+
+The default does not compile or join the schematic. If logical metadata is
+explicitly required, pass `use_schematic_metadata=True`; matching components
+then use compiled schematic value, description, parameters, and component kind
+while placement remains PCB-owned. This option retains the earlier PnP
+metadata behavior and cost. The default assumes the board has been
+synchronized before manufacturing output.
+
+With its default `include_pnp=True`, `AltiumDesign.to_json(...)` also includes
+PnP data under the optional root `pnp` field when a PcbDoc is referenced.
 
 The default PnP coordinate mode is `altium-pick-place`. It matches Altium's
 Pick Place export by taking the center of the bounding box of component-owned
@@ -46,10 +81,64 @@ The `schema` field is the contract version. These payloads do not use a root
 
 The root `generator` field is `altium_monkey`.
 
+Standalone Netlist b0 uses structured `source_pages` and stable component
+identities. Design b0 owns a separate embedded-net compatibility projection;
+its root `nets` retain filename-only `source_sheets` and must not be interpreted
+as standalone Netlist b0 rows.
+
+Use `SchematicContractLimits` to lower the reviewed JSON resource ceilings.
+`SchematicContractError` provides a stable error code and JSON Pointer path for
+invalid Netlist b0 or schematic-BOM a0 payloads.
+
 See [schema contracts](schemas/index.md) for field-level contract notes.
 See [compiled design migration](api_patterns/compiled_design.md) for guidance
-when moving strict validators or SVG/component consumers from `altium_monkey.design.a1` to
-`altium_monkey.design.a2`.
+when moving strict validators or SVG/component consumers from Design a2 to
+Design b0. The retained `altium_monkey.design.a2` schema describes archived
+physical-page payloads, and `altium_monkey.design.a1` describes the earlier
+project contract. Neither predecessor is emitted by the current API.
+
+## Project Load Modes
+
+`AltiumDesign.from_prjpcb(...)` accepts an `AltiumProjectLoadMode`:
+
+```python
+from altium_monkey import AltiumDesign, AltiumProjectLoadMode
+
+design = AltiumDesign.from_prjpcb(
+    "board.PrjPcb",
+    load_mode=AltiumProjectLoadMode.METADATA_ONLY,
+)
+```
+
+`FULL`, the default, loads the project and compile-participating SchDocs. It
+provides the compiler, netlist, Design JSON, BOM, schematic rendering, and
+schematic query APIs. Despite its name, it does not eagerly load a referenced
+PcbDoc: both project modes leave `design.pcbdoc` as `None` until an explicit
+PCB-dependent operation requests the board.
+
+Design JSON is a mixed schematic/PCB transport for compatibility. Its
+`include_pnp=True` default loads a referenced PcbDoc to populate the optional
+`pnp` field. Use `design.to_json(include_pnp=False)` for schematic-only Design
+JSON; that path does not parse the board.
+
+`METADATA_ONLY` reads neither SchDoc nor PcbDoc document bytes. It retains
+project metadata, compile options, project parameters, variants, DNP and
+component-override rows, and board discovery through `get_pcbdoc_paths()`.
+Its `schdocs` list and schematic-derived `sheet_parameters` are empty.
+`load_pcbdoc(...)` remains available and parses only the selected board. The
+default `to_pnp()` is also available in this mode and lazily loads the board;
+`to_pnp(use_schematic_metadata=True)` requires `FULL` because it compiles the
+schematic.
+
+Schematic-dependent methods on a metadata-only design raise
+`AltiumProjectCapabilityError`; they do not return an empty result that could
+be mistaken for an empty design. A design does not upgrade its load mode in
+place. Construct a new `FULL` design when schematic capabilities are needed.
+
+Loaded PcbDocs are cached by resolved source path. Equivalent filename,
+relative-path, and absolute-path selectors return the same mutable object, so
+intentional in-memory edits remain visible. Construct a new design when fresh
+disk state is required.
 
 ## Compiled vs Logical Views
 
@@ -59,8 +148,8 @@ model:
 
 1. `AltiumDesign.to_json(...)`
 2. `AltiumDesign.to_netlist()`
-3. `AltiumDesign.to_physical_ir(physical_page_id)`
-4. `AltiumDesign.to_physical_svg(physical_page_id)`
+3. `AltiumDesign.to_physical_ir(page_occurrence_ref)`
+4. `AltiumDesign.to_physical_svg(page_occurrence_ref)`
 
 This means repeated sheets, channel instances, annotation-driven designator
 changes, and project net naming are resolved before data is emitted.
@@ -71,57 +160,63 @@ single-sheet renderers do not know which physical page instance they represent,
 so they do not substitute channel-resolved designators.
 
 For projects without repeated physical sheet instances, the compiled project
-view decays to the familiar one-source-sheet/one-physical-page shape. Consumers
-can still use `physical_pages`; there is just no ambiguity to resolve.
+view decays to the familiar one-source-sheet/one-page-occurrence shape. The
+same graph contract still applies, so consumers do not need a separate simple
+project code path.
 
-## Compiled Physical Pages
+## Compiled Schematic Graph
 
-`AltiumDesign.to_json(...)` includes a compact compiled physical-page
-projection for user-facing tools:
+Design b0 requires `compiled_schematic_graph`, a variant-neutral transport with
+the same source-neutral ten collections used by the governed generic graph:
 
-1. `physical_pages`: one row per compiled physical schematic page, including
-   page-local components, nets, graphical evidence, and hierarchy identity.
-2. `indexes`: optional lookup maps when `include_indexes=True`.
+1. `unit_definitions`
+2. `page_definitions`
+3. `unit_occurrences`
+4. `page_occurrences`
+5. `hierarchy_occurrences`
+6. `component_occurrences`
+7. `local_net_occurrences`
+8. `terminal_occurrences`
+9. `hierarchy_terminal_bindings`
+10. `graphical_artifact_links`
 
-`physical_pages` is always present in `design.a2`, including simple projects
-without repeated sheets. In those projects it decays to the single physical
-instance per source sheet.
+Definitions describe reusable logical source material. Occurrences describe
+the realized compiled design, so repeated sheets and channels have distinct
+canonical identities. Local nets belong to page occurrences, and explicit
+hierarchy terminal bindings connect parent sheet entries to child ports.
+
+The embedded graph schema is
+`altium_monkey.compiled_schematic_graph.a0`; its identity namespace is
+`sch.compiled_schematic_graph.a0`.
 
 `compile` and `diagnostics` are optional root fields. Request them with
 `AltiumDesign.to_json(include_compile_metadata=True)` when a consumer needs
 compile health, resolved options, annotation state, statistics, or warning/error
 records. The default payload omits them to keep the normal design JSON compact.
 
-The physical review identity is `physical_page.id` plus a graphical `svg_id`.
-For repeated sheets, the same logical SVG element can represent more than one
-physical component. In that case:
+The review-safe drawing selector is:
 
-1. `indexes.svg_to_component` keeps only unambiguous one-to-one mappings for
-   existing consumers.
-2. `indexes.svg_to_components` maps a logical SVG ID to every physical
-   component designator represented by that source element.
-3. `indexes.physical_svg_to_components` maps
-   `"{physical_page.id}|{svg_id}"` to the physical component designator(s) on
-   that page.
-4. `indexes.component_to_physical_page`,
-   `indexes.physical_page_to_components`, and `indexes.physical_page_to_nets`
-   provide direct page-level navigation.
+```text
+page_occurrence_ref + artifact_key + element_id
+```
 
-For projects without repeated physical sheet instances, the public design JSON
-decays to the historical component/net/SVG shape while still deriving the data
-from the compiled model. For repeated or channelized projects, consumers should
-use `physical_pages` and the physical SVG indexes instead of assuming a single
-logical SVG ID identifies exactly one component.
+Current schematic SVG and IR use `artifact_key == "sch.dwg_scene"`.
+`graphical_artifact_links` maps each scoped selector to a component, terminal,
+local net, hierarchy occurrence, or page target. A bare SVG element id is not
+a realized identity.
 
-Each `physical_pages[]` row is intended to be directly useful to review tools:
+`physical_page_metadata` is the only Altium-specific page projection retained
+at the Design root. Each row is keyed by canonical `page_occurrence_ref` and
+contains only presentation facts:
 
-1. `id`: the compiled physical page id.
-2. `physical_instance_path`: the resolved page path/name used by the compiler.
-3. `source_sheet` / `source_path`: the logical SchDoc rendered for this page.
-4. `components`: page-local resolved component rows with `designator`,
-   `logical_designator`, `physical_designator`, `svg_id`, `dnp`, and `fitted`.
-5. `nets`: page-local compiled nets with terminals, graphical pin/object IDs,
-   aliases, and optional name-source provenance.
+1. physical instance path;
+2. channel index, prefix, and alpha token;
+3. logical and physical room names;
+4. document number.
+
+It does not repeat components or nets. Optional Design indexes retain only
+non-page compatibility lookups such as component-to-net and unambiguous SVG
+component maps; the Design a2 page-derived indexes are retired.
 
 Net records may include `aliases` and `name_sources`. `aliases` are alternate
 net names discovered while merging compiled connectivity. `name_sources`
@@ -140,7 +235,9 @@ need provenance or search over alternate names.
 Variant processing includes DNP/not-fitted handling, project current-variant
 state, variant metadata in design JSON, and per-designator parameter overrides.
 `to_bom(variant=...)` applies parameter overrides to component parameters,
-values, and descriptions while retaining DNP rows with a `dnp` flag.
+values, and descriptions while retaining DNP rows with a `dnp` flag. With
+`use_pcb_data=True`, the base facts come from placed PCB components and the
+cached PCB parameter stream rather than compiled logical components.
 `to_pnp(variant=...)` omits DNP placements for the selected variant.
 Design JSON component rows expose active-variant `dnp` and `fitted` state when
 available. Schematic SVG/IR rendering does not hide, dim, or mutate DNP
@@ -153,7 +250,7 @@ output yet.
 
 The compiled design path resolves hierarchical sheets, repeated channels,
 physical page instances, and annotation-file driven designator mapping for the
-governed release corpus. `.Annotation` files are parsed for compile-relevant
+supported project shapes. `.Annotation` files are parsed for compile-relevant
 physical designator and sheet/document metadata. Annotation `NetNameManager`
 records are preserved as annotation metadata, but are not applied as compiled
 flat-net renames because reference compile evidence does not apply those
@@ -161,7 +258,7 @@ records during schematic compilation.
 
 Use schematic SVG rendering directly when you only need page-level drawings.
 Use `AltiumDesign` when you need project context such as parameters, variants,
-compiled physical pages, resolved designators, or netlist data.
+the compiled schematic graph, resolved designators, or netlist data.
 
 WireList output is removed from the public output path. WireList can lose
 information that exists in the compiled model, especially for repeated sheets,
@@ -169,9 +266,9 @@ long generated names, aliases, name-source provenance, and zero-pin interface
 nets. Use `AltiumDesign.to_json(...)`, `AltiumDesign.compile().to_dict()`, or
 `AltiumDesign.to_netlist().to_json(...)` for programmatic consumers.
 
-Use `design.load_pcbdoc().components` when a PCB-backed BOM should reflect the
-components that are actually placed on the board. The `pcbdoc_bom` example shows
-that pattern.
+Use `design.to_bom(use_pcb_data=True)` when a PCB-backed BOM should reflect the
+components that are actually placed on the board. The `pcbdoc_bom` example
+shows how to build a richer custom PCB component and grouped-BOM projection.
 
 ## Examples
 
@@ -185,5 +282,5 @@ Start with:
 6. [`prjpcb_make_project`](../examples/prjpcb_make_project/README.md)
 
 `hello_altium_design` is the canonical project-design example for this release.
-It writes full `design.a2` JSON, a physical-page summary, compiled net-name
+It writes full Design b0 JSON, a compiled-graph summary, compiled net-name
 examples, and project-aware physical schematic SVGs.

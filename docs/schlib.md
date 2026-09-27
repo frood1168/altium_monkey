@@ -17,6 +17,18 @@ Use it when you need to:
 `AltiumSymbol` uses the same `ObjectCollection` pattern as `AltiumSchDoc`.
 Symbol properties such as `symbol.pins`, `symbol.parameters`,
 `symbol.rectangles`, `symbol.lines`, and `symbol.arcs` are typed query views.
+`AltiumSchLib.symbols`, `AltiumSymbol.objects`, and these typed accessors are
+read-only live views. Use `AltiumSchLib.add_symbol()` / `remove_symbol()` and
+`AltiumSymbol.add_object()` / `remove_object()` for structural changes instead
+of appending to or replacing a returned view.
+
+Rename a library-owned symbol with
+`schlib.rename_symbol(symbol_or_storage_name, storage_name,
+original_name=None)`. String selection is exact and case-sensitive and uses
+the current OLE storage key, not the semantic library reference. Omitting
+`original_name` preserves that semantic reference. The operation validates and
+serializes a candidate before changing live state, moves the complete symbol
+storage subtree, and returns the same owned symbol object.
 
 Add symbol records with `symbol.add_object(...)` or symbol helper methods. Keep
 visual ordering in mind: body graphics should usually be behind pins and text.
@@ -52,6 +64,19 @@ You can also set `schlib.show_comments_designators = True` before saving.
 
 For parsed libraries, prefer `AltiumSchLib.get_symbol(...)` and symbol views
 over scanning raw streams.
+
+## Legacy Auxiliary-Stream Compatibility
+
+`AltiumSchLib` accepts bounded legacy `PinTextData` and embedded-image Storage
+streams that Altium itself imports even when their header termination, row
+names, or declared count is noncanonical. Selected rows are still checked for
+valid framing, compression, and payload shape; unrelated corruption remains an
+error. PinTextData aliases apply in source order, including later default rows
+that clear earlier custom settings. Storage validates and budgets every
+selected row, then retains the first case-insensitive name for image lookup.
+An unchanged PinTextData stream is preserved exactly. A semantic
+PinTextData synchronization writes the current canonical zero-based form and
+does not retain source rows that Altium ignored.
 
 ## Extraction From SchDoc
 
@@ -92,6 +117,12 @@ For the shared reference and JSON contract, see
 schematic pixel-canvas coordinates. Pass
 `SchSvgRenderOptions(include_view_box=False)` to omit only that root attribute
 while keeping the same geometry and symbol rendering path.
+
+Bundled fallback font payloads are omitted by default. Pass
+`SchSvgRenderOptions(embed_bundled_fallback_fonts=True)` for self-contained
+symbol SVGs when package fallbacks are selected. The option embeds only used
+package-owned fallback faces. Bulk `to_svg(output_dir=...)` still writes only
+the requested SVG artifacts; it does not copy font sidecars.
 
 ## Examples
 

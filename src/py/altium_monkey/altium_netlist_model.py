@@ -6,11 +6,45 @@ from collections.abc import Callable, Hashable
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
+
+if TYPE_CHECKING:
+    from .altium_schematic_contract import SchematicContractLimits
 
 
-NETLIST_JSON_SCHEMA = "altium_monkey.netlist.a0"
+NETLIST_JSON_SCHEMA = "altium_monkey.netlist.b0"
 JSON_GENERATOR = "altium_monkey"
+
+
+class AmbiguousNetNameError(LookupError):
+    """A net name or alias identifies more than one net in the netlist.
+
+    Bare source-local names (for example a channel sheet's local label) may
+    remain as scoped provenance aliases on several compiled nets at once.
+    Strict lookup refuses to guess between them and lists the candidate
+    canonical net names for disambiguation.
+    """
+
+    def __init__(self, name: str, candidate_names: list[str]) -> None:
+        self.name = name
+        self.candidate_names = candidate_names
+        joined = ", ".join(candidate_names)
+        super().__init__(f"net name {name!r} is ambiguous; candidates: {joined}")
+
+
+@dataclass(frozen=True, slots=True)
+class NetlistSourcePage:
+    """Correlated physical-page and logical-source identity."""
+
+    physical_document_id: str | None
+    source_sheet_file: str | None
+
+    def __post_init__(self) -> None:
+        if self.physical_document_id == "" or self.source_sheet_file == "":
+            raise ValueError("source-page identities must be non-empty when present")
+        if self.physical_document_id is None and self.source_sheet_file is None:
+            raise ValueError("source page must carry at least one identity")
+
 
 # =============================================================================
 # Hierarchy Path (immutable value type for sheet hierarchy tracking)
@@ -221,6 +255,11 @@ class Terminal:
     pin: str  # Pin designator (e.g., "1", "VCC")
     pin_name: str = ""  # Pin name (e.g., "GPIO5")
     pin_type: PinType = PinType.PASSIVE
+    _source_component_uid: str = field(default="", repr=False)
+    _source_pin_uid: str = field(default="", repr=False)
+    _source_pin_object_id: int = field(default=0, repr=False)
+    _source_owner_part_id: int = field(default=1, repr=False)
+    component_id: str = ""
 
     @property
     def full_name(self) -> str:
@@ -239,6 +278,7 @@ class GraphicalPinRef:
     designator: str  # Component designator (e.g., "R1")
     pin: str  # Pin designator (e.g., "1")
     svg_id: str  # Actual pin unique_id (SVG element ID)
+    component_id: str = ""
 
 
 @dataclass
@@ -264,6 +304,18 @@ class NetEndpoint:
     sheet_index: int | None = None
     compiled_sheet_index: int | None = None
     connection_point: tuple[int, int] | None = None
+    _source_occurrence_id: str = field(default="", repr=False, compare=False)
+    _source_pin_object_id: int = field(default=0, repr=False, compare=False)
+    _bus_signal_index: int | None = field(default=None, repr=False, compare=False)
+    _harness_entries_path: tuple[str, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _repeat_value: int | None = field(default=None, repr=False, compare=False)
+    _harness_type_name: str = field(default="", repr=False, compare=False)
+    _harness_interface_name: str = field(default="", repr=False, compare=False)
+    _harness_type_inferred: bool = field(default=False, repr=False, compare=False)
+    component_id: str = ""
+    source_page: NetlistSourcePage | None = None
 
     def to_json(self) -> dict:
         """
@@ -580,6 +632,30 @@ def _generate_uid() -> str:
     return uuid.uuid4().hex[:12]
 
 
+@dataclass(frozen=True, slots=True)
+class _SignalHarnessNameCandidate:
+    """Internal naming evidence produced by a real signal-harness traversal."""
+
+    value: str
+    value_from_source_object: str
+    source_kind: str
+    source_priority: int
+    source_element_id: str = ""
+    source_connection_link_id: str = ""
+    harness_entries_path: tuple[str, ...] = ()
+    bus_signal_index: int | None = None
+    bus_signal_width: int = 0
+    bus_signal_offset: int = 0
+    bus_signal_prefix: str = ""
+    bus_signal_suffix: str = ""
+    bus_prefix_full_name: str | None = None
+    source_schematic_id: str = ""
+    hierarchy_path: tuple[str, ...] = ()
+    source_is_multipath: bool = False
+    relative_multichannel_depth: int = 0
+    full_name: str = ""
+
+
 @dataclass
 class Net:
     """
@@ -594,15 +670,43 @@ class Net:
     source_sheets: list[str] = field(
         default_factory=list
     )  # Originating SchDoc filename(s)
-    aliases: list[str] = field(
-        default_factory=list
-    )  # Alternate names from cross-sheet merge
+    # Scoped source-name provenance: losing merge labels, harness-entry
+    # names, and bare channel-local names. The same alias may legitimately
+    # repeat on several nets; it is not a unique global lookup namespace.
+    aliases: list[str] = field(default_factory=list)
     hierarchy_paths: list[HierarchyPath] = field(
         default_factory=list
     )  # Hierarchy provenance
     endpoints: list[NetEndpoint] = field(
         default_factory=list
     )  # Source-owned semantic endpoints for trace/layout tools
+    _name_source_kind: str = field(default="", repr=False, compare=False)
+    _name_source_priority: int = field(default=0, repr=False, compare=False)
+    _name_source_raw_name: str = field(default="", repr=False, compare=False)
+    _name_source_bus_prefix: str = field(default="", repr=False, compare=False)
+    _name_source_bus_suffix: str = field(default="", repr=False, compare=False)
+    _name_source_is_bus: bool = field(default=False, repr=False, compare=False)
+    _bus_signal_width: int = field(default=0, repr=False, compare=False)
+    _bus_signal_offset: int = field(default=0, repr=False, compare=False)
+    _source_connection_link_id: str = field(default="", repr=False, compare=False)
+    _contains_bus: bool = field(default=False, repr=False, compare=False)
+    _port_bus_member_names: tuple[str, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _scalar_merge_name_sources: tuple[tuple[str, str], ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _signal_harness_name_candidates: tuple[_SignalHarnessNameCandidate, ...] = field(
+        default=(), repr=False, compare=False
+    )
+    _managed_item_count: int = field(default=0, repr=False, compare=False)
+    _managed_removed_item_count: int = field(default=0, repr=False, compare=False)
+    _managed_first_item_owner: str = field(default="", repr=False, compare=False)
+    _managed_first_item_location: tuple[int, int] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _single_pin_retention_only: bool = field(default=False, repr=False, compare=False)
+    source_pages: list[NetlistSourcePage] = field(default_factory=list)
 
     @property
     def designators(self) -> list[str]:
@@ -650,6 +754,11 @@ class NetlistComponent:
     parameters: dict[str, str] = field(default_factory=dict)
     component_kind: int = 0  # Raw Altium ComponentKind value
     exclude_from_bom: bool = False  # BOM filtering flag derived from component_kind
+    _source_component_uid: str = field(default="", repr=False)
+    component_id: str = ""
+    logical_designator: str | None = None
+    physical_designator: str | None = None
+    source_page: NetlistSourcePage | None = None
 
     @property
     def prefix(self) -> str:
@@ -667,15 +776,17 @@ class PnpEntry:
     """
     Pick-and-place entry for a component.
 
-        Contains position/rotation from PcbDoc merged with parameters
-        from schematic. Used for manufacturing pick-and-place output. By
+        Contains position, rotation, and metadata projected from PcbDoc for
+        manufacturing pick-and-place output. ``AltiumDesign.to_pnp()`` can
+        optionally replace the metadata with compiled schematic facts. By
         default, ``center_x`` and ``center_y`` use the ``altium-pick-place``
-        mode from ``AltiumDesign.to_pnp()``: center of the bounding box of
-        component-owned pad anchor points, with component-origin fallback.
+        mode: center of the bounding box of component-owned pad anchor points,
+        with component-origin fallback.
 
         Attributes:
             designator: Component designator (e.g., "R1", "U1_2")
-            comment: Display value from schematic (e.g., "10k", "LM358")
+            comment: Display value from the selected metadata authority; PCB by
+                default (e.g., "10k", "LM358")
             layer: PCB layer - "top" or "bottom" (normalized)
             footprint: PCB footprint name
             center_x: Selected PnP position X in requested units (mm or mils)
@@ -869,6 +980,7 @@ class Netlist:
     components: list[NetlistComponent] = field(default_factory=list)
     schematic_hierarchy: dict = field(default_factory=dict)
     _net_lookup: dict[str, list[Net]] = field(default_factory=dict, repr=False)
+    _alias_lookup: dict[str, list[Net]] = field(default_factory=dict, repr=False)
     _uid_lookup: dict[str, Net] = field(default_factory=dict, repr=False)
     _component_lookup: dict[str, NetlistComponent] = field(
         default_factory=dict, repr=False
@@ -885,14 +997,28 @@ class Netlist:
         Rebuild lookup dictionaries.
         """
         self._net_lookup = defaultdict(list)
+        self._alias_lookup = defaultdict(list)
         for n in self.nets:
             self._net_lookup[n.name].append(n)
+            for alias in dict.fromkeys(n.aliases):
+                self._alias_lookup[alias].append(n)
         self._uid_lookup = {n.uid: n for n in self.nets}
-        self._component_lookup = {c.designator: c for c in self.components}
+        components_by_designator: dict[str, list[NetlistComponent]] = defaultdict(list)
+        for component in self.components:
+            components_by_designator[component.designator].append(component)
+        self._component_lookup = {
+            designator: rows[0]
+            for designator, rows in components_by_designator.items()
+            if len(rows) == 1
+        }
 
     def get_net(self, name: str) -> Net | None:
         """
-        Get the first net with the given name.
+        Get the first net with the given canonical name.
+
+        Consults canonical names only, and silently picks the first of the
+        documented flat-mode duplicates. Use resolve_net for strict lookup
+        that refuses ambiguity and also admits globally unique aliases.
         """
         nets = self._net_lookup.get(name, [])
         return nets[0] if nets else None
@@ -901,10 +1027,38 @@ class Netlist:
         """
         Get all nets with given name (handles duplicate-named nets).
 
-                In flat mode, same-named net labels on different sheets can produce
-                separate nets with the same name.
+        In flat mode, same-named net labels on different sheets can produce
+        separate nets with the same name.
         """
         return list(self._net_lookup.get(name, []))
+
+    def get_nets_by_alias(self, name: str) -> list[Net]:
+        """
+        Get all nets carrying the given provenance alias, in net order.
+
+        Aliases are scoped source-name provenance (for example the bare
+        local label a channel net was compiled from) and may legitimately
+        repeat across nets, so this query returns every carrier.
+        """
+        return list(self._alias_lookup.get(name, []))
+
+    def resolve_net(self, name: str) -> Net | None:
+        """
+        Resolve a name to exactly one net, or fail explicitly.
+
+        Canonical net names are consulted first; provenance aliases are
+        usable for global lookup only when they identify a single net.
+        Returns None when the name is unknown and raises
+        AmbiguousNetNameError when the name maps to more than one net, so
+        many-net lookup ambiguity is always explicit, never a silent
+        first-match guess.
+        """
+        matches = self._net_lookup.get(name) or self._alias_lookup.get(name) or []
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise AmbiguousNetNameError(name, [net.name for net in matches])
+        return matches[0]
 
     def get_net_by_uid(self, uid: str) -> Net | None:
         """
@@ -933,131 +1087,20 @@ class Netlist:
             return []
         return net.graphical.all_svg_ids()
 
-    def to_json(self) -> dict:
-        """
-        Serialize netlist to JSON-compatible dict.
+    def to_json(self) -> dict[str, object]:
+        """Serialize the canonical current netlist b0 mapping."""
+        from .altium_netlist_contract import netlist_to_mapping
 
-                The resulting payload is the package-owned raw netlist contract.
-                It preserves grouped graphical connectivity metadata without
-                relying on the deprecated WireList serialization.
-        """
-        return {
-            "schema": NETLIST_JSON_SCHEMA,
-            "generator": JSON_GENERATOR,
-            "components": [
-                {
-                    "designator": c.designator,
-                    "value": c.value,
-                    "footprint": c.footprint,
-                    "library_ref": c.library_ref,
-                    "description": c.description,
-                    "parameters": c.parameters,
-                }
-                for c in self.components
-            ],
-            "nets": [
-                {
-                    "uid": n.uid,
-                    "name": n.name,
-                    "auto_named": n.auto_named,
-                    "source_sheets": _unique_sorted_strings(n.source_sheets),
-                    "terminals": _unique_sorted_dicts(
-                        [
-                            {
-                                "designator": t.designator,
-                                "pin": t.pin,
-                                "pin_name": t.pin_name,
-                                "pin_type": t.pin_type.name,
-                            }
-                            for t in n.terminals
-                        ],
-                        _terminal_sort_key,
-                    ),
-                    "graphical": n.graphical.to_json(),
-                    "aliases": _unique_sorted_strings(n.aliases),
-                    "endpoints": _unique_sorted_dicts(
-                        [endpoint.to_json() for endpoint in n.endpoints],
-                        _endpoint_sort_key,
-                    ),
-                    **(
-                        {
-                            "hierarchy_paths": _unique_sorted_json_values(
-                                [
-                                    _hierarchy_path_to_json(hp)
-                                    for hp in n.hierarchy_paths
-                                ]
-                            )
-                        }
-                        if n.hierarchy_paths
-                        else {}
-                    ),
-                }
-                for n in self.nets
-            ],
-        }
+        return netlist_to_mapping(self)
 
-    @staticmethod
-    def _parse_source_sheets(n: dict) -> list[str]:
-        """
-        Parse source_sheets from JSON, accepting the older source_sheet key.
-        """
-        if "source_sheets" in n:
-            return list(n["source_sheets"])
-        old = n.get("source_sheet")
-        return [old] if old else []
+    def to_json_text(self, *, limits: "SchematicContractLimits | None" = None) -> str:
+        """Serialize canonical compact netlist b0 JSON text."""
+        return self.to_json_bytes(limits=limits).decode("utf-8")
 
-    @classmethod
-    def from_json(cls, data: dict) -> "Netlist":
-        """
-        Deserialize a netlist from a JSON-compatible dict.
-        """
-        components = [
-            NetlistComponent(
-                designator=c["designator"],
-                value=c.get("value", ""),
-                footprint=c.get("footprint", ""),
-                library_ref=c.get("library_ref", ""),
-                description=c.get("description", ""),
-                parameters=c.get("parameters", {}),
-            )
-            for c in data.get("components", [])
-        ]
-        nets = []
-        for n in data.get("nets", []):
-            # Parse structured graphical data if present
-            graphical_data = n.get("graphical")
-            graphical = (
-                NetGraphical.from_json(graphical_data)
-                if graphical_data
-                else NetGraphical()
-            )
+    def to_json_bytes(
+        self, *, limits: "SchematicContractLimits | None" = None
+    ) -> bytes:
+        """Serialize canonical compact netlist b0 UTF-8 bytes."""
+        from .altium_netlist_contract import netlist_to_bytes
 
-            hierarchy_paths = [
-                _hierarchy_path_from_json(hp) for hp in n.get("hierarchy_paths", [])
-            ]
-
-            nets.append(
-                Net(
-                    name=n["name"],
-                    uid=n.get("uid", _generate_uid()),
-                    auto_named=n.get("auto_named", False),
-                    source_sheets=cls._parse_source_sheets(n),
-                    terminals=[
-                        Terminal(
-                            designator=t["designator"],
-                            pin=t["pin"],
-                            pin_name=t.get("pin_name", ""),
-                            pin_type=PinType[t.get("pin_type", "PASSIVE")],
-                        )
-                        for t in n.get("terminals", [])
-                    ],
-                    graphical=graphical,
-                    aliases=n.get("aliases", []),
-                    hierarchy_paths=hierarchy_paths,
-                    endpoints=[
-                        NetEndpoint.from_json(endpoint)
-                        for endpoint in n.get("endpoints", [])
-                    ],
-                )
-            )
-        return cls(nets=nets, components=components)
+        return netlist_to_bytes(self, limits=limits)

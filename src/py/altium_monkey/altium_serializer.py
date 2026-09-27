@@ -25,9 +25,11 @@ Architecture:
 from __future__ import annotations
 
 import logging
+import math
+import re
 import struct
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Mapping
 
@@ -58,6 +60,85 @@ BROKEN_BAR_CHAR = "\u00a6"  # U+00A6 - escaped pipe
 # Binary strings use DXP.Utils.EncodingDefault (Windows-1252/ANSI), NOT UTF-8!
 BINARY_STRING_ENCODING = "cp1252"
 
+_ASCII_WHITESPACE = " \t\n\r\v\f"
+_ASCII_INTEGER = re.compile(r"[+-]?[0-9](?:_?[0-9])*")
+_ASCII_FLOAT = re.compile(
+    r"[+-]?(?:(?:[0-9](?:_?[0-9])*)(?:\.(?:[0-9](?:_?[0-9])*)?)?"
+    r"|\.(?:[0-9](?:_?[0-9])*))(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))?"
+)
+_ASCII_NONFINITE = re.compile(r"[+-]?(?:inf(?:inity)?|nan)", re.IGNORECASE)
+_MANAGED_FLOAT_INFINITY = "\u221e"
+_I32_MIN = -(1 << 31)
+_I32_MAX = (1 << 31) - 1
+_I16_MIN = -(1 << 15)
+_I16_MAX = (1 << 15) - 1
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+_U32_MIN = 0
+_U32_MAX = (1 << 32) - 1
+
+
+def _parse_ascii_integer(value: object, minimum: int, maximum: int) -> int:
+    """Parse the reviewed portable decimal grammar within a signed width."""
+    if isinstance(value, bool):
+        raise ValueError("boolean is not an integer field value")
+    text = str(value).strip(_ASCII_WHITESPACE)
+    if _ASCII_INTEGER.fullmatch(text) is None:
+        raise ValueError("expected an ASCII decimal integer")
+    parsed = int(text.replace("_", ""), 10)
+    if not minimum <= parsed <= maximum:
+        raise ValueError(f"integer is outside [{minimum}, {maximum}]")
+    return parsed
+
+
+def _parse_ascii_float(value: object, *, single: bool) -> float:
+    """Parse the reviewed portable real grammar and optionally quantize to f32."""
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a real field value")
+    text = str(value).strip(_ASCII_WHITESPACE)
+    if single and text in {_MANAGED_FLOAT_INFINITY, f"-{_MANAGED_FLOAT_INFINITY}"}:
+        return math.inf if text == _MANAGED_FLOAT_INFINITY else -math.inf
+    explicit_nonfinite = _ASCII_NONFINITE.fullmatch(text) is not None
+    if _ASCII_FLOAT.fullmatch(text) is None and not explicit_nonfinite:
+        raise ValueError("expected an ASCII floating-point value")
+    parsed = float(text.replace("_", ""))
+    if not explicit_nonfinite and not math.isfinite(parsed):
+        raise ValueError("value is outside the IEEE floating-point range")
+    if not single:
+        return parsed
+    try:
+        return struct.unpack("<f", struct.pack("<f", parsed))[0]
+    except OverflowError as error:
+        raise ValueError("value is outside the IEEE f32 range") from error
+
+
+def _require_integer_width(value: int, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("integer field value must be an int")
+    if not minimum <= value <= maximum:
+        raise ValueError(f"integer is outside [{minimum}, {maximum}]")
+    return value
+
+
+def require_color_wire_value(value: int | None) -> int:
+    """Return a managed Param UInt32 color value or raise ``ValueError``."""
+    return _require_integer_width(value or 0, _U32_MIN, _U32_MAX)
+
+
+def require_coordinate_wire_parts(
+    whole: int, fraction: int, field: str
+) -> tuple[int, int]:
+    """Validate one Param coordinate's signed 16/32-bit wire parts."""
+    try:
+        checked_whole = _require_integer_width(whole, _I16_MIN, _I16_MAX)
+    except (TypeError, ValueError) as error:
+        raise type(error)(f"{field}: {error}") from error
+    try:
+        checked_fraction = _require_integer_width(fraction, _I32_MIN, _I32_MAX)
+    except (TypeError, ValueError) as error:
+        raise type(error)(f"{field}_Frac: {error}") from error
+    return checked_whole, checked_fraction
+
 
 def real_num_equal(r1: float, r2: float) -> bool:
     """
@@ -73,6 +154,47 @@ def real_num_equal(r1: float, r2: float) -> bool:
         True if values are within DOUBLE_TOLERANCE of each other
     """
     return abs(r1 - r2) < DOUBLE_TOLERANCE
+
+
+def format_param_n3(value: float) -> str:
+    """Format a V5 Param real with the managed invariant ``N3`` contract."""
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
+    return f"{value:,.3f}"
+
+
+def _format_param_float(value: float) -> str:
+    """Format a managed Single so its own Param reader accepts the output."""
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return _MANAGED_FLOAT_INFINITY if value > 0 else f"-{_MANAGED_FLOAT_INFINITY}"
+    return str(value)
+
+
+def _format_param_double(value: float) -> str:
+    """Format a managed Double so its own Param reader accepts the output."""
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
+    return str(value)
+
+
+def read_coord_binary(data: bytes, offset: int = 0) -> tuple[int, int]:
+    """Read a signed 16-bit whole-mil coordinate into internal units."""
+    whole_mils, new_offset = read_short_binary(data, offset)
+    return whole_mils * 100_000, new_offset
+
+
+def write_coord_binary(value: int) -> bytes:
+    """Write an internal-unit coordinate as signed 16-bit whole mils."""
+    whole_mils = abs(value) // 100_000
+    if value < 0:
+        whole_mils = -whole_mils
+    return write_short_binary(whole_mils)
 
 
 # =============================================================================
@@ -234,46 +356,81 @@ def read_dynamic_string_field(
     if utf8_value is not None:
         return process_mbcs_string(str(utf8_value)), True, True
 
-    value, present = serializer.read_str(record, field_def, default=default)
+    # record_view mirrors record case-insensitively, so the fallback read goes
+    # through the indexed view instead of scanning the plain record dict.
+    value, present = serializer.read_str(record_view, field_def, default=default)
     return process_mbcs_string(value), present, False
 
 
 def write_dynamic_string_field(
     serializer: "AltiumSerializer",
-    record: dict,
+    record: dict[str, object],
     field: FieldDef | str,
     value: str,
     *,
-    raw_record: dict | None,
+    raw_record: dict[str, object] | None,
     used_utf8_sidecar: bool,
     was_present: bool,
+    force: bool = False,
 ) -> None:
     """
     Write a dynamic-string field using the Altium `%UTF8%` sidecar contract.
 
-    When `used_utf8_sidecar` is true, preserve the legacy ANSI fallback field as-is
-    and update only the UTF-8 sidecar, adding the PascalCase alias when the raw
-    file used the uppercase `%UTF8%FIELD` form.
+    When `used_utf8_sidecar` is true, preserve the legacy ANSI fallback field and
+    update the actual case-insensitive sidecar key found in the source record.
     """
     field_def = serializer._get_field_def(field)
     utf8_pascal = f"%UTF8%{field_def.pascal}"
-    utf8_upper = utf8_pascal.upper()
+    matching_field_keys = _matching_case_insensitive_keys(record, field_def.pascal)
+    matching_utf8_keys = _matching_case_insensitive_keys(record, utf8_pascal)
+
+    if not value:
+        _remove_keys(record, (*matching_field_keys, *matching_utf8_keys))
+        return
 
     if used_utf8_sidecar:
-        raw_uses_upper_utf8 = raw_record is not None and utf8_upper in raw_record
-        if raw_uses_upper_utf8:
-            record[utf8_upper] = value
-        else:
-            record.pop(utf8_upper, None)
-        record[utf8_pascal] = value
+        _write_existing_dynamic_sidecar(record, matching_utf8_keys, utf8_pascal, value)
         return
 
     if was_present or value:
-        serializer.write_str(record, field_def, value, raw_record)
+        serializer.write_str(record, field_def, value, raw_record, force=force)
     else:
         serializer.remove_field(record, field_def)
-    record.pop(utf8_pascal, None)
-    record.pop(utf8_upper, None)
+    for key in matching_utf8_keys:
+        record.pop(key)
+
+
+def _matching_case_insensitive_keys(
+    record: Mapping[str, object], field: str
+) -> tuple[str, ...]:
+    normalized = field.casefold()
+    return tuple(key for key in record if key.casefold() == normalized)
+
+
+def _remove_keys(record: dict[str, object], keys: tuple[str, ...]) -> None:
+    for key in keys:
+        record.pop(key)
+
+
+def _remove_dynamic_string_field(record: dict[str, object], field: str) -> None:
+    ordinary = field.casefold()
+    utf8 = f"%utf8%{ordinary}"
+    for key in tuple(record):
+        if key.casefold() in (ordinary, utf8):
+            record.pop(key)
+
+
+def _write_existing_dynamic_sidecar(
+    record: dict[str, object],
+    matching_keys: tuple[str, ...],
+    default_key: str,
+    value: str,
+) -> None:
+    output_key = matching_keys[0] if matching_keys else default_key
+    for key in matching_keys:
+        if key != output_key:
+            record.pop(key)
+    record[output_key] = value
 
 
 # =============================================================================
@@ -597,6 +754,14 @@ class FieldDef:
     canonical: str
     pascal: str
     upper: str
+    _canonical_lower: str = dataclass_field(init=False, repr=False, compare=False)
+    _upper_lower: str = dataclass_field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        # Precomputed for the case-insensitive lookups in find_in_record,
+        # which runs once per field read on the parse hot path.
+        object.__setattr__(self, "_canonical_lower", self.canonical.lower())
+        object.__setattr__(self, "_upper_lower", self.upper.lower())
 
     @classmethod
     def simple(cls, pascal: str) -> FieldDef:
@@ -620,22 +785,88 @@ class FieldDef:
         """
         return self.pascal if mode == CaseMode.PASCALCASE else self.upper
 
-    def find_in_record(self, record: dict) -> tuple[str, bool]:
+    def find_in_record(self, record: Mapping[str, object]) -> tuple[str, bool]:
         """
         Find this field in a record (case-insensitive).
 
         Returns:
             (found_key, exists) - the key that was found and whether it exists
         """
-        for key in [self.pascal, self.upper, self.canonical]:
-            if key in record:
-                return key, True
+        # Case-insensitive record dicts index every key by its lowercase
+        # form, so presence resolves in O(1) instead of scanning the keys.
+        # canonical always equals pascal, so two lookups cover all variants
+        # and the containment answers below stay identical.
+        lower_map = getattr(record, "_lower_map", None)
+        if lower_map is not None:
+            if self._canonical_lower in lower_map:
+                return self.pascal, True
+            if self._upper_lower in lower_map:
+                return self.upper, True
+            return self.pascal, False
+        if self.pascal in record:
+            return self.pascal, True
+        if self.upper in record:
+            return self.upper, True
+        if self.canonical in record:
+            return self.canonical, True
         # Check case-insensitive
-        lower = self.canonical.lower()
+        lower = self._canonical_lower
         for key in record:
             if key.lower() == lower:
                 return key, True
         return self.pascal, False
+
+    def find_value_in_record(
+        self, record: Mapping[str, object]
+    ) -> tuple[object | None, bool]:
+        """
+        Find this field's value in a record (case-insensitive).
+
+        Returns:
+            (value, exists) - the stored value (None when absent) and whether
+            the field exists. Callers must branch on the flag, not the value.
+        """
+        # Case-insensitive record dicts map each lowercase name to its stored
+        # key, so one indexed fetch replaces the resolve-key-then-getitem
+        # double lookup (whose __getitem__ lowercases the key a second time).
+        lower_map = getattr(record, "_lower_map", None)
+        if lower_map is not None and isinstance(record, dict):
+            actual = lower_map.get(self._canonical_lower)
+            if actual is None:
+                actual = lower_map.get(self._upper_lower)
+                if actual is None:
+                    return None, False
+            # The stored key indexes the plain-dict storage directly, so the
+            # base fetch skips the case-insensitive __getitem__ override.
+            return dict.__getitem__(record, actual), True
+        key, exists = self.find_in_record(record)
+        if not exists:
+            return None, False
+        return record[key], True
+
+
+# FieldDef instances are immutable, and the field-name vocabulary is fixed by
+# the record formats, so per-name definitions are shared instead of rebuilt on
+# every read call.
+_SIMPLE_FIELD_DEF_CACHE: dict[str, FieldDef] = {}
+_DOTTED_FIELD_DEF_CACHE: dict[tuple[str, str], FieldDef] = {}
+
+
+def _simple_field_def(name: str) -> FieldDef:
+    definition = _SIMPLE_FIELD_DEF_CACHE.get(name)
+    if definition is None:
+        definition = FieldDef.simple(name)
+        _SIMPLE_FIELD_DEF_CACHE[name] = definition
+    return definition
+
+
+def _dotted_field_def(base: str, suffix: str) -> FieldDef:
+    key = (base, suffix)
+    definition = _DOTTED_FIELD_DEF_CACHE.get(key)
+    if definition is None:
+        definition = FieldDef.dotted(base, suffix)
+        _DOTTED_FIELD_DEF_CACHE[key] = definition
+    return definition
 
 
 # =============================================================================
@@ -780,6 +1011,7 @@ class Fields:
     TEXT_STYLE = FieldDef.simple("TextStyle")
     SIDE = FieldDef.simple("Side")
     DISTANCE_FROM_TOP = FieldDef.simple("DistanceFromTop")
+    DISTANCE_FROM_TOP_FRAC = FieldDef.simple("DistanceFromTop_Frac")
     DISTANCE_FROM_TOP_FRAC1 = FieldDef.simple("DistanceFromTop_Frac1")
     OWNER_INDEX_ADDITIONAL_LIST = FieldDef.simple("OwnerIndexAdditionalList")
     NOT_AUTO_POSITION = FieldDef.simple("NotAutoPosition")
@@ -856,6 +1088,15 @@ class Fields:
 # =============================================================================
 
 
+def _read_param_boolean(record: Mapping[str, object], field: FieldDef | str) -> bool:
+    """Read exact text Param booleans, retaining typed programmatic inputs."""
+    definition = _simple_field_def(field) if isinstance(field, str) else field
+    value, _ = definition.find_value_in_record(record)
+    if isinstance(value, (bool, int)):
+        return bool(value)
+    return isinstance(value, str) and value == "T"
+
+
 class AltiumSerializer:
     """
     Central serializer for Altium record fields.
@@ -901,17 +1142,27 @@ class AltiumSerializer:
             (value, was_present) - the value and whether field was in record
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
+        if not exists:
+            return default, False
+        try:
+            return _parse_ascii_integer(value, _I32_MIN, _I32_MAX), True
+        except (ValueError, TypeError):
+            log.warning(f"Invalid int value for {field_def.canonical}: {value}")
+            return default, True
 
-        if exists:
-            try:
-                return int(record[key]), True
-            except (ValueError, TypeError):
-                log.warning(
-                    f"Invalid int value for {field_def.canonical}: {record[key]}"
-                )
-                return default, True
-        return default, False
+    def _read_int_checked(
+        self, record: dict[str, object], field: FieldDef | str, default: int = 0
+    ) -> tuple[int, bool]:
+        """Read a signed i32 and raise for malformed or out-of-range input."""
+        field_def = self._get_field_def(field)
+        value, exists = field_def.find_value_in_record(record)
+        if not exists:
+            return default, False
+        try:
+            return _parse_ascii_integer(value, _I32_MIN, _I32_MAX), True
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{field_def.canonical}: {error}") from error
 
     def read_bool(
         self, record: dict, field: FieldDef | str, default: bool = False
@@ -930,10 +1181,9 @@ class AltiumSerializer:
             (value, was_present) - the value and whether field was in record
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
 
         if exists:
-            value = record[key]
             if isinstance(value, bool):
                 return value, True
             if isinstance(value, str):
@@ -944,7 +1194,7 @@ class AltiumSerializer:
         return default, False
 
     def read_str(
-        self, record: dict, field: FieldDef | str, default: str = ""
+        self, record: Mapping[str, object], field: FieldDef | str, default: str = ""
     ) -> tuple[str, bool]:
         """
         Read string field from record.
@@ -958,10 +1208,10 @@ class AltiumSerializer:
             (value, was_present) - the value and whether field was in record
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
 
         if exists:
-            return str(record[key]), True
+            return str(value), True
         return default, False
 
     def read_color(
@@ -981,11 +1231,11 @@ class AltiumSerializer:
             (value, was_present) - the color int and whether field was in record
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
 
         if exists:
             try:
-                return int(record[key]), True
+                return _parse_ascii_integer(value, _U32_MIN, _U32_MAX), True
             except (ValueError, TypeError):
                 return default, True
         return default, False
@@ -1006,16 +1256,50 @@ class AltiumSerializer:
             (value, frac, was_present) - integer part, fractional part, and presence
         """
         if prefix:
-            field_def = FieldDef.dotted(base, prefix)
-            frac_def = FieldDef.dotted(base, f"{prefix}_Frac")
+            field_def = _dotted_field_def(base, prefix)
+            frac_def = _dotted_field_def(base, f"{prefix}_Frac")
         else:
-            field_def = FieldDef.simple(base)
-            frac_def = FieldDef.simple(f"{base}_Frac")
+            field_def = _simple_field_def(base)
+            frac_def = _simple_field_def(f"{base}_Frac")
 
         value, present = self.read_int(record, field_def, default=0)
+        if not _I16_MIN <= value <= _I16_MAX:
+            log.warning(
+                "Invalid coord whole value for %s: %s",
+                field_def.canonical,
+                value,
+            )
+            value = 0
         frac, _ = self.read_int(record, frac_def, default=0)
 
         return value, frac, present
+
+    def coordinate_has_invalid_wire_value(
+        self, record: dict[str, object], base: str, prefix: str = ""
+    ) -> bool:
+        """Return whether a present coordinate part violates its Param width."""
+        if prefix:
+            whole = FieldDef.dotted(base, prefix)
+            fraction = FieldDef.dotted(base, f"{prefix}_Frac")
+        else:
+            whole = FieldDef.simple(base)
+            fraction = FieldDef.simple(f"{base}_Frac")
+        return self._field_violates_width(record, whole, _I16_MIN, _I16_MAX) or (
+            self._field_violates_width(record, fraction, _I32_MIN, _I32_MAX)
+        )
+
+    @staticmethod
+    def _field_violates_width(
+        record: dict[str, object], field: FieldDef, minimum: int, maximum: int
+    ) -> bool:
+        value, present = field.find_value_in_record(record)
+        if not present:
+            return False
+        try:
+            _parse_ascii_integer(value, minimum, maximum)
+        except (TypeError, ValueError):
+            return True
+        return False
 
     def write_coord(
         self,
@@ -1026,6 +1310,7 @@ class AltiumSerializer:
         frac: int = 0,
         raw_record: dict | None = None,
         skip_if_zero: bool = False,
+        force: bool = False,
     ) -> None:
         """
         Write coordinate with fractional part.
@@ -1038,20 +1323,23 @@ class AltiumSerializer:
             frac: Fractional part (default 0)
             raw_record: Original raw record for round-trip
             skip_if_zero: If True, skip writing if value and frac are both 0
+            force: If True, add whole and fractional fields missing from raw_record
         """
         if skip_if_zero and value == 0 and frac == 0:
             return
 
         if prefix:
-            field_def = FieldDef.dotted(base, prefix)
-            frac_def = FieldDef.dotted(base, f"{prefix}_Frac")
+            field_def = _dotted_field_def(base, prefix)
+            frac_def = _dotted_field_def(base, f"{prefix}_Frac")
         else:
-            field_def = FieldDef.simple(base)
-            frac_def = FieldDef.simple(f"{base}_Frac")
-        self.write_int(record, field_def, value, raw_record)
+            field_def = _simple_field_def(base)
+            frac_def = _simple_field_def(f"{base}_Frac")
+        value, frac = require_coordinate_wire_parts(value, frac, field_def.canonical)
+        if value != 0:
+            self.write_int(record, field_def, value, raw_record, force=force)
 
         if frac != 0:
-            self.write_int(record, frac_def, frac, raw_record)
+            self.write_int(record, frac_def, frac, raw_record, force=force)
 
     def read_font_id(
         self,
@@ -1076,9 +1364,15 @@ class AltiumSerializer:
             (internal_font_id, was_present)
         """
         field_def = self._get_field_def(field)
-        raw_id, exists = self.read_int(record, field_def, default)
+        value, exists = field_def.find_value_in_record(record)
+        if not exists:
+            return default, False
+        try:
+            raw_id = _parse_ascii_integer(value, _I16_MIN, _I16_MAX)
+        except (TypeError, ValueError):
+            return default, True
 
-        if font_manager and exists:
+        if font_manager:
             # Apply in_translator if available
             internal_id = font_manager.translate_in(raw_id)
             return internal_id, True
@@ -1111,6 +1405,7 @@ class AltiumSerializer:
             default: Default value for skip_if_default check
             force: If True, add field even when missing from raw_record
         """
+        value = _require_integer_width(value, _I32_MIN, _I32_MAX)
         if skip_if_default and value == default:
             return
 
@@ -1195,8 +1490,7 @@ class AltiumSerializer:
         """
         if skip_if_none and value is None:
             return
-        if value is None:
-            value = 0
+        value = require_color_wire_value(value)
 
         field_def = self._get_field_def(field)
         self._write_field(record, field_def, str(value), raw_record, force=force)
@@ -1227,6 +1521,7 @@ class AltiumSerializer:
             file_id = font_manager.translate_out(internal_id)
         else:
             file_id = internal_id
+        file_id = _require_integer_width(file_id, _I16_MIN, _I16_MAX)
 
         field_def = self._get_field_def(field)
         self._write_field(record, field_def, str(file_id), raw_record)
@@ -1252,15 +1547,13 @@ class AltiumSerializer:
         Implementation note: serializer parameter implementation ReadFloat
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
 
         if exists:
             try:
-                return float(record[key]), True
+                return _parse_ascii_float(value, single=True), True
             except (ValueError, TypeError):
-                log.warning(
-                    f"Invalid float value for {field_def.canonical}: {record[key]}"
-                )
+                log.warning(f"Invalid float value for {field_def.canonical}: {value}")
                 return default, True
         return default, False
 
@@ -1280,18 +1573,18 @@ class AltiumSerializer:
         Returns:
             (value, was_present) - the value and whether field was in record
 
-        Implementation note: serializer parameter implementation ReadDouble, StrUtils.TryParseExponent
+        The binary-field reader accepts only restricted decimal syntax, while
+        the ASCII-field reader accepts exponent notation. This public helper
+        deliberately follows the broader ASCII syntax.
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
 
         if exists:
             try:
-                return float(record[key]), True
+                return _parse_ascii_float(value, single=False), True
             except (ValueError, TypeError):
-                log.warning(
-                    f"Invalid double value for {field_def.canonical}: {record[key]}"
-                )
+                log.warning(f"Invalid double value for {field_def.canonical}: {value}")
                 return default, True
         return default, False
 
@@ -1312,15 +1605,13 @@ class AltiumSerializer:
         Implementation note: serializer parameter implementation ReadLong
         """
         field_def = self._get_field_def(field)
-        key, exists = field_def.find_in_record(record)
+        value, exists = field_def.find_value_in_record(record)
 
         if exists:
             try:
-                return int(record[key]), True
+                return _parse_ascii_integer(value, _I64_MIN, _I64_MAX), True
             except (ValueError, TypeError):
-                log.warning(
-                    f"Invalid long value for {field_def.canonical}: {record[key]}"
-                )
+                log.warning(f"Invalid long value for {field_def.canonical}: {value}")
                 return default, True
         return default, False
 
@@ -1344,11 +1635,12 @@ class AltiumSerializer:
 
         Implementation note: serializer parameter implementation WriteFloat
         """
+        value = _parse_ascii_float(value, single=True)
         if skip_if_zero and value == 0.0:
             return
 
         field_def = self._get_field_def(field)
-        self._write_field(record, field_def, str(value), raw_record)
+        self._write_field(record, field_def, _format_param_float(value), raw_record)
 
     def write_double(
         self,
@@ -1374,14 +1666,15 @@ class AltiumSerializer:
 
         Implementation note: serializer parameter implementation WriteDouble, DoubleToString uses "N3" format
         """
+        value = _parse_ascii_float(value, single=False)
         if skip_if_zero and real_num_equal(0.0, value):
             return
 
         field_def = self._get_field_def(field)
         if format_n3:
-            str_value = f"{value:.3f}"
+            str_value = format_param_n3(value)
         else:
-            str_value = str(value)
+            str_value = _format_param_double(value)
         self._write_field(record, field_def, str_value, raw_record)
 
     def write_long(
@@ -1406,6 +1699,7 @@ class AltiumSerializer:
 
         Implementation note: serializer parameter implementation WriteLong
         """
+        value = _require_integer_width(value, _I64_MIN, _I64_MAX)
         if skip_if_default and value == default:
             return
 
@@ -1422,7 +1716,7 @@ class AltiumSerializer:
         """
         if isinstance(field, FieldDef):
             return field
-        return FieldDef.simple(field)
+        return _simple_field_def(field)
 
     def _write_field(
         self,
@@ -1471,8 +1765,10 @@ class AltiumSerializer:
             field: Field definition or canonical name
         """
         field_def = self._get_field_def(field)
-        for key in [field_def.pascal, field_def.upper, field_def.canonical]:
-            record.pop(key, None)
+        normalized = field_def.canonical.casefold()
+        for key in tuple(record):
+            if str(key).casefold() == normalized:
+                record.pop(key)
 
 
 # =============================================================================

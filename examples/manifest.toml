@@ -1364,10 +1364,11 @@ assets = []
 outputs = [
   "hello_altium_design/output/project_summary.json",
   "hello_altium_design/output/altium_design.json",
-  "hello_altium_design/output/physical_pages_summary.json",
+  "hello_altium_design/output/compiled_schematic_graph_summary.json",
   "hello_altium_design/output/physical_svg_manifest.json",
   "hello_altium_design/output/physical_svgs/",
   "hello_altium_design/output/netlist.json",
+  "hello_altium_design/output/schematic_bom.json",
   "hello_altium_design/output/compiled_net_name_examples.json",
   "hello_altium_design/output/bom_all.json",
   "hello_altium_design/output/variant_boms/",
@@ -1800,7 +1801,7 @@ tags = ["schlib", "symbol", "split"]
 [[examples]]
 id = "schlib_merge"
 title = "Merge SchLib files"
-summary = "Scan a folder of SchLib files, merge all symbols into one combined SchLib, and write a merge manifest."
+summary = "Scan a folder of SchLib files, merge fully parseable symbols, and report any skipped legacy libraries in the manifest."
 areas = ["schlib"]
 status = "ready"
 entrypoint = "schlib_merge/schlib_merge.py"
@@ -1831,6 +1832,34 @@ outputs = [
 ]
 requires_extra = []
 tags = ["intlib", "library", "source-extraction", "schlib", "pcblib"]
+
+[[examples]]
+id = "intlib_create_from_libraries"
+title = "Create multi-source and aggregate IntLibs"
+summary = "Build the same realistic seven-component IC, protection, and resistor subset from ordered source libraries and from merged aggregate libraries, then verify graph equivalence, exact embedded sources, warnings, and deterministic output."
+areas = ["intlib", "schlib", "pcblib"]
+status = "ready"
+entrypoint = "intlib_create_from_libraries/intlib_create_from_libraries.py"
+doc = "intlib_create_from_libraries/README.md"
+inputs = [
+  "assets/schlib/MIMXRT685SFVKB.Schlib",
+  "assets/schlib/24LC32AT.SchLib",
+  "assets/schlib/MX25R6435FZNIL0.Schlib",
+  "assets/schlib/SM712-02HTG.Schlib",
+  "assets/schlib/R_2P.Schlib",
+  "assets/pcblib/RT_SUPER_C1.PcbLib",
+  "assets/pcblib/R0603_0.55MM_MD.PcbLib",
+]
+assets = []
+outputs = [
+  "intlib_create_from_libraries/output/ic-subset-multi-source.IntLib",
+  "intlib_create_from_libraries/output/ic-subset-aggregate.IntLib",
+  "intlib_create_from_libraries/output/prepared/multi_source/",
+  "intlib_create_from_libraries/output/prepared/aggregate/",
+  "intlib_create_from_libraries/output/intlib_create_manifest.json",
+]
+requires_extra = []
+tags = ["intlib", "library", "generation", "multi-source", "aggregate", "schlib", "pcblib", "shared-footprint", "alternate-footprint"]
 
 [[examples]]
 id = "embedded_asset_inventory"

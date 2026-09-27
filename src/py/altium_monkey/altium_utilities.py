@@ -4,11 +4,16 @@ Internal helpers for low-level Altium OLE stream parsing and serialization.
 
 import logging
 import struct
-import zlib
+from collections.abc import Mapping
 from typing import Any
 
 from .altium_ole import AltiumOleFile
 from .altium_record_types import is_text_record as is_text_record
+from .altium_sch_auxiliary_codec import (
+    decode_auxiliary_stream,
+    encode_auxiliary_stream,
+)
+from .altium_text_codec import decode_altium_ansi, encode_altium_ansi_lossy
 
 log = logging.getLogger(__name__)
 
@@ -16,6 +21,45 @@ log = logging.getLogger(__name__)
 def as_dynamic(value: Any) -> Any:
     """Pass a value through `Any` for runtime-only metadata assignments."""
     return value
+
+
+def _validated_record_header(
+    data: bytes, pos: int, section: str | list[str]
+) -> tuple[bytes, int, bool]:
+    if pos + 4 > len(data):
+        raise ValueError(
+            f"truncated record-length prefix in section {section!r} at offset {pos}"
+        )
+    length_bytes = data[pos : pos + 4]
+    actual_length = int.from_bytes(length_bytes[:3], byteorder="little")
+    is_binary = length_bytes[3] != 0
+    if actual_length == 0 and not is_binary:
+        raise ValueError(
+            f"zero-length text record in section {section!r} at offset {pos}"
+        )
+    return length_bytes, actual_length, is_binary
+
+
+def _validated_record_end(
+    data: bytes, payload_pos: int, actual_length: int, section: str | list[str]
+) -> int:
+    record_end = payload_pos + actual_length
+    if record_end > len(data):
+        raise ValueError(
+            f"truncated record payload in section {section!r} at "
+            f"offset {payload_pos - 4}: expected {actual_length} bytes, "
+            f"found {len(data) - payload_pos}"
+        )
+    return record_end
+
+
+def _require_text_record_terminator(
+    data: bytes, record_end: int, record_offset: int, section: str | list[str]
+) -> None:
+    if data[record_end - 1] != 0:
+        raise ValueError(
+            f"unterminated text record in section {section!r} at offset {record_offset}"
+        )
 
 
 # =============================================================================
@@ -44,6 +88,8 @@ def get_records_in_section(
 
     Raises:
         IOError: If the section cannot be opened or read.
+        ValueError: If record framing is truncated, a text record is
+            zero-length, or a required text-record terminator is missing.
 
     Note:
         - Records are length-prefixed with 4-byte little-endian integers
@@ -60,23 +106,12 @@ def get_records_in_section(
     records = []
 
     while pos < len(data):
-        # Read 4-byte length
-        if pos + 4 > len(data):
-            break
-
-        length_bytes = data[pos : pos + 4]
-        int.from_bytes(length_bytes, byteorder="little")
-
-        # Check if this is a binary record (highest byte non-zero)
-        is_binary = length_bytes[3] != 0
-
-        actual_length = int.from_bytes(length_bytes[:3], byteorder="little")
-
+        record_offset = pos
+        length_bytes, actual_length, is_binary = _validated_record_header(
+            data, pos, section
+        )
         pos += 4
-
-        # Read the record
-        if pos + actual_length > len(data):
-            break
+        record_end = _validated_record_end(data, pos, actual_length, section)
 
         if is_binary:
             # Store binary record as-is with metadata
@@ -107,9 +142,8 @@ def get_records_in_section(
             pos += actual_length
         else:
             # Process text record as before
-            record = data[pos : pos + actual_length - 1]
-            if data[pos + actual_length - 1] != 0:
-                log.error("record not terminated")
+            _require_text_record_terminator(data, record_end, record_offset, section)
+            record = data[pos : record_end - 1]
 
             pos += actual_length
 
@@ -118,8 +152,15 @@ def get_records_in_section(
                 result = {}
                 empty_pair_cnt = 0
 
-                for pair in parse_byte_record(record):
-                    pair = decode_byte_array(pair)
+                for pair_index, raw_pair in enumerate(parse_byte_record(record)):
+                    field_name = raw_pair.partition(b"=")[0].decode(
+                        "ascii", errors="replace"
+                    )
+                    context = (
+                        f"section {section!r}, record {len(records)}, "
+                        f"pair {pair_index}, field {field_name!r}"
+                    )
+                    pair = decode_byte_array(raw_pair, context=context)
 
                     try:
                         if "=" in pair:
@@ -147,12 +188,18 @@ def get_records_in_section(
     return records
 
 
-def create_stream_from_records(records: list[dict[str, Any]]) -> bytes:
+def create_stream_from_records(
+    records: list[dict[str, Any]], *, utf8_sidecars: bool = True
+) -> bytes:
     """
     Serialize parsed record dictionaries back into Altium stream bytes.
 
     Args:
         records: Parsed text or binary record dictionaries.
+        utf8_sidecars: When True (schematic convention), non-ASCII values
+            receive an auto-synthesized "%UTF8%<KEY>" sidecar pair. PCB
+            streams use "UNICODE__<FIELD>" sidebands instead and must pass
+            False so no schematic-style sidecars leak into PCB records.
 
     Returns:
         Length-prefixed Altium stream data.
@@ -161,7 +208,7 @@ def create_stream_from_records(records: list[dict[str, Any]]) -> bytes:
         - Text records are serialized as "|key=value|key=value..." format
         - Binary records with '__BINARY_DATA__' preserve original data exactly
         - Binary records with '__SUBRECORDS__' are re-serialized from parsed SubRecords
-        - Text encoding uses UTF-8 for keys with "%UTF8%" prefix, cp1252 otherwise
+        - Non-ASCII values receive a UTF-8 sidecar plus a cp1252-safe fallback
         - UNHANDLED keys (malformed pairs) are serialized without key=value format
         - Each record is prefixed with a 4-byte little-endian length field
         - Text records are null-terminated; binary records use original format
@@ -209,29 +256,15 @@ def create_stream_from_records(records: list[dict[str, Any]]) -> bytes:
                 stream_data.extend(binary_data)
 
         else:
-            # Handle text record
-            # Convert dictionary to "|key=value|key=value|key=value" format
-            pairs = []
-            for key, value in record.items():
-                # Skip our special binary record keys
-                if key.startswith("__") and key.endswith("__"):
-                    continue
-
-                if "UNHANDLED" in key:
-                    pairs.append("|".encode("cp1252"))
-                else:
-                    if "%UTF8%" in key:
-                        pairs.append(f"|{key}={value}".encode())
-                    else:
-                        # For non-UTF8 keys, handle Unicode characters gracefully
-                        try:
-                            pairs.append(f"|{key}={value}".encode("cp1252"))
-                        except UnicodeEncodeError:
-                            # Fall back to UTF-8 for Unicode characters
-                            pairs.append(f"|{key}={value}".encode())
-
-            # Join all pairs (each already starts with |)
-            record_bytes = b"".join(pairs)
+            # Handle text record. Altium emits a UTF-8 sidecar followed by an
+            # ACP-safe fallback whenever a value contains non-ASCII text.
+            record_bytes = b"".join(
+                _encode_altium_text_pairs(
+                    record,
+                    skip_private_keys=False,
+                    utf8_sidecars=utf8_sidecars,
+                )
+            )
 
             # Encode to UTF-8
             # record_bytes = record_string.encode('utf-8')
@@ -287,111 +320,14 @@ def parse_storage_stream(
         return {}
 
     storage_data = ole.openstream("Storage")
+    entries = decode_auxiliary_stream(storage_data, expected_header="Icon storage")
+    images = {entry.name: entry.data for entry in entries}
     if debug:
-        log.info(f"DEBUG: Storage stream size: {len(storage_data)} bytes")
-
-    images = {}
-    cursor = 0
-
-    # Skip header record (length-prefixed text)
-    if len(storage_data) < 4:
-        if debug:
-            log.info("DEBUG: Storage stream too small")
-        return {}
-
-    header_len = struct.unpack("<I", storage_data[cursor : cursor + 4])[0]
-    if debug:
-        log.info(f"DEBUG: Header length: {header_len}")
-    cursor += 4 + header_len
-    if debug:
-        log.info(f"DEBUG: After header, cursor at: {cursor}")
-        # Show next 64 bytes
-        next_bytes = storage_data[cursor : cursor + 64]
-        hex_str = " ".join(f"{b:02X}" for b in next_bytes[:32])
-        log.info(f"DEBUG: Next 32 bytes: {hex_str}")
-
-    # Parse embedded files
-    while cursor < len(storage_data) - 8:
-        try:
-            # Skip 5-byte metadata before each image (empirically determined)
-            # Format appears to be: timestamp or image metadata
-            if cursor + 5 > len(storage_data):
-                if debug:
-                    log.info("DEBUG: Not enough data for 5-byte metadata")
-                break
-
-            metadata = storage_data[cursor : cursor + 5]
-            if debug:
-                log.info(
-                    f"DEBUG: At offset {cursor}, metadata = {' '.join(f'{b:02X}' for b in metadata)}"
-                )
-            cursor += 5
-
-            # Read filename length (1-byte pascal string)
-            filename_len = storage_data[cursor]
-            if debug:
-                log.info(
-                    f"DEBUG: At offset {cursor}, filename_len (1-byte) = {filename_len}"
-                )
-            cursor += 1
-
-            if cursor + filename_len > len(storage_data):
-                if debug:
-                    log.info(
-                        f"DEBUG: Filename length {filename_len} exceeds remaining data"
-                    )
-                break
-
-            # Read filename
-            filename = storage_data[cursor : cursor + filename_len].decode(
-                "utf-8", errors="replace"
-            )
-            if debug:
-                log.info(f"DEBUG: Filename: '{filename}'")
-            cursor += filename_len
-
-            # Read compressed data length
-            if cursor + 4 > len(storage_data):
-                if debug:
-                    log.info("DEBUG: Not enough data for compressed length")
-                break
-
-            compressed_len = struct.unpack("<I", storage_data[cursor : cursor + 4])[0]
-            if debug:
-                log.info(f"DEBUG: Trying 4-byte compressed_len = {compressed_len}")
-
-            cursor += 4
-
-            if cursor + compressed_len > len(storage_data):
-                if debug:
-                    log.info(
-                        f"DEBUG: Compressed length {compressed_len} exceeds remaining data"
-                    )
-                break
-
-            # Read and decompress data
-            compressed_data = storage_data[cursor : cursor + compressed_len]
-            cursor += compressed_len
-
-            try:
-                # Decompress zlib data
-                decompressed_data = zlib.decompress(compressed_data)
-                if debug:
-                    log.info(f"DEBUG: Decompressed to {len(decompressed_data)} bytes")
-                images[filename] = decompressed_data
-            except Exception as e:
-                if debug:
-                    log.info(f"DEBUG: Failed to decompress: {e}")
-                # Store compressed data anyway
-                images[filename] = compressed_data
-
-        except Exception as e:
-            if debug:
-                log.info(f"DEBUG: Error parsing storage stream at offset {cursor}: {e}")
-            break
-
-    if debug:
-        log.info(f"DEBUG: Finished parsing. Found {len(images)} images")
+        log.info(
+            "DEBUG: Parsed %d Storage entries from %d bytes",
+            len(entries),
+            len(storage_data),
+        )
     return images
 
 
@@ -407,77 +343,26 @@ def parse_storage_stream_raw(
         - Dict mapping filename to decompressed image data (for use by IMAGE records)
         - Dict mapping filename to (binary_header, compressed_data) for round-trip
     """
-    images = {}
-    raw_entries = {}
-
     if not ole.exists("Storage") or ole.get_type("Storage") != 2:
-        return images, raw_entries
+        return {}, {}
 
-    storage_data = ole.openstream("Storage")
-    cursor = 0
-
-    # Skip header record
-    if len(storage_data) < 4:
-        return images, raw_entries
-
-    header_len = struct.unpack("<I", storage_data[cursor : cursor + 4])[0]
-    cursor += 4 + header_len
-
-    # Parse embedded files
-    while cursor < len(storage_data) - 8:
-        try:
-            # Read 4-byte binary record header: (record_size | 0x01000000)
-            # Upper byte = mode (0x01 for binary), lower 24 bits = record size
-            if cursor + 4 > len(storage_data):
-                break
-            binary_header = storage_data[cursor : cursor + 4]
-            cursor += 4
-
-            # Read 0xD0 marker (208 = BINARY instruction)
-            if cursor >= len(storage_data) or storage_data[cursor] != 0xD0:
-                break
-            cursor += 1
-
-            # Read filename length and filename
-            filename_len = storage_data[cursor]
-            cursor += 1
-            if cursor + filename_len > len(storage_data):
-                break
-            filename = storage_data[cursor : cursor + filename_len].decode(
-                "utf-8", errors="replace"
-            )
-            cursor += filename_len
-
-            # Read compressed length and data
-            if cursor + 4 > len(storage_data):
-                break
-            compressed_len = struct.unpack("<I", storage_data[cursor : cursor + 4])[0]
-            cursor += 4
-
-            if cursor + compressed_len > len(storage_data):
-                break
-            compressed_data = storage_data[cursor : cursor + compressed_len]
-            cursor += compressed_len
-
-            # Store raw entry for round-trip (binary_header preserved for exact reproduction)
-            raw_entries[filename] = (binary_header, compressed_data)
-
-            # Decompress for use
-            try:
-                decompressed_data = zlib.decompress(compressed_data)
-                images[filename] = decompressed_data
-            except Exception:
-                images[filename] = compressed_data
-
-        except Exception as e:
-            if debug:
-                log.info(f"DEBUG: Error parsing storage stream at offset {cursor}: {e}")
-            break
-
+    entries = decode_auxiliary_stream(
+        ole.openstream("Storage"), expected_header="Icon storage"
+    )
+    images = {entry.name: entry.data for entry in entries}
+    raw_entries = {
+        entry.name: (entry.binary_header, entry.compressed_data) for entry in entries
+    }
+    if debug:
+        log.info("DEBUG: Preserved %d raw Storage entries", len(raw_entries))
     return images, raw_entries
 
 
-def create_storage_stream(images: dict[str, bytes] | None = None) -> bytes:
+def create_storage_stream(
+    images: Mapping[str, bytes] | None = None,
+    *,
+    raw_entries: Mapping[str, tuple[bytes, bytes]] | None = None,
+) -> bytes:
     """
     Create a schematic Storage stream for embedded images.
 
@@ -487,49 +372,15 @@ def create_storage_stream(images: dict[str, bytes] | None = None) -> bytes:
     Returns:
         Storage stream bytes ready to write to OLE file
     """
-    if images is None:
-        images = {}
-
-    if not images:
-        # Empty storage: just header with null terminator INCLUDED in length
-        header = b"|HEADER=Icon storage\x00"
-        header_len = len(header)  # 21 bytes including null
-        return struct.pack("<I", header_len) + header
-
-    # Storage with images - include Weight field
-    header = b"|HEADER=Icon storage|Weight=1\x00"
-    header_len = len(header)  # 30 bytes including null
-    storage_data = struct.pack("<I", header_len) + header
-
-    # Add each image using proper binary record format
-    for filename, image_data in images.items():
-        # Compress with zlib
-        compressed = zlib.compress(image_data, level=9)
-
-        # Encode filename
-        filename_bytes = filename.encode("utf-8")
-
-        # Calculate record size: 0xD0 (1) + filename_len (1) + filename + compressed_len (4) + compressed
-        record_size = 1 + 1 + len(filename_bytes) + 4 + len(compressed)
-
-        # Binary record header: (record_size | 0x01000000) as uint32 LE
-        binary_header = struct.pack("<I", record_size | 0x01000000)
-        storage_data += binary_header
-
-        # 0xD0 marker (208 = BINARY instruction)
-        storage_data += b"\xd0"
-
-        # Filename as pascal string (1-byte length + string)
-        storage_data += struct.pack("B", len(filename_bytes))
-        storage_data += filename_bytes
-
-        # Compressed size
-        storage_data += struct.pack("<I", len(compressed))
-
-        # Compressed data
-        storage_data += compressed
-
-    return storage_data
+    active_images = images or {}
+    compressed = (
+        {name: raw[1] for name, raw in raw_entries.items()}
+        if raw_entries is not None
+        else None
+    )
+    return encode_auxiliary_stream(
+        "Icon storage", active_images.items(), raw_compressed=compressed
+    )
 
 
 # =============================================================================
@@ -566,7 +417,7 @@ def parse_byte_record(record: bytes) -> list[bytes]:
     return result
 
 
-def decode_byte_array(byte_array: bytes) -> str:
+def decode_byte_array(byte_array: bytes, *, context: str | None = None) -> str:
     """
     Decode byte array as UTF-8 if it starts with %UTF8%, otherwise as cp1252.
 
@@ -585,6 +436,9 @@ def decode_byte_array(byte_array: bytes) -> str:
     - 0x8E alone -> | (pipe)
     - 0x8E 0x8E -> 0x8E (literal, un-doubled)
 
+    Legacy unmarked UTF-8 is recovered only when strict cp1252 fails. ``context``
+    is included in the recovery warning when supplied.
+
     See native StrUtils.ProcessMBCSString() for authoritative behavior.
     """
     if not byte_array:
@@ -594,10 +448,7 @@ def decode_byte_array(byte_array: bytes) -> str:
     utf8_prefix = b"%UTF8%"
 
     if byte_array.startswith(utf8_prefix):
-        try:
-            decoded = byte_array.decode("utf-8")
-        except UnicodeDecodeError as e:
-            raise ValueError(f"Failed to decode UTF-8 content: {e}") from e
+        decoded = byte_array.decode("utf-8", errors="replace")
     else:
         # Process MBCS pipe escape sequences at BYTE level before decoding.
         # native StrUtils.ProcessMBCSString() operates on AnsiString (raw bytes),
@@ -605,11 +456,24 @@ def decode_byte_array(byte_array: bytes) -> str:
         # maps to U+017D (Z with caron) in cp1252 but U+008E in ISO-8859-1.
         processed = _process_pipe_escapes_bytes(byte_array)
 
-        # Decode as cp1252 (Windows-1252) - Altium is a Windows application
+        # Decode as cp1252 (Windows-1252) - Altium is a Windows application.
+        # Older Monkey writers could put raw UTF-8 beneath an unmarked key. Only
+        # recover that legacy defect when strict cp1252 fails and the original
+        # bytes form valid UTF-8; valid cp1252 remains authoritative.
         try:
             decoded = processed.decode("cp1252")
-        except UnicodeDecodeError as e:
-            raise ValueError(f"Failed to decode cp1252 content: {e}") from e
+        except UnicodeDecodeError:
+            try:
+                decoded = byte_array.decode("utf-8")
+            except UnicodeDecodeError:
+                decoded = decode_altium_ansi(processed)
+            else:
+                location = f" ({context})" if context else ""
+                log.warning(
+                    "Recovered unmarked UTF-8 in Altium text record%s; "
+                    "rewrite the file to add a %%UTF8%% sidecar",
+                    location,
+                )
 
     return decoded
 
@@ -694,15 +558,96 @@ def _escape_pipe_for_altium(value: str) -> str:
     return "".join(result)
 
 
-def encode_altium_record(record: dict) -> bytes:
+_UTF8_FIELD_PREFIX = "%UTF8%"
+
+
+def _needs_utf8_sidecar(value: str) -> bool:
+    """Match Altium's dynamic-string sidecar decision for text parameters."""
+
+    return any(ord(char) > 0x7E and char != "\x8e" for char in value)
+
+
+def _encode_altium_pair(key: str, value: str, *, utf8: bool) -> bytes:
+    escaped_value = _escape_pipe_for_altium(value)
+    pair = f"|{key}={escaped_value}"
+    if utf8:
+        return pair.encode("utf-8")
+    return encode_altium_ansi_lossy(pair)
+
+
+def _skip_altium_text_key(key: str, *, skip_private_keys: bool) -> bool:
+    if skip_private_keys:
+        return key.startswith("_")
+    return key.startswith("__") and key.endswith("__")
+
+
+def _encode_altium_field_pairs(
+    key: str,
+    raw_value: object,
+    explicit_keys: set[str],
+    *,
+    utf8_sidecars: bool = True,
+) -> list[bytes]:
+    if "UNHANDLED" in key:
+        return [b"|"]
+
+    value = str(raw_value)
+    is_utf8 = key.startswith(_UTF8_FIELD_PREFIX)
+    pairs: list[bytes] = []
+    sibling_key = f"{_UTF8_FIELD_PREFIX}{key}".casefold()
+    if (
+        utf8_sidecars
+        and not is_utf8
+        and _needs_utf8_sidecar(value)
+        and sibling_key not in explicit_keys
+    ):
+        pairs.append(
+            _encode_altium_pair(f"{_UTF8_FIELD_PREFIX}{key}", value, utf8=True)
+        )
+    pairs.append(_encode_altium_pair(key, value, utf8=is_utf8))
+    return pairs
+
+
+def _encode_altium_text_pairs(
+    record: Mapping[str, object],
+    *,
+    skip_private_keys: bool,
+    utf8_sidecars: bool = True,
+) -> list[bytes]:
+    """Encode Altium parameter pairs with UTF-8 sidecars and safe fallbacks."""
+
+    explicit_keys = {
+        key.casefold()
+        for key in record
+        if isinstance(key, str) and key.startswith(_UTF8_FIELD_PREFIX)
+    }
+    pairs: list[bytes] = []
+    for key, raw_value in record.items():
+        if _skip_altium_text_key(key, skip_private_keys=skip_private_keys):
+            continue
+        pairs.extend(
+            _encode_altium_field_pairs(
+                key, raw_value, explicit_keys, utf8_sidecars=utf8_sidecars
+            )
+        )
+    return pairs
+
+
+def encode_altium_record(record: dict, *, utf8_sidecars: bool = True) -> bytes:
     """
     Encode a record dictionary back to Altium format (round-trip support).
 
     Handles both text records (key-value pairs) and binary records (PIN, etc.).
-    Text records have pipe characters in values escaped per native StrUtils.ReplaceSpecialParameterChars.
+    Text records have pipe characters escaped per native
+    StrUtils.ReplaceSpecialParameterChars. Non-ASCII values use Altium's
+    UTF-8-sidecar plus ACP-safe-fallback representation.
 
     Args:
         record: Dictionary of key-value pairs, or binary record with special keys
+        utf8_sidecars: When True (schematic convention), non-ASCII values
+            receive an auto-synthesized "%UTF8%<KEY>" sidecar pair. PCB
+            property records use "UNICODE__<FIELD>" sidebands instead and
+            must pass False.
 
     Returns:
         Bytes for length-prefixed record (text or binary)
@@ -730,30 +675,9 @@ def encode_altium_record(record: dict) -> bytes:
             )
         return length_bytes + binary_data
 
-    # Text record: Build pipe-separated key=value pairs
-    # Each pair is encoded separately - %UTF8% keys use UTF-8, others use cp1252
-    # This matches the behavior in create_stream_from_records
-    encoded_pairs = []
-    for key, value in record.items():
-        # Skip internal metadata fields (starting with underscore)
-        if key.startswith("_"):
-            continue
-        # Escape pipe and special characters in values
-        escaped_value = _escape_pipe_for_altium(str(value))
-
-        # Encode %UTF8% keys as UTF-8, others as cp1252
-        if "%UTF8%" in key:
-            # UTF-8 encoding for %UTF8% prefixed keys (preserves special chars correctly)
-            pair_str = f"|{key}={escaped_value}"
-            encoded_pairs.append(pair_str.encode("utf-8"))
-        else:
-            pair_str = f"|{key}={escaped_value}"
-            try:
-                encoded_pairs.append(pair_str.encode("cp1252"))
-            except UnicodeEncodeError:
-                # Characters outside cp1252 range require %UTF8% prefix
-                pair_str = f"|%UTF8%{key}={escaped_value}"
-                encoded_pairs.append(pair_str.encode("utf-8"))
+    encoded_pairs = _encode_altium_text_pairs(
+        record, skip_private_keys=True, utf8_sidecars=utf8_sidecars
+    )
 
     # Join all encoded pairs
     record_bytes = b"".join(encoded_pairs)
