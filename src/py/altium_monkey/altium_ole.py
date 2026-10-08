@@ -640,8 +640,13 @@ class AltiumOleFile:
         sector = start_sector
         count = 0
         fat = self._fat if use_fat else self._minifat
+        # A chain longer than the allocation table must revisit a sector: that is the cycle guard.
+        # (A fixed 100,000-sector cap used to stand here and silently cut every stream over
+        # 51.2 MB -- e.g. ShapeBasedRegions6 on a repoured 22-layer board -- which a later save
+        # then wrote back truncated.)
+        limit = len(fat) + 1
 
-        while sector != ENDOFCHAIN and sector < MAXREGSECT and count < 100000:
+        while sector != ENDOFCHAIN and sector < MAXREGSECT and count < limit:
             if use_fat:
                 sector_data = self._read_sector(sector)
             else:
@@ -657,6 +662,11 @@ class AltiumOleFile:
 
         result = b"".join(data)
         if size is not None:
+            if len(result) < size:
+                raise ValueError(
+                    f"OLE stream chain from sector {start_sector} holds {len(result)} bytes, "
+                    f"directory says {size}"
+                )
             result = result[:size]
         return result
 
@@ -690,8 +700,9 @@ class AltiumOleFile:
         sector = start_sector
         fat = self._fat if use_fat else self._minifat
         count = 0
+        limit = len(fat) + 1      # cycle guard; was a fixed 100,000 that cut chains over 51.2 MB
 
-        while sector != ENDOFCHAIN and sector < MAXREGSECT and count < 100000:
+        while sector != ENDOFCHAIN and sector < MAXREGSECT and count < limit:
             chain.append(sector)
             if sector < len(fat):
                 sector = fat[sector]
