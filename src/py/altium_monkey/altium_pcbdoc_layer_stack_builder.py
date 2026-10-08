@@ -161,7 +161,8 @@ def is_layer_stack_core_entry_key(key: str | None) -> bool:
 
 
 def is_layer_pair_entry_key(key: str | None) -> bool:
-    return bool(key and key.startswith("LAYERPAIR"))
+    # VIATYPE<n> rows (via types, uVia flag) sit with the LAYERPAIR rows.
+    return bool(key and key.startswith(("LAYERPAIR", "VIATYPE")))
 
 
 class PcbDocLayerStackBuilder:

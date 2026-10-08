@@ -72,6 +72,7 @@ _FEATURE_ID_STANDARD = "{C8939E8A-FD0E-4D52-8860-B7A98F452016}"
 _FEATURE_ID_RIGID_FLEX = "{5277E6A4-9E5F-4F54-951F-DC18CFEB7530}"
 _FEATURE_ID_RIGID_FLEX_ADVANCED = "{4E697926-85C3-4C60-8B9B-E23CCB226764}"
 _FEATURE_ID_IMPEDANCE = "{E3DF2B86-5F1B-49CA-B266-D1AE57F0BA6F}"
+_FEATURE_ID_BACK_DRILLS = "{0A82BA33-E4D8-43F3-9C01-412DC26BDD5E}"
 _STACKUP_ATTRIBUTE_V8_SUFFIXES: tuple[tuple[str, str], ...] = (
     ("RoughnessType", "ROUGHNESSTYPE"),
     ("RoughnessFactorSR", "ROUGHNESSFACTORSR"),
@@ -172,7 +173,9 @@ class AltiumStackupDocument:
         Write this document to `path` and return the resolved path object.
         """
         target = Path(path)
-        target.write_text(self.to_text(), encoding="utf-8")
+        # UTF-8 with a BOM, as AD's own .stackup files are (a "μVia" span
+        # name is not ASCII).
+        target.write_text(self.to_text(), encoding="utf-8-sig")
         return target
 
     def to_layer_stack_document(self) -> "AltiumLayerStackDocument":
@@ -329,6 +332,12 @@ def _feature_records(
         features.append((_FEATURE_ID_IMPEDANCE, "Impedance Calculator"))
     else:
         features.append((_FEATURE_ID_IMPEDANCE, "Impedance Calculator"))
+    # AD declares Back Drills, last, on a stack that has any (its own exports).
+    if any(
+        bool(getattr(pair, "is_backdrill", False))
+        for pair in tuple(getattr(document, "layer_pairs", ()) or ())
+    ):
+        features.append((_FEATURE_ID_BACK_DRILLS, "Back Drills"))
 
     records: list[tuple[str, str]] = []
     for index, (feature_id, feature_name) in enumerate(features):
@@ -790,9 +799,7 @@ def _span_records(
                         first_layer_id=layer_record_ids[first],
                         last_layer_id=layer_record_ids[last],
                         name=_span_name(
-                            _via_span_name_prefix(
-                                getattr(pair, "drill_pair_type_raw", None)
-                            ),
+                            _via_span_name_prefix(_via_span_type_raw(pair)),
                             first,
                             last,
                             visible_layers,
@@ -1214,6 +1221,12 @@ def _pair_token(value: object) -> str:
 
 
 def _via_span_type_raw(pair: object) -> int:
+    """Layer Stack Manager via type (VIASPAN TYPE) of a non-back-drill pair:
+    its `via_span_type_raw`, else (pairs authored before that field) the raw
+    drill-pair code, else thru."""
+    span_type = getattr(pair, "via_span_type_raw", None)
+    if isinstance(span_type, int):
+        return span_type
     raw = getattr(pair, "drill_pair_type_raw", None)
     if isinstance(raw, int):
         return raw
@@ -1224,7 +1237,9 @@ def _via_span_name_prefix(span_type_raw: object) -> str:
     if span_type_raw == 2:
         return "Buried"
     if span_type_raw == 3:
-        return "MicroVia"
+        return "μVia"   # AD's own name, e.g. "μVia 1:2"
+    if span_type_raw == 1:
+        return "Blind"
     return "Thru"
 
 
