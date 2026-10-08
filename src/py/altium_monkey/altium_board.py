@@ -24,6 +24,8 @@ _V9_CACHE_RE = re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE)
 _PLANE_NETNAME_RE = re.compile(r"^PLANE(\d+)NETNAME$", re.IGNORECASE)
 _HOLESHAPE_HASH_INDEX_RE = re.compile(r"^HASHVALUE#(\d+)$", re.IGNORECASE)
 _LAYER_PAIR_LOW_RE = re.compile(r"^LAYERPAIR(\d+)LOW$", re.IGNORECASE)
+_VIA_TYPE_LOW_RE = re.compile(r"^VIATYPE(\d+)LOW$", re.IGNORECASE)
+_VIA_SPAN_TYPE_MICROVIA = 3   # = altium_layer_stack_document.VIA_SPAN_TYPE_MICROVIA
 _SUBSTACK_FIELD_FAMILIES = (
     (
         re.compile(r"^V9_SUBSTACK(\d+)_ID$", re.IGNORECASE),
@@ -490,6 +492,9 @@ class AltiumBoardSubstack:
 class AltiumBoardLayerPair:
     """
     Typed drill-pair metadata parsed from board settings.
+
+    `via_span_type_raw` is 3 (microvia) when a `VIATYPE<n>` row for the same
+    span carries `DRILLPAIRTYPE=1`; see `AltiumLayerPair` for the two codes.
     """
 
     pair_index: int
@@ -501,6 +506,7 @@ class AltiumBoardLayerPair:
     is_inverted: bool | None = None
     drill_guide: bool | None = None
     drill_drawing: bool | None = None
+    via_span_type_raw: int | None = None
 
     @property
     def name(self) -> str:
@@ -762,6 +768,22 @@ class AltiumBoard:
                 if match is not None
             }
         )
+        # VIATYPE<n> rows (beside the LAYERPAIR rows) carry the microvia flag:
+        # DRILLPAIRTYPE=1 on a span AD shows with uVia ticked.
+        microvia_spans: set[tuple[str, str]] = set()
+        for key in raw_record:
+            match = _VIA_TYPE_LOW_RE.match(str(key or ""))
+            if match is None:
+                continue
+            index = match.group(1)
+            if _parse_altium_int_token(raw_record.get(f"VIATYPE{index}DRILLPAIRTYPE")) != 1:
+                continue
+            microvia_spans.add(
+                (
+                    str(raw_record.get(f"VIATYPE{index}LOW", "") or "").strip().upper(),
+                    str(raw_record.get(f"VIATYPE{index}HIGH", "") or "").strip().upper(),
+                )
+            )
         pairs: list[AltiumBoardLayerPair] = []
         for pair_index in pair_indices:
             low_layer_token = str(
@@ -786,6 +808,12 @@ class AltiumBoard:
                 ref = str(value or "").strip()
                 if ref and ref not in source_substack_refs:
                     source_substack_refs.append(ref)
+            is_backdrill = _parse_altium_bool_token(
+                raw_record.get(f"LAYERPAIR{pair_index}BACKDRILL")
+            )
+            is_microvia = not is_backdrill and (
+                (low_layer_token.upper(), high_layer_token.upper()) in microvia_spans
+            )
             pairs.append(
                 AltiumBoardLayerPair(
                     pair_index=pair_index,
@@ -795,9 +823,8 @@ class AltiumBoard:
                     drill_pair_type_raw=_parse_altium_int_token(
                         raw_record.get(f"LAYERPAIR{pair_index}DRILLPAIRTYPE")
                     ),
-                    is_backdrill=_parse_altium_bool_token(
-                        raw_record.get(f"LAYERPAIR{pair_index}BACKDRILL")
-                    ),
+                    is_backdrill=is_backdrill,
+                    via_span_type_raw=_VIA_SPAN_TYPE_MICROVIA if is_microvia else None,
                     is_inverted=_parse_altium_bool_token(
                         raw_record.get(f"LAYERPAIR{pair_index}INVERTED")
                     ),

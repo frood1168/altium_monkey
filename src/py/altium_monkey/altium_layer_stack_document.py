@@ -138,11 +138,22 @@ _STACK_ENTRY_KEY_RE = re.compile(
     r"IMPEDANCEPROFILE_V8_|"
     r"TRACEIMPEDANCE_V8_|"
     r"LAYERPAIR\d+|"
+    r"VIATYPE\d+|"
     r"RIGIDFLEXADVANCED|"
     r"LAYER\d+"
     r")",
     re.IGNORECASE,
 )
+# Layer Stack Manager via-span types (`AltiumLayerPair.via_span_type_raw`).
+VIA_SPAN_TYPE_THRU = 0
+VIA_SPAN_TYPE_BLIND = 1
+VIA_SPAN_TYPE_BURIED = 2
+VIA_SPAN_TYPE_MICROVIA = 3
+# Board6 codes: `LAYERPAIR<n>DRILLPAIRTYPE` on a back-drill pair, and
+# `VIATYPE<n>DRILLPAIRTYPE` on a microvia span (seen in an AD-saved PcbDoc,
+# 2026-10; boards without microvias carry no VIATYPE rows).
+LAYER_PAIR_DRILL_PAIR_TYPE_BACKDRILL = 2
+VIA_TYPE_DRILL_PAIR_TYPE_MICROVIA = 1
 _V8_SPAN_RE = re.compile(
     r"^(VIASPAN|DRILLPAIR|DRILLSPAN)_V8_(\{[^}]+\})_(\d+)(.+)$",
     re.IGNORECASE,
@@ -905,6 +916,18 @@ class AltiumStackBranch:
 class AltiumLayerPair:
     """
     Drill/via span metadata parsed from Board6/Data layer-pair rows.
+
+    Altium codes a span's type differently in each place it stores one, so the
+    two raw codes are kept apart:
+
+    - `drill_pair_type_raw` is the Board6 `LAYERPAIR<n>DRILLPAIRTYPE` code.
+      AD writes it only on back-drill pairs (2, with `BACKDRILL=TRUE`) and
+      reads 2 as a back-drill whatever `BACKDRILL` says, so a via span must
+      not carry it.
+    - `via_span_type_raw` is the Layer Stack Manager via-span type: 0 thru,
+      1 blind, 2 buried, 3 microvia - `.stackup` `VIASPAN_V8_*TYPE`, `.stackupx`
+      `<ViaSpan Type>`. A PcbDoc keeps the microvia flag in `VIATYPE<n>` rows
+      (`DRILLPAIRTYPE=1`), written beside the `LAYERPAIR` rows.
     """
 
     pair_index: int
@@ -916,9 +939,14 @@ class AltiumLayerPair:
     is_inverted: bool | None = None
     drill_guide: bool | None = None
     drill_drawing: bool | None = None
+    via_span_type_raw: int | None = None
+
+    @property
+    def is_microvia(self) -> bool:
+        return self.via_span_type_raw == VIA_SPAN_TYPE_MICROVIA and not self.is_backdrill
 
     def to_debug_json(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "pair_index": self.pair_index,
             "low_layer_token": self.low_layer_token,
             "high_layer_token": self.high_layer_token,
@@ -929,6 +957,9 @@ class AltiumLayerPair:
             "drill_guide": self.drill_guide,
             "drill_drawing": self.drill_drawing,
         }
+        if self.via_span_type_raw is not None:
+            result["via_span_type_raw"] = self.via_span_type_raw
+        return result
 
 
 @dataclass(frozen=True)
@@ -2019,13 +2050,13 @@ class AltiumLayerStackSourceMap:
 
 def _is_layer_pair_source_key(key: str) -> bool:
     return key.upper().startswith(
-        ("LAYERPAIR", "VIASPAN_V8_", "DRILLPAIR_V8_", "DRILLSPAN_V8_")
+        ("LAYERPAIR", "VIATYPE", "VIASPAN_V8_", "DRILLPAIR_V8_", "DRILLSPAN_V8_")
     )
 
 
 def _is_substack_source_key(key: str) -> bool:
     upper_key = key.upper()
-    return "SUBSTACK" in upper_key and not upper_key.startswith("LAYERPAIR")
+    return "SUBSTACK" in upper_key and not upper_key.startswith(("LAYERPAIR", "VIATYPE"))
 
 
 def _build_layer_stack_source_map(
@@ -2448,6 +2479,7 @@ class AltiumLayerStackDocument:
         is_inverted: bool | None = None,
         drill_guide: bool | None = False,
         drill_drawing: bool | None = False,
+        via_span_type_raw: int | None = None,
     ) -> "AltiumLayerStackDocument":
         """
         Return a document with one authored layer-pair / drill-span row.
@@ -2456,6 +2488,10 @@ class AltiumLayerStackDocument:
         via binary tails. Historical native-save research showed direct
         backdrill/counterhole via-tail mutation is unsafe; authored backdrills
         should be represented as stack spans through this document model.
+
+        `drill_pair_type_raw` is the Board6 `LAYERPAIR` code (2 = back-drill);
+        `via_span_type_raw` is the Layer Stack Manager via type (0 thru,
+        1 blind, 2 buried, 3 microvia). See `AltiumLayerPair`.
         """
         resolved_low = _resolve_authored_layer_pair_token(self, low_layer)
         resolved_high = _resolve_authored_layer_pair_token(self, high_layer)
@@ -2498,6 +2534,7 @@ class AltiumLayerStackDocument:
             is_inverted=is_inverted,
             drill_guide=drill_guide,
             drill_drawing=drill_drawing,
+            via_span_type_raw=via_span_type_raw,
         )
         pairs = [
             pair
@@ -2520,9 +2557,14 @@ class AltiumLayerStackDocument:
         is_inverted: bool | None = None,
         drill_guide: bool | None = False,
         drill_drawing: bool | None = False,
+        via_span_type_raw: int | None = None,
     ) -> "AltiumLayerStackDocument":
         """
         Return a document with one authored non-backdrill via span.
+
+        Give the span its Layer Stack Manager type with `via_span_type_raw`
+        (`VIA_SPAN_TYPE_MICROVIA` ticks uVia) and leave `drill_pair_type_raw`
+        unset: AD reads `LAYERPAIR` type 2 as a back-drill.
         """
         return self.with_layer_pair(
             low_layer,
@@ -2534,6 +2576,7 @@ class AltiumLayerStackDocument:
             is_inverted=is_inverted,
             drill_guide=drill_guide,
             drill_drawing=drill_drawing,
+            via_span_type_raw=via_span_type_raw,
         )
 
     def with_backdrill_span(
@@ -3199,6 +3242,7 @@ class AltiumLayerStackDocument:
             _add_authored_substack_values(values, substack)
         for pair in self.layer_pairs:
             _add_authored_layer_pair_values(values, pair)
+        _add_authored_via_type_values(values, self.layer_pairs)
         return values
 
     def _authored_impedance_entry_strings(self) -> tuple[str, ...]:
@@ -3938,7 +3982,7 @@ def _source_field_bucket(key: str) -> str:
         return "v8_impedance_profile"
     if upper.startswith("TRACEIMPEDANCE_V8_"):
         return "v8_trace_impedance"
-    if upper.startswith("LAYERPAIR"):
+    if upper.startswith(("LAYERPAIR", "VIATYPE")):
         return "layer_pair"
     if _LEGACY_LAYER_RE.match(key):
         return "legacy_layer"
@@ -4129,15 +4173,20 @@ def _semantic_layer_pair_entry_strings(
             ),
         )
     entries: list[str] = []
+    rewritten_pairs: list[AltiumLayerPair] = []
     for index, pair in enumerate(pairs):
         rewritten_pair = replace(
             pair,
             pair_index=index,
             source_substack_refs=pair.source_substack_refs or default_substack_refs,
         )
+        rewritten_pairs.append(rewritten_pair)
         values: dict[str, str] = {}
         _add_authored_layer_pair_values(values, rewritten_pair)
         entries.extend(f"{key}={value}" for key, value in values.items())
+    values = {}
+    _add_authored_via_type_values(values, rewritten_pairs)
+    entries.extend(f"{key}={value}" for key, value in values.items())
     return tuple(entries)
 
 
@@ -4958,10 +5007,11 @@ def _append_missing_authored_layer_pair_entries(
     authored_values: Mapping[str, str],
     emitted_keys: set[str],
 ) -> None:
+    # VIATYPE rows follow the LAYERPAIR rows, as AD writes them.
     missing_entries = [
         f"{key}={value}"
         for key, value in authored_values.items()
-        if key.startswith("LAYERPAIR") and key not in emitted_keys
+        if key.startswith(("LAYERPAIR", "VIATYPE")) and key not in emitted_keys
     ]
     if not missing_entries:
         return
@@ -4969,7 +5019,7 @@ def _append_missing_authored_layer_pair_entries(
     insert_index = len(entries)
     for index, entry in enumerate(entries):
         key = entry.split("=", 1)[0] if "=" in entry else entry
-        if key.startswith("LAYERPAIR"):
+        if key.startswith(("LAYERPAIR", "VIATYPE")):
             insert_index = index + 1
     entries[insert_index:insert_index] = missing_entries
     for entry in missing_entries:
@@ -5595,6 +5645,31 @@ def _add_authored_layer_pair_values(
         values[f"{prefix}DRILLPAIRTYPE"] = str(int(pair.drill_pair_type_raw))
     for index, substack_ref in enumerate(pair.source_substack_refs):
         values[f"{prefix}SUBSTACK_{index}"] = substack_ref
+
+
+def _add_authored_via_type_values(
+    values: dict[str, str],
+    pairs: Sequence[AltiumLayerPair],
+) -> None:
+    """
+    Write the `VIATYPE<n>` rows AD keeps beside the `LAYERPAIR` rows: one per
+    via span (back-drills excluded), `DRILLPAIRTYPE=1` on a microvia - the
+    Layer Stack Manager uVia box. Written only when a span is a microvia: a
+    board without one carries no VIATYPE rows, as before.
+    """
+    spans = [pair for pair in pairs if not pair.is_backdrill]
+    if not any(pair.is_microvia for pair in spans):
+        return
+    for index, pair in enumerate(spans):
+        prefix = f"VIATYPE{index}"
+        values[f"{prefix}LOW"] = pair.low_layer_token
+        values[f"{prefix}HIGH"] = pair.high_layer_token
+        _set_optional_bool(values, f"{prefix}DRILLGUIDE", pair.drill_guide)
+        _set_optional_bool(values, f"{prefix}DRILLDRAWING", pair.drill_drawing)
+        if pair.is_microvia:
+            values[f"{prefix}DRILLPAIRTYPE"] = str(VIA_TYPE_DRILL_PAIR_TYPE_MICROVIA)
+        for ref_index, substack_ref in enumerate(pair.source_substack_refs):
+            values[f"{prefix}SUBSTACK_{ref_index}"] = substack_ref
 
 
 def _set_optional_bool(
@@ -6300,6 +6375,7 @@ def _build_layer_pairs(
                 is_inverted=getattr(pair, "is_inverted", None),
                 drill_guide=getattr(pair, "drill_guide", None),
                 drill_drawing=getattr(pair, "drill_drawing", None),
+                via_span_type_raw=getattr(pair, "via_span_type_raw", None),
             )
         )
     pairs.extend(
@@ -6686,17 +6762,38 @@ def _build_v8_span_layer_pairs(
         is_backdrill = _parse_altium_bool_token(fields.get("BACKDRILL"))
         if is_backdrill is None and kind == "VIASPAN":
             is_backdrill = False
+        # A VIASPAN TYPE is a Layer Stack Manager via type, kept in
+        # via_span_type_raw. It reaches drill_pair_type_raw (a LAYERPAIR code)
+        # only where the two codings agree - thru, 0 - so a PcbDoc written from
+        # this stack never carries a buried span's 2 (a back-drill to AD).
+        span_type = _parse_int_token(fields.get("TYPE"))
+        if kind == "VIASPAN":
+            drill_pair_type_raw = _layer_pair_code_for_via_span_type(span_type)
+            via_span_type_raw = span_type
+        elif is_backdrill:
+            drill_pair_type_raw = LAYER_PAIR_DRILL_PAIR_TYPE_BACKDRILL
+            via_span_type_raw = None
+        else:
+            drill_pair_type_raw, via_span_type_raw = span_type, None
         pairs.append(
             AltiumLayerPair(
                 pair_index=pair_index_start + len(pairs),
                 low_layer_token=low_layer_token,
                 high_layer_token=high_layer_token,
                 source_substack_refs=(stack_ref,),
-                drill_pair_type_raw=_parse_int_token(fields.get("TYPE")),
+                drill_pair_type_raw=drill_pair_type_raw,
                 is_backdrill=is_backdrill,
+                via_span_type_raw=via_span_type_raw,
             )
         )
     return pairs
+
+
+def _layer_pair_code_for_via_span_type(span_type: int | None) -> int | None:
+    """The LAYERPAIR DRILLPAIRTYPE matching a Layer Stack Manager via type:
+    thru (0) means a plain drill pair in both codings; blind, buried and
+    microvia have no LAYERPAIR code (AD reads 2 there as a back-drill)."""
+    return span_type if span_type == VIA_SPAN_TYPE_THRU else None
 
 
 def _layer_pair_token(layer: AltiumStackLayer) -> str:
@@ -6763,11 +6860,22 @@ def _compact_layer_pair_endpoint(value: str) -> str:
 def _default_layer_pair_substack_refs(
     document: AltiumLayerStackDocument,
 ) -> tuple[str, ...]:
-    if document.active_stack_ref:
+    # AD's own files name a SUBSTACK (V9_SUBSTACK<n>_ID) on every layer pair.
+    # On a rigid stack the active ref is the master stack, so it is used only
+    # when it is one of the substacks.
+    substack_refs = [
+        substack.source_stackup_ref
+        for substack in document.substacks
+        if substack.source_stackup_ref
+    ]
+    active = _normalized_source_id(document.active_stack_ref)
+    if active and (
+        not substack_refs
+        or any(_normalized_source_id(ref) == active for ref in substack_refs)
+    ):
         return (document.active_stack_ref,)
-    for substack in document.substacks:
-        if substack.source_stackup_ref:
-            return (substack.source_stackup_ref,)
+    if substack_refs:
+        return (substack_refs[0],)
     for stack in document.physical_stacks:
         if stack.stack_ref:
             return (stack.stack_ref,)

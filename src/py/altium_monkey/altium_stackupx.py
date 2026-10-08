@@ -1170,7 +1170,11 @@ def _to_layer_pairs(
     pair_index_start: int,
     layer_tokens_by_id: dict[str, str],
 ) -> list["AltiumLayerPair"]:
-    from .altium_layer_stack_document import AltiumLayerPair
+    from .altium_layer_stack_document import (
+        LAYER_PAIR_DRILL_PAIR_TYPE_BACKDRILL,
+        AltiumLayerPair,
+        _layer_pair_code_for_via_span_type,
+    )
 
     layers_by_id = {layer.id: layer for layer in stack.layers}
     pairs: list[AltiumLayerPair] = []
@@ -1187,8 +1191,17 @@ def _to_layer_pairs(
                     span.stop_layer_id, _span_layer_token(stop)
                 ),
                 source_substack_refs=(stack.id,),
-                drill_pair_type_raw=_span_type_raw(span),
+                # <ViaSpan Type> is a Layer Stack Manager via type, not a
+                # LAYERPAIR code (where 2 means back-drill): see AltiumLayerPair.
+                drill_pair_type_raw=(
+                    LAYER_PAIR_DRILL_PAIR_TYPE_BACKDRILL
+                    if span.span_type == "BackDrill"
+                    else _layer_pair_code_for_via_span_type(_span_type_raw(span))
+                ),
                 is_backdrill=(span.span_type == "BackDrill"),
+                via_span_type_raw=(
+                    None if span.span_type == "BackDrill" else _span_type_raw(span)
+                ),
             )
         )
     return pairs
@@ -2847,6 +2860,12 @@ def _pair_token(value: object) -> str:
 
 
 def _via_span_type_raw(pair: object) -> int:
+    """Layer Stack Manager via type of a non-back-drill pair: its
+    `via_span_type_raw`, else (pairs authored before that field) the raw
+    drill-pair code, else thru."""
+    span_type = getattr(pair, "via_span_type_raw", None)
+    if isinstance(span_type, int):
+        return span_type
     return _int_or_default(getattr(pair, "drill_pair_type_raw", None), 0)
 
 
@@ -2880,7 +2899,7 @@ def _via_span_name_prefix(span_type_raw: int) -> str:
     if span_type_raw == 2:
         return "Buried"
     if span_type_raw == 3:
-        return "MicroVia"
+        return "μVia"   # AD's own AutoName, e.g. "μVia 1:2"
     if span_type_raw == 1:
         return "Blind"
     return "Thru"
