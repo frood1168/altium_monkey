@@ -97,6 +97,10 @@ from .altium_pcb_via_structure import (
     parse_via_structure_manager_stream,
     via_structure_header_count,
 )
+from .altium_pcbdoc_via_instancing import (
+    VIA_INSTANCING_STREAM_NAMES,
+    rebuild_via_instancing,
+)
 from .altium_pcbdoc_unions import (
     PCB_USER_UNION_MEMBER_COLLECTIONS,
     PcbSmartUnionRecord,
@@ -4128,6 +4132,8 @@ class AltiumPcbDoc:
         for stream_name, data in self._raw_streams.items():
             if owns_via_structure_streams and stream_name in VIA_STRUCTURE_STREAM_NAMES:
                 continue
+            if stream_name in VIA_INSTANCING_STREAM_NAMES:
+                continue  # written beside Vias6 by _write_via_instancing_streams
             writer.add_stream(stream_name, data)
             if verbose:
                 log.info(f"  Wrote passthrough stream: {stream_name}")
@@ -4249,6 +4255,54 @@ class AltiumPcbDoc:
         writer.add_stream(f"{section_name}/Data", data)
         return True
 
+    def _write_via_instancing_streams(
+        self,
+        writer: AltiumOleWriter,
+        vias_data: bytes | None,
+        *,
+        verbose: bool,
+    ) -> None:
+        """
+        Keep AD's ViaInstancing in step with Vias6.
+
+        AD takes a via's diameter, hole and span from its ViaInstancing
+        template, so a stale copy undoes any via edit. Unchanged vias keep
+        the source stream; changed ones get it rebuilt. When it cannot be
+        rebuilt it is left out, and AD reads the vias from Vias6 as it does
+        for a board saved without one.
+        """
+        data = self._raw_streams.get("ViaInstancing/Data")
+        header = self._raw_streams.get("ViaInstancing/Header")
+        if data is None:
+            return
+        source_vias = self._raw_streams.get("Vias6/Data", b"")
+        if vias_data is None or vias_data == source_vias:
+            writer.add_stream("ViaInstancing/Data", data)
+            if header is not None:
+                writer.add_stream("ViaInstancing/Header", header)
+            return
+        try:
+            rebuilt = rebuild_via_instancing(data, source_vias, vias_data)
+        except ValueError as exc:
+            log.warning("ViaInstancing left out (AD reads Vias6 instead): %s", exc)
+            return
+        if rebuilt is None:
+            log.warning(
+                "ViaInstancing left out (AD reads Vias6 instead): the edited vias "
+                "cannot be matched to the source ones"
+            )
+            return
+        data, group_count = rebuilt
+        if verbose:
+            log.info(f"  Rebuilt ViaInstancing ({group_count} via groups)")
+        self._write_counted_section(
+            writer,
+            "ViaInstancing",
+            record_count=group_count,
+            data=data,
+            force=True,
+        )
+
     def _write_via_structure_streams(
         self, writer: AltiumOleWriter, *, verbose: bool
     ) -> None:
@@ -4347,16 +4401,19 @@ class AltiumPcbDoc:
                 force=True,
             )
 
+        vias_data: bytes | None = None
         if self._should_write_counted_section("Vias6", len(self.vias)):
             if verbose:
                 log.info(f"  Writing Vias6/Data ({len(self.vias)} vias)...")
+            vias_data = self._serialize_vias()
             self._write_counted_section(
                 writer,
                 "Vias6",
                 record_count=len(self.vias),
-                data=self._serialize_vias(),
+                data=vias_data,
                 force=True,
             )
+        self._write_via_instancing_streams(writer, vias_data, verbose=verbose)
 
         if self._should_write_counted_section("Texts6", len(self.texts)):
             if verbose:
