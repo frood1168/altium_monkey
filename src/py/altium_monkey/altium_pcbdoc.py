@@ -187,7 +187,7 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .altium_board import BoardOutlineVertex
-    from .altium_layer_stack_document import AltiumLayerStackDocument
+    from .altium_layer_stack_document import AltiumLayerPair, AltiumLayerStackDocument
     from .altium_pcbdoc_builder import (
         PcbCustomPadLayerShapeSpec,
         PcbDocBuildProfile,
@@ -1313,6 +1313,75 @@ class AltiumPcbDoc:
         """
         self._ensure_authoring_builder().set_layer_stack_document(document)
         self._mirror_authoring_builder_state()
+
+    def via_spans(self) -> tuple["AltiumLayerPair", ...]:
+        """
+        Return the board's via spans (drill pairs), typed from Board6.
+
+        `via_span_type_raw` is 3 on a microvia span; back-drills carry
+        `is_backdrill`.
+        """
+        from .altium_pcbdoc_via_spans import via_spans
+
+        return via_spans(self)
+
+    def set_via_spans(self, pairs: Sequence["AltiumLayerPair"]) -> None:
+        """
+        Replace the board's via spans on a loaded board.
+
+        Only the Board6 `LAYERPAIR<n>` / `VIATYPE<n>` rows are rewritten, in
+        place; the authoring builder is not involved, so no other stream
+        changes. Boards embedding the Layer Stack Manager XML
+        (`V9_STACKCUSTOMDATA`) raise `NotImplementedError`.
+        """
+        from .altium_pcbdoc_via_spans import set_via_spans
+
+        set_via_spans(self, pairs)
+
+    def add_via_span(
+        self,
+        low_layer: object,
+        high_layer: object,
+        *,
+        via_span_type_raw: int | None = None,
+        drill_guide: bool | None = False,
+        drill_drawing: bool | None = False,
+    ) -> "AltiumLayerPair":
+        """
+        Declare one more via span on a loaded board and return it.
+
+        Args:
+            low_layer: Upper signal layer token, e.g. `"TOP"` or `"MID3"`.
+            high_layer: Lower signal layer token, e.g. `"MID1"` or `"BOTTOM"`.
+            via_span_type_raw: Layer Stack Manager type (`VIA_SPAN_TYPE_*`);
+                `VIA_SPAN_TYPE_MICROVIA` ticks uVia.
+        """
+        from .altium_pcbdoc_via_spans import add_via_span
+
+        return add_via_span(
+            self,
+            low_layer,
+            high_layer,
+            via_span_type_raw=via_span_type_raw,
+            drill_guide=drill_guide,
+            drill_drawing=drill_drawing,
+        )
+
+    def set_via_layer_span(
+        self,
+        via: "AltiumPcbVia",
+        low_layer: object,
+        high_layer: object,
+    ) -> None:
+        """
+        Give a via the span `low_layer`..`high_layer`.
+
+        The span must already be declared on the board (`add_via_span`);
+        back-drill pairs do not count.
+        """
+        from .altium_pcbdoc_via_spans import set_via_layer_span
+
+        set_via_layer_span(self, via, low_layer, high_layer)
 
     def set_mechanical_layer(
         self,
