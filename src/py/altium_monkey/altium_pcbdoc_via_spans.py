@@ -133,6 +133,26 @@ def add_via_span(
     return next(pair for pair in stack.layer_pairs if pair.pair_index not in before)
 
 
+def _declared_via_spans(doc: "AltiumPcbDoc") -> set[tuple[int, int]]:
+    """(low, high) legacy ids of the declared non-back-drill spans, read from the parsed Board6 record.
+
+    Cheap on purpose: `via_spans` builds the whole layer-stack document, far too slow per via on a large board
+    (ElectraMX-Eval, 27,000 vias). A pair is a back-drill when BACKDRILL=TRUE or DRILLPAIRTYPE=2 (AD reads 2 as
+    a back-drill whatever BACKDRILL says).
+    """
+    record = {str(k).upper(): str(v).strip() for k, v in (getattr(doc.board, "raw_record", None) or {}).items()}
+    spans = set()
+    for key, low in record.items():
+        m = re.fullmatch(r"LAYERPAIR(\d+)LOW", key)
+        if not m:
+            continue
+        n = m.group(1)
+        if record.get(f"LAYERPAIR{n}BACKDRILL", "").upper() == "TRUE" or record.get(f"LAYERPAIR{n}DRILLPAIRTYPE") == "2":
+            continue
+        spans.add((_legacy_signal_id(low), _legacy_signal_id(record.get(f"LAYERPAIR{n}HIGH", ""))))
+    return spans
+
+
 def _legacy_signal_id(layer: object) -> int:
     ref = PcbLayerRef.from_legacy(layer) if isinstance(layer, int) else PcbLayerRef.parse(str(layer))
     if ref.legacy_layer_id is None:
@@ -148,11 +168,7 @@ def set_via_layer_span(
 ) -> None:
     """Give a via the span low..high; that span must be declared on the board (not as a back-drill)."""
     low, high = _legacy_signal_id(low_layer), _legacy_signal_id(high_layer)
-    declared = {
-        (_legacy_signal_id(pair.low_layer_token), _legacy_signal_id(pair.high_layer_token))
-        for pair in via_spans(doc)
-        if not pair.is_backdrill
-    }
+    declared = _declared_via_spans(doc)
     if (low, high) not in declared:
         raise ValueError(
             f"no via span {low_layer}-{high_layer} declared on the board; declared: {sorted(declared)}"
