@@ -1516,12 +1516,13 @@ def _type_id_for_layer(layer: object) -> str:
             return _TYPE_ID_COPPER_PLANE
         return _TYPE_ID_COPPER_SIGNAL
     if family == "dielectric":
-        dielectric_type = getattr(layer, "dielectric_type", None)
-        if dielectric_type == 2:
-            return _TYPE_ID_PREPREG
-        if dielectric_type == 0:
-            return _TYPE_ID_CORE
-        return _TYPE_ID_DIELECTRIC
+        # DIELTYPE as AD pairs it with the type: 0 dielectric, 1 core,
+        # 2 prepreg, 3 solder mask.
+        return {
+            1: _TYPE_ID_CORE,
+            2: _TYPE_ID_PREPREG,
+            3: _TYPE_ID_SOLDER_MASK,
+        }.get(getattr(layer, "dielectric_type", None), _TYPE_ID_DIELECTRIC)
     if family == "overlay":
         return _TYPE_ID_OVERLAY
     if family == "solder_mask":

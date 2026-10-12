@@ -12,6 +12,7 @@ import base64
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum, IntEnum
+import logging
 import math
 from typing import TYPE_CHECKING
 import re
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
     from .altium_record_pcb__board_region import AltiumPcbBoardRegion
     from .altium_stackup import AltiumStackupDocument
     from .altium_stackupx import AltiumStackupXDocument
+
+log = logging.getLogger(__name__)
 
 _V9_STACK_RE = re.compile(r"^V9_STACK_LAYER(\d+)_(.+)$", re.IGNORECASE)
 _V9_CACHE_RE = re.compile(r"^V9_CACHE_LAYER(\d+)_(.+)$", re.IGNORECASE)
@@ -767,6 +770,9 @@ class AltiumPhysicalStack:
     stackupx_is_flex: bool | None = None
     stackupx_stack_type: str | None = None
     layers: tuple[AltiumStackLayer, ...] = ()
+    # Layer Stack Manager "Stack Symmetry" as the source stored it; None when
+    # the source had no Layer Stack Manager document.
+    stackupx_is_symmetric: bool | None = None
 
     def to_debug_json(self) -> dict[str, object]:
         return {
@@ -778,6 +784,7 @@ class AltiumPhysicalStack:
             "used_by_primitives": self.used_by_primitives,
             "stackupx_is_flex": self.stackupx_is_flex,
             "stackupx_stack_type": self.stackupx_stack_type,
+            "stackupx_is_symmetric": self.stackupx_is_symmetric,
             "layer_names": [layer.display_name for layer in self.layers],
             "layers": [layer.to_debug_json() for layer in self.layers],
         }
@@ -802,6 +809,9 @@ class AltiumStackSubstack:
     stackupx_is_flex: bool | None = None
     stackupx_stack_type: str | None = None
     enabled_layer_refs: tuple[str, ...] = ()
+    # Layer Stack Manager "Stack Symmetry" of this substack's <Stack>; None
+    # when the source had no Layer Stack Manager document.
+    stackupx_is_symmetric: bool | None = None
 
     def to_debug_json(self) -> dict[str, object]:
         return {
@@ -818,6 +828,7 @@ class AltiumStackSubstack:
             "stackupx_is_flex": self.stackupx_is_flex,
             "stackupx_stack_type": self.stackupx_stack_type,
             "enabled_layer_refs": list(self.enabled_layer_refs),
+            "stackupx_is_symmetric": self.stackupx_is_symmetric,
         }
 
 
@@ -1134,9 +1145,14 @@ class AltiumComponentPlacement(IntEnum):
 class AltiumDielectricLayerKind(IntEnum):
     """
     Layer Stack Manager dielectric row kind for authored rigid stacks.
+
+    The values are Board6 `DIELTYPE` codes as AD writes them: 0 is Layer
+    Stack Manager's untyped "Dielectric", 1 core, 2 prepreg (3, solder mask,
+    is its own row family).
     """
 
-    CORE = 0
+    DIELECTRIC = 0
+    CORE = 1
     PREPREG = 2
     COVERLAY = 4
 
@@ -2707,7 +2723,10 @@ class AltiumLayerStackDocument:
         _append_cache_registry_entries(cache_groups, registry_entries)
         _append_legacy_registry_entries(board, registry_entries)
 
-        substacks = _build_substacks(board, stack_layers)
+        substacks = _with_stack_custom_data_symmetry(
+            _build_substacks(board, stack_layers),
+            stack_custom_data,
+        )
         primary_substack = substacks[0] if substacks else None
         active_stack_ref = (
             _text(raw_record.get("V9_MASTERSTACK_ID"))
@@ -4364,11 +4383,12 @@ def _semantic_kvl_type_id_for_layer(layer: AltiumStackLayer) -> str:
             return _braced_schema_type_id("copper_plane")
         return _braced_schema_type_id("copper_signal")
     if family == "dielectric":
-        if layer.dielectric_type == 2:
-            return _braced_schema_type_id("prepreg")
-        if layer.dielectric_type == 0:
-            return _braced_schema_type_id("core")
-        return _braced_schema_type_id("dielectric")
+        # Board6 DIELTYPE as AD pairs it with the Layer Stack Manager type.
+        return _braced_schema_type_id(
+            {1: "core", 2: "prepreg", 3: "solder_mask"}.get(
+                layer.dielectric_type, "dielectric"
+            )
+        )
     return _braced_schema_type_id("dielectric")
 
 
@@ -5050,7 +5070,7 @@ def _stack_custom_data_entry(entries: tuple[str, ...]) -> str:
 
 
 def _authored_stack_custom_data_entry(document: AltiumLayerStackDocument) -> str:
-    xml_bytes = document.to_stackupx().to_bytes()
+    xml_bytes = _stack_custom_data_xml_bytes(document.to_stackupx_text())
     token = base64.b64encode(zlib.compress(xml_bytes)).decode("ascii")
     return f"V9_STACKCUSTOMDATA={token}"
 
@@ -6303,9 +6323,34 @@ def _stack_custom_data_auxiliary_stacks(
                 stackupx_is_flex=getattr(stack, "is_flex", None),
                 stackupx_stack_type=_text(getattr(stack, "stack_type", "")),
                 enabled_layer_refs=(),
+                stackupx_is_symmetric=getattr(stack, "is_symmetric", None) is True,
             )
         )
     return tuple(auxiliary)
+
+
+def _with_stack_custom_data_symmetry(
+    substacks: list[AltiumStackSubstack],
+    stackupx: "AltiumStackupXDocument | None",
+) -> list[AltiumStackSubstack]:
+    """
+    Carry each substack's Stack Symmetry from its Layer Stack Manager
+    `<Stack>` (same GUID). Board6 has no key for it; AD writes
+    `IsSymmetric="True"` when it is on and leaves the attribute out when off.
+    """
+    if stackupx is None:
+        return substacks
+    symmetric_by_ref = {
+        _normalized_source_id(stack.id): stack.is_symmetric is True
+        for stack in stackupx.stacks
+    }
+    result: list[AltiumStackSubstack] = []
+    for substack in substacks:
+        key = _normalized_source_id(substack.source_stackup_ref)
+        if key in symmetric_by_ref:
+            substack = replace(substack, stackupx_is_symmetric=symmetric_by_ref[key])
+        result.append(substack)
+    return result
 
 
 def _stackupx_branch_stack_refs(
@@ -6519,15 +6564,48 @@ def _stack_custom_data_stackupx(
     token = _text(raw_record.get("V9_STACKCUSTOMDATA"))
     if not token:
         return None
-    try:
-        xml_bytes = zlib.decompress(base64.b64decode(token))
-        if xml_bytes.startswith(b"?<"):
-            xml_bytes = xml_bytes[1:]
-        from .altium_stackupx import AltiumStackupXDocument
+    from .altium_stackupx import AltiumStackupXDocument
 
-        return AltiumStackupXDocument.from_bytes(xml_bytes)
-    except Exception:
+    try:
+        xml_text = _stack_custom_data_xml_text(
+            zlib.decompress(base64.b64decode(token))
+        )
+        return AltiumStackupXDocument.from_text(xml_text)
+    except Exception as exc:
+        log.warning(
+            "Board6 V9_STACKCUSTOMDATA (Layer Stack Manager XML) could not be "
+            "read; its impedance profiles, branches and per-layer metadata are "
+            "ignored: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
         return None
+
+
+def _stack_custom_data_xml_text(data: bytes) -> str:
+    """Decode the Layer Stack Manager XML as AD stores it in Board6.
+
+    AD writes '?' + cp1252: Windows' ANSI conversion turns the BOM into '?'
+    and best-fits Greek mu (U+03BC, AD's "μVia a:b" span names) to 0xB5.
+    Boards written by monkey before that was known hold bare UTF-8.
+    """
+    if data.startswith(b"?<"):
+        return data[1:].decode("cp1252")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("cp1252")
+
+
+def _stack_custom_data_xml_bytes(xml_text: str) -> bytes:
+    """Encode Layer Stack Manager XML the way AD stores it in Board6.
+
+    '?' + cp1252 with Greek mu as 0xB5 - byte for byte what AD writes (see
+    `_stack_custom_data_xml_text`). A character with no cp1252 byte becomes an
+    XML character reference rather than AD's lossy best-fit guess.
+    """
+    cp1252_text = xml_text.replace("\u03bc", "\u00b5")
+    return b"?" + cp1252_text.encode("cp1252", errors="xmlcharrefreplace")
 
 
 _STACKUP_ATTRIBUTE_V8_SUFFIXES: tuple[tuple[str, str], ...] = (

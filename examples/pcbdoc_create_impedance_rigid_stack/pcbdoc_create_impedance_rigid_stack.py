@@ -55,7 +55,7 @@ def _build_impedance_stack() -> AltiumLayerStackDocument:
                 thickness_mils=7.5,
                 dielectric_constant=3.45,
                 material="Megtron6-Core",
-                dielectric_type=0,
+                dielectric_type=1,
                 loss_tangent=0.004,
             ),
             AltiumRigidDielectricLayerSpec(
@@ -71,7 +71,7 @@ def _build_impedance_stack() -> AltiumLayerStackDocument:
                 thickness_mils=30.0,
                 dielectric_constant=3.45,
                 material="Megtron6-Core",
-                dielectric_type=0,
+                dielectric_type=1,
                 loss_tangent=0.004,
             ),
             AltiumRigidDielectricLayerSpec(
@@ -87,7 +87,7 @@ def _build_impedance_stack() -> AltiumLayerStackDocument:
                 thickness_mils=7.5,
                 dielectric_constant=3.45,
                 material="Megtron6-Core",
-                dielectric_type=0,
+                dielectric_type=1,
                 loss_tangent=0.004,
             ),
             AltiumRigidDielectricLayerSpec(

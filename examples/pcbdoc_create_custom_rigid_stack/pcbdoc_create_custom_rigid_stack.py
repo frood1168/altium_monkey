@@ -72,7 +72,7 @@ def _build_custom_stack() -> AltiumLayerStackDocument:
                 dielectric_height_mils=41.0,
                 dielectric_constant=4.2,
                 dielectric_material="FR4-TEST",
-                dielectric_type=0,
+                dielectric_type=1,
             ),
             AltiumRigidStackRowSpec("L3_PWR", "copper", copper_thickness_mils=0.7),
             AltiumRigidStackRowSpec(

@@ -651,6 +651,7 @@ class AltiumStackupXDocument:
                     stackupx_is_flex=stack.is_flex,
                     stackupx_stack_type=stack.stack_type,
                     layers=tuple(stack_layers),
+                    stackupx_is_symmetric=stack.is_symmetric is True,
                 )
             )
             substacks.append(
@@ -668,6 +669,7 @@ class AltiumStackupXDocument:
                         for source_layer, stack_layer in zip(stack.layers, stack_layers)
                         if source_layer.is_enabled is not False
                     ),
+                    stackupx_is_symmetric=stack.is_symmetric is True,
                 )
             )
             layer_pairs.extend(
@@ -1439,12 +1441,10 @@ def _append_feature_set(
 def _append_stacks(stackup: Element, stacks: tuple[StackupXStack, ...]) -> None:
     stacks_element = ET.SubElement(stackup, _qname("Stacks"))
     for stack in stacks:
-        attrs = {
-            "Id": stack.id,
-            "Name": stack.name,
-            "IsSymmetric": _xml_bool(stack.is_symmetric),
-            "TemplateId": stack.template_id,
-        }
+        attrs = {"Id": stack.id, "Name": stack.name}
+        if stack.is_symmetric is not None:
+            attrs["IsSymmetric"] = _xml_bool(stack.is_symmetric)
+        attrs["TemplateId"] = stack.template_id
         if stack.stack_type:
             attrs["Type"] = stack.stack_type
         if stack.is_flex is not None:
@@ -1640,6 +1640,17 @@ def _export_stacks(document: "AltiumLayerStackDocument") -> tuple[StackupXStack,
     substack_exports = _export_pcbdoc_substack_stacks(document, stacks)
     if substack_exports:
         return substack_exports
+    substacks = tuple(document.substacks or ())
+    if len(stacks) == 1 and substacks:
+        # AD writes a board's <Stack> as its substack (V9_SUBSTACK0_ID and
+        # _NAME), never the master stack; profiles and branches point at it.
+        stacks = (
+            _physical_stack_from_substack(
+                stacks[0],
+                substacks[0],
+                include_disabled_layers=True,
+            ),
+        )
     return tuple(
         _export_stack(document, index, stack, strict_scoped_pairs=len(stacks) > 1)
         for index, stack in enumerate(stacks)
@@ -1749,6 +1760,7 @@ def _physical_stack_from_substack(
         used_by_primitives=getattr(substack, "used_by_primitives", None),
         stackupx_is_flex=getattr(substack, "stackupx_is_flex", None),
         stackupx_stack_type=getattr(substack, "stackupx_stack_type", None),
+        stackupx_is_symmetric=getattr(substack, "stackupx_is_symmetric", None),
         layers=layers,
     )
 
@@ -1814,18 +1826,40 @@ def _export_stack(
         ),
         default_pairs=not is_flex and not tuple(document.layer_pairs or ()),
     )
+    # AD writes IsSymmetric="True" while Stack Symmetry is on and leaves it out
+    # when off. Without the source's own setting, claim it only for a stack
+    # that mirrors.
+    is_symmetric = getattr(stack, "stackupx_is_symmetric", None)
+    if is_symmetric is None:
+        is_symmetric = _layers_mirror(layers)
     return StackupXStack(
         id=stack_id,
         name=str(getattr(stack, "display_name", "") or "Board Layer Stack"),
         stack_type=stack_type,
         is_flex=emitted_is_flex,
-        is_symmetric=True,
+        is_symmetric=True if is_symmetric else None,
         template_id=_stackupx_guid("template", stack_id),
         layers=layers,
         via_spans=via_spans,
         drill_spans=drill_spans,
         raw_attributes=(),
     )
+
+
+def _layers_mirror(layers: tuple[StackupXLayer, ...]) -> bool:
+    """Whether the stack reads the same top-down and bottom-up: each layer's
+    type, thickness, material, Dk and Df."""
+    signature = [
+        (
+            layer.type_id,
+            *(
+                layer.property_value(name)
+                for name in ("Thickness", "Material", "DielectricConstant", "LossTangent")
+            ),
+        )
+        for layer in layers
+    ]
+    return bool(signature) and signature == signature[::-1]
 
 
 def _layer_pairs_for_stack(
@@ -2789,13 +2823,22 @@ def _type_id_for_layer(layer: object) -> str:
             return _COPPER_PLANE_TYPE_ID
         return _COPPER_SIGNAL_TYPE_ID
     if family == "dielectric":
-        dielectric_type = getattr(layer, "dielectric_type", None)
-        if dielectric_type == 2:
-            return "1a79611a-039d-4d40-a204-53c26c50f8b5"
-        if dielectric_type == 0:
-            return "136c62ef-1fa6-4897-ae71-7e797b632b92"
-        return "92b02d5e-8d69-48a8-880e-ac4b77db099d"
+        return _DIELECTRIC_TYPE_IDS.get(
+            getattr(layer, "dielectric_type", None),
+            StackupXLayerType.DIELECTRIC.value,
+        )
     raise ValueError(f"Unsupported layer family for .stackupx export: {family}")
+
+
+# Board6 DIELTYPE -> Layer Stack Manager TypeId, as AD pairs them (every
+# AD-saved board on hand). A board's mask row can carry a dielectric name
+# ("F.Mask"), so DIELTYPE 3 types it.
+_DIELECTRIC_TYPE_IDS: dict[int, str] = {
+    0: StackupXLayerType.DIELECTRIC.value,
+    1: StackupXLayerType.CORE.value,
+    2: StackupXLayerType.PREPREG.value,
+    3: StackupXLayerType.SOLDER_MASK.value,
+}
 
 
 def _is_internal_plane_layer(layer: object) -> bool:
@@ -2899,7 +2942,9 @@ def _via_span_name_prefix(span_type_raw: int) -> str:
     if span_type_raw == 2:
         return "Buried"
     if span_type_raw == 3:
-        return "μVia"   # AD's own AutoName, e.g. "μVia 1:2"
+        # AD's own AutoName, e.g. "μVia 1:2": Greek mu in its UTF-8 exports;
+        # 0xB5 in a PcbDoc's cp1252 V9_STACKCUSTOMDATA (Windows' best fit).
+        return "μVia"
     if span_type_raw == 1:
         return "Blind"
     return "Thru"
@@ -2919,10 +2964,12 @@ def _span_name(
 
 def _dielectric_type_from_type_id(type_id: str) -> int | None:
     token = str(type_id or "").strip().lower()
-    if token == "1a79611a-039d-4d40-a204-53c26c50f8b5":
-        return 2
-    if token == "136c62ef-1fa6-4897-ae71-7e797b632b92":
+    if token == StackupXLayerType.DIELECTRIC.value:
         return 0
+    if token == StackupXLayerType.PREPREG.value:
+        return 2
+    if token == StackupXLayerType.CORE.value:
+        return 1
     if token == "8de65238-89ed-47c5-bbf8-0f6f02d1899c":
         return 4
     return None
