@@ -4522,6 +4522,20 @@ class AltiumPcbDoc:
                 force=True,
             )
 
+        if self._should_write_counted_section("Classes6", len(self.net_classes)):
+            if verbose:
+                log.info(
+                    "  Writing Classes6/Data (%d classes)...",
+                    len(self.net_classes),
+                )
+            self._write_counted_section(
+                writer,
+                "Classes6",
+                record_count=len(self.net_classes),
+                data=self._serialize_classes(),
+                force=True,
+            )
+
         if self._should_write_counted_section(
             "DifferentialPairs6", len(self.differential_pairs)
         ):
@@ -5949,6 +5963,19 @@ class AltiumPcbDoc:
         Serialize typed DifferentialPairs6/Data records.
         """
         return build_differential_pair_stream(self.differential_pairs)
+
+    def _serialize_classes(self) -> bytes:
+        """
+        Serialize typed Classes6/Data records back to length-prefixed text.
+
+        Covers every object-class family in the stream -- net, component,
+        pad, layer, differential-pair, polygon and from-to classes -- because
+        they share one stream and one record shape.
+        """
+        data = bytearray()
+        for pcb_class in self.net_classes:
+            data.extend(encode_altium_record(pcb_class.to_record()))
+        return bytes(data)
 
     def _serialize_dimensions(self) -> bytes:
         """
